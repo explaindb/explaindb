@@ -10,6 +10,7 @@ numpy = "*"
 seaborn = "*"
 black = {extras = ["jupyter"], version = "*"}
 pandas = "*"
+ipycanvas = "*"
 
 [dev-packages]
 
