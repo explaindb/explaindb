@@ -6,6 +6,10 @@ name = "pypi"
 [packages]
 jupyter = "*"
 faker = "*"
+numpy = "*"
+seaborn = "*"
+black = {extras = ["jupyter"], version = "*"}
+pandas = "*"
 
 [dev-packages]
 
