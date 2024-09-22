@@ -1,0 +1,42 @@
+workflow:
+  rules:
+    # Don't run simple push pipelines
+    - if: $CI_PIPELINE_SOURCE == 'push' && $CI_COMMIT_REF_NAME != $CI_DEFAULT_BRANCH
+      when: never
+    # Allow to interrupt pipelines on merge request if a new commit arrives
+    - if: $CI_PIPELINE_SOURCE == 'merge_request_event'
+      auto_cancel:
+        on_new_commit: interruptible
+    # Do not interrupt pipelines on main
+    - if: $CI_COMMIT_REF_NAME == $CI_DEFAULT_BRANCH
+      auto_cancel:
+        on_new_commit: none
+
+# Suppress certain warning
+variables:
+  PIPENV_VERBOSITY: -1
+
+stages:
+  - formatting
+  - test
+
+formatting:
+  stage: formatting
+  tags:
+    - test
+  script:
+    # Use black to verify the correct formatting of all files
+    - black --check .
+
+test:
+  stage: test
+  tags:
+    - test
+  script:
+    # Use most recent version from Pipfile
+    - pipenv sync
+    # Run all unit tests
+    - pipenv run python -m unittest discover system/tests/unittests
+    # Run all notebook tests
+    - pipenv run pytest system/tests/notebook_tests/
+  interruptible: true

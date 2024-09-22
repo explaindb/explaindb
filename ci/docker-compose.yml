@@ -1,0 +1,50 @@
+name: materials-ci
+
+volumes:
+  # Anonymous volume
+  runner-config:
+
+x-gitlab-common: &gitlab-common
+  # Make sure to keep the Major and Minor aligned with gitlab version
+  image: gitlab/gitlab-runner:alpine-v17.0.0
+  volumes:
+    # Share config between "register" and actual runner container
+    - runner-config:/etc/gitlab-runner
+    # Runner can interact with host docker
+    - /var/run/docker.sock:/var/run/docker.sock
+  environment:
+    AUTH_TOKEN: ${AUTH_TOKEN}
+    DOCKER_VERSION: ${DOCKER_VERSION}
+    TZ: DE
+
+services:
+
+  gitlab-runner:
+    <<: *gitlab-common
+    restart: unless-stopped
+
+  # This service is used to register the runner with the GitLab server.
+  register:
+    <<: *gitlab-common
+    restart: 'no'
+    profiles:
+      - donotstart
+    command:
+      - register
+      - --non-interactive
+      - --url=https://gitlab.cs.uni-saarland.de
+      - --token=${AUTH_TOKEN}
+      - --executor=docker
+      # Jobs will run in a container with this image
+      - --docker-image=materials-ci:latest
+      - --docker-pull-policy=if-not-present
+      # Increase the maximum output log size to 20 MB
+      - --output-limit=20000
+
+  materials-ci:
+    image: materials-ci:latest
+    build:
+      context: .
+      dockerfile: materials-ci.dockerfile
+    profiles:
+      - donotstart
