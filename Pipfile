@@ -11,8 +11,6 @@ seaborn = "*"
 black = {extras = ["jupyter"], version = "*"}
 pandas = "*"
 ipycanvas = "*"
-pytest = "*"
-testbook = "*"
 
 [dev-packages]
 
