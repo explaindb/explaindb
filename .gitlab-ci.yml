@@ -36,7 +36,9 @@ test:
     # Use most recent version from Pipfile
     - pipenv sync
     # Run all unit tests
-    - pipenv run python -m unittest discover system/tests/unittests
-    # Run all notebook tests
-    - pipenv run pytest system/tests/notebook_tests/
+    - pipenv run python -m unittest discover system/tests/
+    # Convert all jupyter notebooks into python files
+    - jupyter nbconvert --to script *.ipynb
+    # Run all notebooks
+    - for file in *.py; do pipenv run python "$file"; done
   interruptible: true
