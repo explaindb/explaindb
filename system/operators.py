@@ -1,6 +1,7 @@
 from abc import ABC, abstractmethod
 import math
 import pickle
+import re
 from typing import Self
 
 
@@ -156,8 +157,9 @@ class Filter(Operator):
         self.parent.interpret_close()
 
     def compile(self, emit):
+        compiled_pred = re.sub("([a-zA-Z]+)", r"tup['\1']", self.pred)
         return self.children[0].compile(
-            f"if eval('{self.pred}', dict(), tup):\n    {self.indent_emit_(emit)}"
+            f"if {compiled_pred}:\n    {self.indent_emit_(emit)}"
         )
 
     def dump(self, indent):
@@ -195,10 +197,10 @@ class SHJ(Operator):
         # check if build phase is active
         if self.is_build_phase:
             # insert current tuple into hash table
-            self.ht.setdefault(eval(f"tup['{self.left_attr}']"), []).append(tup)
+            self.ht.setdefault(tup[self.left_attr], []).append(tup)
         else:
             # probe hash table for current tuple and iterate over results
-            for tup2 in self.ht.get(eval(f"tup['{self.right_attr}']"), []):
+            for tup2 in self.ht.get(tup[self.right_attr], []):
                 # merge current tuple with probed result and push it to parent operator
                 self.parent.interpret_next(tup | tup2)
 
