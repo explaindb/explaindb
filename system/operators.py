@@ -125,7 +125,10 @@ class Scan(Operator):
             )
 
     def dump(self, indent):
-        print(self.indent_(indent) + f"Scan({self.file}, {self.num_tuples})")
+        if self.num_tuples == math.inf:
+            print(self.indent_(indent) + f"Scan({self.file})")
+        else:
+            print(self.indent_(indent) + f"Scan({self.file}, {self.num_tuples})")
 
 
 class Filter(Operator):
