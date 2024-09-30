@@ -4,15 +4,16 @@ verify_ssl = true
 name = "pypi"
 
 [packages]
-jupyter = "*"
-faker = "*"
-numpy = "*"
-seaborn = "*"
 black = {extras = ["jupyter"], version = "*"}
-pandas = "*"
+faker = "*"
 ipycanvas = "*"
-
-[dev-packages]
+ipywidgets = "*"
+jupyter = "*"
+matplotlib = "*"
+numpy = "*"
+pandas = "*"
+seaborn = "*"
+tqdm = "*"
 
 [requires]
 python_version = "3.12"
