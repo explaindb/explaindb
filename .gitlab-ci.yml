@@ -38,7 +38,7 @@ test:
     # Run all unit tests
     - pipenv run python -m unittest discover system/tests/
     # Convert all jupyter notebooks into python files
-    - jupyter nbconvert --to script *.ipynb
+    - pipenv run jupyter nbconvert --to script *.ipynb
     # Run all notebooks
-    - for file in *.py; do pipenv run python "$file"; done
+    - for file in *.py; do pipenv run ipython "$file"; done
   interruptible: true
