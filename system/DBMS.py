@@ -29,7 +29,6 @@ class DBMS(ABC):
         pass
 
     @abstractmethod
-    @deprecated
     def execute_prepared_query(
         self, query_id: int, parameters: dict[str, object]
     ) -> Iterator[object]:
