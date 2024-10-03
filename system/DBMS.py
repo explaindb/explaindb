@@ -1,16 +1,17 @@
 from abc import abstractmethod, ABC
 from typing import Iterator
-from warnings import deprecated
+
+import deprecation
 
 
 class DBMS(ABC):
     """Simplified interface of a DBMS"""
 
     @abstractmethod
-    @deprecated
+    @deprecation.deprecated(details="Use the prepare_query function instead!")
     def execute_query(self, query: str) -> Iterator[object]:
         """Execute a query, non-prepared version. DO NOT USE THIS METHOD. Only provided for backward compatability or
-        cases for sanitizing the query is not required.
+        cases for sanitizing the query is not required or done outside the DBMS.
 
         @param query: The query to execute as a string. Technically, we are not specifying the query language at this
         point.

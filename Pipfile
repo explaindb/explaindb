@@ -17,6 +17,7 @@ tqdm = "*"
 pylint = "*"
 nbqa = "*"
 coverage = "*"
+deprecation = "*"
 
 [requires]
 python_version = "3.12"
