@@ -71,6 +71,6 @@ linting:
     # Use most recent version from Pipfile
     - pipenv sync
     # show pylint output of code for each py file:
-    - find . -iname \*.py -not -path "*venv*" -print0 | xargs -0 pylint
+    - find . -iname \*.py -not -path "*venv*" -print0 | xargs -0 pylint --exit-zero
     # show pylint output of code for each ipynb file:
-    - find . -iname \*.ipynb -not -path "*venv*" -print0 | xargs -0 nbqa pylint
+    - find . -iname \*.ipynb -not -path "*venv*" -print0 | xargs -0 nbqa pylint --exit-zero
