@@ -1,6 +1,6 @@
 import unittest
 
-from system.DBMS import PyDBMS, DBMS, QueryOptimizer, Store
+from system.DBMS import PyDBMS, DBMS
 
 
 class DBMSTests(unittest.TestCase):
