@@ -2,7 +2,8 @@ from __future__ import annotations
 from system.plan_enumeration.subproblems import Subproblem
 from system.plan_enumeration.join_graph import JoinGraph
 from system.plan_enumeration.cardinality_table import CardinalityTable
-from system.plan_enumeration.cost_function import CostFunction, C_Out
+from system.plan_enumeration.cost_function import C_Out
+from system.interfaces.cost_functions import CostFunction
 import random
 
 

@@ -1,11 +1,12 @@
 import unittest
 from system.plan_enumeration.subproblems import Subproblem
-from system.plan_enumeration.cost_function import CostFunction, C_Out
+from system.plan_enumeration.cost_function import C_Out
+from system.interfaces.cost_functions import CostFunction
 from system.plan_enumeration.plan_table import (
-    PlanTable,
     StandardPlanTable,
     SizeBasedPlanTable,
 )
+from system.interfaces.query_optimization import PlanTable
 from system.plan_enumeration.cardinality_table import CardinalityTable
 from system.plan_enumeration.join_graph import (
     JoinGraph,

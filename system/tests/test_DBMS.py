@@ -1,6 +1,7 @@
 import unittest
 
-from system.DBMS import PyDBMS, DBMS
+from system.DBMS import PyDBMS
+from system.interfaces.DBMS import DBMS
 
 
 class DBMSTests(unittest.TestCase):

@@ -1,15 +1,17 @@
 from __future__ import annotations
 
-from system.interfaces.cost_functions import CostFunction
-from system.plan_enumeration.subproblems import Subproblem
+from abc import ABC, abstractmethod
+
 from system.plan_enumeration.cardinality_table import CardinalityTable
+from system.plan_enumeration.subproblems import Subproblem
 
 
-class C_Out(CostFunction):
+class CostFunction(ABC):
     """
-    Implements the classic cost function C_out.
+    A cost function used to compute the costs of joining two subproblems.
     """
 
+    @abstractmethod
     def estimate_join_costs(
         self,
         left: Subproblem,
@@ -25,12 +27,9 @@ class C_Out(CostFunction):
         :param plan_table: The plan table for the enumeration.
         :return: The costs of joining the left and right subproblems.
         """
-        return (
-            cardinality_table.estimate_join_cardinality(left, right)
-            + plan_table.get_costs_for_subproblem(left)
-            + plan_table.get_costs_for_subproblem(right)
-        )
+        pass
 
+    @abstractmethod
     def estimate_filter_costs(
         self,
         subproblem: Subproblem,
@@ -38,8 +37,8 @@ class C_Out(CostFunction):
     ) -> int:
         """
         Computes the costs to filter the subproblem.
-        :param subproblem: The subproblem .
+        :param subproblem: The subproblem.
         :param cardinality_table: The cardinality table to be used.
         :return: The costs of filtering the subproblem.
         """
-        return cardinality_table.get_cardinality_estimation(subproblem)
+        pass
