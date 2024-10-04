@@ -50,4 +50,4 @@ LOC:
     - test
   script:
     # count lines of code for each py and ipynb file, plus the sum
-    - find . -name '*.py' -o -name "*.ipynb" -not -path "*venv*" -print0 | xargs -0 wc -l
+    - find . \( -iname \*.ipynb -o -iname \*.py \) -not -path "*venv*" -print0 | xargs -0 wc -l
