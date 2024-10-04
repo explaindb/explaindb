@@ -18,7 +18,8 @@ variables:
 
 stages:
   - formatting
-  - test
+  - py_test
+  - ipynb_test
   - LOC
 
 formatting:
@@ -29,8 +30,8 @@ formatting:
     # Use black to verify the correct formatting of all files
     - black --check .
 
-test:
-  stage: test
+py_test:
+  stage: py_test
   tags:
     - test
   script:
@@ -38,6 +39,15 @@ test:
     - pipenv sync
     # Run all unit tests
     - pipenv run python -m unittest discover system/tests/
+  interruptible: true
+
+ipynb_test:
+  stage: ipynb_test
+  tags:
+    - test
+  script:
+    # Use most recent version from Pipfile
+    - pipenv sync
     # Convert all jupyter notebooks into python files
     - pipenv run jupyter nbconvert --to script *.ipynb
     # Run all notebooks
