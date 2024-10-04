@@ -21,6 +21,7 @@ stages:
   - py_test
   - ipynb_test
   - LOC
+  - linting
 
 formatting:
   stage: formatting
@@ -59,5 +60,15 @@ LOC:
   tags:
     - test
   script:
-    # count lines of code for each py and ipynb file, plus the sum
+    # count lines of code for each py and ipynb file, plus the sum:
     - find . \( -iname \*.ipynb -o -iname \*.py \) -not -path "*venv*" -print0 | xargs -0 wc -l
+
+linting:
+  stage: linting
+  tags:
+    - test
+  script:
+    # show pylint output of code for each py file:
+    - find . -iname \*.py -not -path "*venv*" -print0 | xargs -0 pylint
+    # show pylint output of code for each ipynb file:
+    - find . -iname \*.ipynb -not -path "*venv*" -print0 | xargs -0 nbqa pylint
