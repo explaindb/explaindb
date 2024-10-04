@@ -4,10 +4,7 @@ import pickle
 import re
 from typing import Self
 
-from system.interfaces.query_processing import Operator
-
-# tuples are represented as dictionary from attribute name to attribute value
-Tuple = dict
+from system.interfaces.query_processing.operators import Operator
 
 
 class Scan(Operator):

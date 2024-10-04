@@ -1,6 +1,6 @@
 from abc import ABC
 
-from system.interfaces.query_processing import Queryable
+from system.interfaces.query_processing.query_processing import Queryable
 
 
 class ACIDStore(ABC):

@@ -6,7 +6,7 @@ from system.plan_enumeration.plan_table import (
     StandardPlanTable,
     SizeBasedPlanTable,
 )
-from system.interfaces.query_optimization import PlanTable
+from system.interfaces.query_optimization.planning import PlanTable
 from system.plan_enumeration.cardinality_table import CardinalityTable
 from system.plan_enumeration.join_graph import (
     JoinGraph,

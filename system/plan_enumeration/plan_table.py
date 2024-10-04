@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from system.interfaces.query_optimization import PlanTable
+from system.interfaces.query_optimization.planning import PlanTable
 from system.plan_enumeration.subproblems import Subproblem
 from system.plan_enumeration.join_graph import JoinGraph
 from system.interfaces.cost_functions import CostFunction

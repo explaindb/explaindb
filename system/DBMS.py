@@ -1,7 +1,7 @@
 from typing import Iterator
 
 from system.interfaces.DBMS import DBMS
-from system.interfaces.query_processing import QEP, QueryOptimizer
+from system.interfaces.query_processing.query_processing import QEP, QueryOptimizer
 from system.interfaces.stores import QueryableACIDStore
 
 
