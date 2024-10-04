@@ -19,6 +19,7 @@ variables:
 stages:
   - formatting
   - test
+  - LOC
 
 formatting:
   stage: formatting
@@ -42,3 +43,11 @@ test:
     # Run all notebooks
     - for file in *.py; do pipenv run ipython "$file"; done
   interruptible: true
+
+LOC:
+  stage: LOC
+  tags:
+    - test
+  script:
+    # count lines of code for each py and ipynb file, plus the sum
+    - find . -name '*.py' -o -name "*.ipynb" -not -path "*venv*" -print0 | xargs -0 wc -l
