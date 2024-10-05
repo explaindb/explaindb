@@ -18,7 +18,7 @@ variables:
 
 stages:
   - formatting
-  - LOC
+  - artifacts
 
 formatting:
   stage: formatting
@@ -29,14 +29,22 @@ formatting:
     - black --check .
 
 
-LOC:
-  stage: LOC
+artifacts:
+  stage: artifacts
   tags:
     - test
   script:
     # count lines of code for each py and ipynb file, plus the sum:
     - find . \( -iname \*.ipynb -o -iname \*.py \) -not -path "*venv*" -print0 | xargs -0 wc -l > LOC.txt
+    # Use most recent version from Pipfile
+    - pipenv sync
+    # show pylint output of code for each py file:
+    - find . -iname \*.py -not -path "*venv*" -print0 | xargs -0 pylint --exit-zero > pylint_py.txt
+    # show pylint output of code for each ipynb file:
+    - find . -iname \*.ipynb -not -path "*venv*" -print0 | xargs -0 nbqa pylint --exit-zero > pylint_ipynb.txt
   artifacts:
-    paths:
-      - LOC.txt
+      paths:
+        - LOC.txt
+        - pylint_py.txt
+        - pylint_ipynb.txt
 
