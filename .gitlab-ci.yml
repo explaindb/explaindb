@@ -63,7 +63,7 @@ ipynb_test:
 
 
 stats_and_linting:
-  stage: artifacts
+  stage: stats_and_linting
   tags:
     - test
   script:
