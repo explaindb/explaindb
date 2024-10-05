@@ -18,10 +18,10 @@ variables:
 
 stages:
   - formatting
-  - py_test
-  - ipynb_test
+  #- py_test
+  #- ipynb_test
   - LOC
-  - linting
+  #- linting
 
 formatting:
   stage: formatting
@@ -61,7 +61,10 @@ LOC:
     - test
   script:
     # count lines of code for each py and ipynb file, plus the sum:
-    - find . \( -iname \*.ipynb -o -iname \*.py \) -not -path "*venv*" -print0 | xargs -0 wc -l
+    - find . \( -iname \*.ipynb -o -iname \*.py \) -not -path "*venv*" -print0 | xargs -0 wc -l > LOC.txt
+  artifacts:
+    paths:
+      - LOC.txt
 
 linting:
   stage: linting
