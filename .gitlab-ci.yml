@@ -18,10 +18,7 @@ variables:
 
 stages:
   - formatting
-  #- py_test
-  #- ipynb_test
   - LOC
-  #- linting
 
 formatting:
   stage: formatting
@@ -31,29 +28,6 @@ formatting:
     # Use black to verify the correct formatting of all files
     - black --check .
 
-py_test:
-  stage: py_test
-  tags:
-    - test
-  script:
-    # Use most recent version from Pipfile
-    - pipenv sync
-    # Run all unit tests
-    - pipenv run python -m unittest discover system/tests/
-  interruptible: true
-
-ipynb_test:
-  stage: ipynb_test
-  tags:
-    - test
-  script:
-    # Use most recent version from Pipfile
-    - pipenv sync
-    # Convert all jupyter notebooks into python files
-    - pipenv run jupyter nbconvert --to script *.ipynb
-    # Run all notebooks
-    - for file in *.py; do pipenv run ipython "$file"; done
-  interruptible: true
 
 LOC:
   stage: LOC
@@ -66,14 +40,3 @@ LOC:
     paths:
       - LOC.txt
 
-linting:
-  stage: linting
-  tags:
-    - test
-  script:
-    # Use most recent version from Pipfile
-    - pipenv sync
-    # show pylint output of code for each py file:
-    - find . -iname \*.py -not -path "*venv*" -print0 | xargs -0 pylint --exit-zero
-    # show pylint output of code for each ipynb file:
-    - find . -iname \*.ipynb -not -path "*venv*" -print0 | xargs -0 nbqa pylint --exit-zero
