@@ -16,6 +16,7 @@ seaborn = "*"
 tqdm = "*"
 pylint = "*"
 nbqa = "*"
+coverage = "*"
 
 [requires]
 python_version = "3.12"

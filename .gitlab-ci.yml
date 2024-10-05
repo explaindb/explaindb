@@ -19,6 +19,7 @@ variables:
 stages:
   - formatting
   - artifacts
+  - py_test
 
 formatting:
   stage: formatting
@@ -27,6 +28,23 @@ formatting:
   script:
     # Use black to verify the correct formatting of all files
     - black --check .
+
+py_test:
+  stage: py_test
+  tags:
+    - test
+  script:
+    # Use most recent version from Pipfile
+    - pipenv sync
+    # Run all unit tests
+    #- pipenv run python -m unittest discover system/tests/
+    # Run all unit tests with coverage
+    - pipenv run coverage run -m unittest discover system/tests/
+    - pipenv run coverage html
+  interruptible: true
+  artifacts:
+    paths:
+      - htmlcov/*
 
 
 artifacts:
@@ -43,8 +61,8 @@ artifacts:
     # show pylint output of code for each ipynb file:
     - find . -iname \*.ipynb -not -path "*venv*" -print0 | xargs -0 nbqa pylint --exit-zero > pylint_ipynb.txt
   artifacts:
-      paths:
-        - LOC.txt
-        - pylint_py.txt
-        - pylint_ipynb.txt
+    paths:
+      - LOC.txt
+      - pylint_py.txt
+      - pylint_ipynb.txt
 
