@@ -18,8 +18,9 @@ variables:
 
 stages:
   - formatting
-  - artifacts
   - py_test
+  - ipynb_test
+  - stats_and_linting
 
 formatting:
   stage: formatting
@@ -47,14 +48,28 @@ py_test:
       - htmlcov/*
 
 
-artifacts:
+ipynb_test:
+  stage: ipynb_test
+  tags:
+    - test
+  script:
+    # Use most recent version from Pipfile
+    - pipenv sync
+    # Convert all jupyter notebooks into python files
+    - pipenv run jupyter nbconvert --to script *.ipynb
+    # Run all notebooks
+    - for file in *.py; do pipenv run ipython "$file"; done
+  interruptible: true
+
+
+stats_and_linting:
   stage: artifacts
   tags:
     - test
   script:
     # count lines of code for each py and ipynb file, plus the sum:
     - find . \( -iname \*.ipynb -o -iname \*.py \) -not -path "*venv*" -print0 | xargs -0 wc -l > LOC.txt
-    # Use most recent version from Pipfile
+    # Use most recent version from Pipfile, required for pylint and nbqa
     - pipenv sync
     # show pylint output of code for each py file:
     - find . -iname \*.py -not -path "*venv*" -print0 | xargs -0 pylint --exit-zero > pylint_py.txt
