@@ -12,26 +12,24 @@ workflow:
       auto_cancel:
         on_new_commit: none
 
-# Suppress certain warning
+# Suppress certain warnings
 variables:
   PIPENV_VERBOSITY: -1
 
 stages:
-  - formatting
-  - py_test
-  - ipynb_test
-  - stats_and_linting
+  - test
 
 formatting:
-  stage: formatting
+  stage: test
   tags:
     - test
   script:
     # Use black to verify the correct formatting of all files
     - black --check .
+  interruptible: true
 
 py_test:
-  stage: py_test
+  stage: test
   tags:
     - test
   script:
@@ -49,7 +47,7 @@ py_test:
 
 
 ipynb_test:
-  stage: ipynb_test
+  stage: test
   tags:
     - test
   script:
@@ -63,7 +61,7 @@ ipynb_test:
 
 
 stats_and_linting:
-  stage: stats_and_linting
+  stage: test
   tags:
     - test
   script:
@@ -80,4 +78,5 @@ stats_and_linting:
       - LOC.txt
       - pylint_py.txt
       - pylint_ipynb.txt
+  interruptible: true
 

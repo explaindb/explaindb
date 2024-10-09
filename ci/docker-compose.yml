@@ -3,6 +3,10 @@ name: materials-ci
 volumes:
   # Anonymous volume
   runner-config:
+    driver_opts:
+      type: none
+      device: ${PWD}/runner-config
+      o: bind
 
 x-gitlab-common: &gitlab-common
   # Make sure to keep the Major and Minor aligned with gitlab version
