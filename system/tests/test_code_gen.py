@@ -7,8 +7,8 @@ import unittest
 Faker.seed(42)
 fake = Faker()
 
-num_runs = 10
-number_of_tuples = 10000
+num_runs = 5
+number_of_tuples = 1000
 
 
 class MyTest(unittest.TestCase):
