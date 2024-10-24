@@ -337,7 +337,7 @@ class TransactionalKeyValueStore(KeyValueStore):
         """
 
         if TA_id not in self.TD:
-            raise Exception("transaction {TA_id} not found in the system")
+            raise Exception(f"transaction {TA_id} not found in the system")
         if self.TD[TA_id].committed_timestamp is not None:
             raise Exception(f"transaction {TA_id} committed already")
 
