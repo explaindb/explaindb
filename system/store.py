@@ -702,3 +702,6 @@ class TransactionalKeyValueStore(KeyValueStore):
         object_id: str
         for object_id in self.TD[TA_id].write_set:
             self.key_value_store[object_id].wip = None
+
+        # remove the transaction from the transaction dictionary:
+        del self.TD[TA_id]
