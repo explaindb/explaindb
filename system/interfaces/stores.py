@@ -1,6 +1,6 @@
 from abc import ABC
 
-from system.interfaces.query_processing.query_processing import Queryable
+from system.interfaces.query_processing.query_processing import QEPQueryable
 
 
 class ACIDStore(ABC):
@@ -43,7 +43,7 @@ class ACIDStore(ABC):
         pass
 
 
-class QueryableACIDStore(Queryable, ACIDStore, ABC):
-    """Interface for a queryable ACID store"""
+class QEPQueryableACIDStore(QEPQueryable, ACIDStore, ABC):
+    """Interface for a QEP-queryable ACID store"""
 
     pass

@@ -15,8 +15,8 @@ class QEP(ABC):
         pass
 
 
-class Queryable(ABC):
-    """A simplified interface of a queryable component"""
+class QEPQueryable(ABC):
+    """A simplified interface of a component that can be queried using a QEP"""
 
     @abstractmethod
     def execute_query(self, qep: QEP, TA_ID: int = None) -> Iterator[object]:
@@ -25,7 +25,7 @@ class Queryable(ABC):
         @param qep: The query execution plan to execute
         @param TA_ID: The TA_ID of the transaction that is executing the query. If not provided, the query is executed
         as a separate transaction, i.e. it will automatically be wrapped into a transaction.
-        @return: The result of the query as a list of objects. The objects can be of any type.
+        @return: The result of the query as an Iterator of objects. The objects can be of any type.
         """
         pass
 
@@ -35,8 +35,8 @@ class QueryInterface(ABC):
     @abstractmethod
     @deprecation.deprecated(details="Use the prepare_query function instead!")
     def execute_query(self, query: str, TA_ID: int = None) -> Iterator[object]:
-        """Execute a query, non-prepared version. DO NOT USE THIS METHOD. Only provided for backward compatability or
-        cases for sanitizing the query is not required or done outside the DBMS.
+        """Execute a query, non-prepared version on a textual query string. DO NOT USE THIS METHOD. Only provided for
+        backward compatability or cases for sanitizing the query is not required or done outside the DBMS.
 
         @param query: The query to execute as a string. Technically, we are not specifying the query language at this
         point.
@@ -46,11 +46,12 @@ class QueryInterface(ABC):
         """
         pass
 
-    def prepare_query(self, query: str) -> int:
+    def prepare_query(self, query: str, parameters: list[str]) -> int:
         """Prepare a query to be executed multiple times with different parameters.
 
         @param query: The query to execute as a string. Technically, we are not specifying the query language at this
         point.
+        @param parameters: The parameters to use in the query
         @return: The id of the prepared query. This id can be used to execute the query multiple times with different
         parameters using method :func `execute_prepared_query`.
         """
@@ -108,9 +109,10 @@ class QueryOptimizer(ABC):
         pass
 
     @abstractmethod
-    def prepare_query(self, query: str) -> QEP:
+    def prepare_query(self, query: str, parameters: list[str]) -> QEP:
         """Prepare a query to be executed multiple times with different parameters.
         @param query: The query to prepare
+        @param parameters: The parameters to use in the query
         @return: The id of the prepared query as well as the QEP.
         """
         pass

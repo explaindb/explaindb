@@ -2,22 +2,24 @@ from typing import Iterator
 
 from system.interfaces.DBMS import DBMS
 from system.interfaces.query_processing.query_processing import QEP, QueryOptimizer
-from system.interfaces.stores import QueryableACIDStore
+from system.interfaces.stores import QEPQueryableACIDStore
 
 
 class PyDBMS(DBMS):
     """Python implementation of a DBMS"""
 
     def __init__(
-        self, queryable_ACID_store: QueryableACIDStore, query_optimizer: QueryOptimizer
+        self,
+        QEP_queryable_ACID_store: QEPQueryableACIDStore,
+        query_optimizer: QueryOptimizer,
     ):
         """Initialize the DBMS with a store and a query optimizer.
 
-        @param queryable_ACID_store: The store to use
+        @param QEP_queryable_ACID_store: The store to use
         @param query_optimizer: The query optimizer to use
         """
 
-        self.store = queryable_ACID_store
+        self.store = QEP_queryable_ACID_store
         self.query_optimizer = query_optimizer
 
         # dict for prepared queries: query_id -> query
@@ -37,10 +39,10 @@ class PyDBMS(DBMS):
         qep = self.query_optimizer.create_plan(query)
         return self.store.execute_query(qep, TA_ID)
 
-    def prepare_query(self, query: str) -> int:
+    def prepare_query(self, query: str, parameters: list[str]) -> int:
         prepared_query_id: int = self._get_next_prepared_query_id()
         self.prepared_queries[prepared_query_id] = self.query_optimizer.prepare_query(
-            query
+            query, parameters
         )
         return prepared_query_id
 
