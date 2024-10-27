@@ -5,6 +5,7 @@ from dataclasses import dataclass
 import copy
 from typing import Dict, ItemsView
 
+from system.interfaces.stores import ACIDStore
 from system.query_processing import Clause
 
 
@@ -123,7 +124,7 @@ class KeyValueStore:
         pp.pprint(self.key_value_store)
 
 
-class TransactionalKeyValueStore(KeyValueStore):
+class TransactionalKeyValueStore(KeyValueStore, ACIDStore):
     """A fully transactional versioned key value store.
     Notice that this store goes far beyond the typical key value store, which typically is only transactional per
     SINGLE key update/insert/delete.

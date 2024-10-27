@@ -16,13 +16,15 @@ class QEP(ABC):
 
 
 class Queryable(ABC):
-    """Simplified interface of a queryable object"""
+    """A simplified interface of a queryable component"""
 
     @abstractmethod
-    def execute_query(self, qep: QEP) -> Iterator[object]:
+    def execute_query(self, qep: QEP, TA_ID: int = None) -> Iterator[object]:
         """Execute a query execution plan.
 
         @param qep: The query execution plan to execute
+        @param TA_ID: The TA_ID of the transaction that is executing the query. If not provided, the query is executed
+        as a separate transaction, i.e. it will automatically be wrapped into a transaction.
         @return: The result of the query as a list of objects. The objects can be of any type.
         """
         pass

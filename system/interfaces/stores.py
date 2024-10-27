@@ -25,11 +25,6 @@ class ACIDStore(ABC):
         """
         pass
 
-    # TODO wait for merge request 7
-    # def read_objects(
-    #    self, TA_id: int, where: Clause = None, collect_read_clause: bool = True
-    # ) -> list[tuple[str, object]]:
-
     def update_object(self, object_id: str, updated_object: object, TA_id: int) -> None:
         """Update an object.
 
@@ -48,7 +43,7 @@ class ACIDStore(ABC):
         pass
 
 
-class QueryableACIDStore(ACIDStore, Queryable, ABC):
+class QueryableACIDStore(Queryable, ACIDStore, ABC):
     """Interface for a queryable ACID store"""
 
     pass

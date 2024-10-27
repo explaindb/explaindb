@@ -8,14 +8,16 @@ from system.interfaces.stores import QueryableACIDStore
 class PyDBMS(DBMS):
     """Python implementation of a DBMS"""
 
-    def __init__(self, store: QueryableACIDStore, query_optimizer: QueryOptimizer):
+    def __init__(
+        self, queryable_ACID_store: QueryableACIDStore, query_optimizer: QueryOptimizer
+    ):
         """Initialize the DBMS with a store and a query optimizer.
 
-        @param store: The store to use
+        @param queryable_ACID_store: The store to use
         @param query_optimizer: The query optimizer to use
         """
 
-        self.store = store
+        self.store = queryable_ACID_store
         self.query_optimizer = query_optimizer
 
         # dict for prepared queries: query_id -> query
@@ -31,9 +33,9 @@ class PyDBMS(DBMS):
         self.prepared_queries_counter += 1
         return ret
 
-    def execute_query(self, query: str) -> Iterator[object]:
+    def execute_query(self, query: str, TA_ID: int = None) -> Iterator[object]:
         qep = self.query_optimizer.create_plan(query)
-        return self.store.execute_query(qep)
+        return self.store.execute_query(qep, TA_ID)
 
     def prepare_query(self, query: str) -> int:
         prepared_query_id: int = self._get_next_prepared_query_id()
@@ -43,9 +45,8 @@ class PyDBMS(DBMS):
         return prepared_query_id
 
     def execute_prepared_query(
-        self, query_id: int, parameters: dict[str, object]
+        self, query_id: int, parameters: dict[str, object], TA_ID: int = None
     ) -> Iterator[object]:
-
         if query_id not in self.prepared_queries:
             raise ValueError(f"No prepared QEP found for query id {query_id}.")
 
@@ -58,4 +59,4 @@ class PyDBMS(DBMS):
         )
 
         # execute the query and return the result iterator:
-        return self.store.execute_query(qep_with_bound_parameters)
+        return self.store.execute_query(qep_with_bound_parameters, TA_ID)

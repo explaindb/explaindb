@@ -6,7 +6,7 @@ from system.interfaces.DBMS import DBMS
 
 class DBMSTests(unittest.TestCase):
     def test_DBMS(self):
-        dbms: DBMS = PyDBMS(store=None, query_optimizer=None)
+        dbms: DBMS = PyDBMS(queryable_ACID_store=None, query_optimizer=None)
         self.assertIsInstance(dbms, DBMS)
         self.assertIsInstance(dbms, PyDBMS)
         self.assertTrue(hasattr(dbms, "query_optimizer"))
