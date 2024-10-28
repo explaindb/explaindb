@@ -21,7 +21,7 @@ class PlanTable(ABC):
         cardinality_table: CardinalityTable,
     ):
         """
-        # Initialize the plan table with the entries for singleton problems.
+        Initialize the plan table with the entries for singleton problems.
         :param join_graph: The underlying join graph.
         :param cost_function: The cost function to be used.
         :param cardinality_table: The cardinality table.

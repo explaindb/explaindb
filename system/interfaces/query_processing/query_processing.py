@@ -16,10 +16,11 @@ class QEP(ABC):
 
 
 class QEPQueryable(ABC):
-    """A simplified interface of a component that can be queried using a QEP"""
+    """A simplified interface of a component that can be queried using a QEP. In other words, a component that can
+    execute a query execution plan."""
 
     @abstractmethod
-    def execute_query(self, qep: QEP, TA_ID: int = None) -> Iterator[object]:
+    def execute_query(self, qep: QEP, TA_ID: int | None = None) -> Iterator[object]:
         """Execute a query execution plan.
 
         @param qep: The query execution plan to execute
@@ -31,18 +32,21 @@ class QEPQueryable(ABC):
 
 
 class QueryInterface(ABC):
+    """A basic Query Interface"""
 
     @abstractmethod
     @deprecation.deprecated(details="Use the prepare_query function instead!")
-    def execute_query(self, query: str, TA_ID: int = None) -> Iterator[object]:
+    def execute_unprepared_query(
+        self, query: str, TA_ID: int | None = None
+    ) -> Iterator[object]:
         """Execute a query, non-prepared version on a textual query string. DO NOT USE THIS METHOD. Only provided for
-        backward compatability or cases for sanitizing the query is not required or done outside the DBMS.
+        backward compatability or cases where sanitizing the query is not required or done outside the DBMS.
 
         @param query: The query to execute as a string. Technically, we are not specifying the query language at this
         point.
         @param TA_ID: The TA_ID of the transaction that is executing the query. If not provided, the query is executed
         as a separate transaction, i.e. it will automatically be wrapped into a transaction.
-        @return: The result of the query as a list of objects. The objects can be of any type.
+        @return: The result of the query as an iterator of objects. The objects can be of any type.
         """
         pass
 
@@ -59,7 +63,7 @@ class QueryInterface(ABC):
 
     @abstractmethod
     def execute_prepared_query(
-        self, query_id: int, parameters: dict[str, object], TA_ID: int = None
+        self, query_id: int, parameters: dict[str, object], TA_ID: int | None = None
     ) -> Iterator[object]:
         """Execute a query, prepared version. Always use this method to execute a query.
 
@@ -67,11 +71,16 @@ class QueryInterface(ABC):
         @param parameters: The parameters to use in the query
         @param TA_ID: The TA_ID of the transaction that is executing the query. If not provided, the query is executed
         as a separate transaction, i.e. it will automatically be wrapped into a transaction.
+        @return: The result of the query as an iterator of objects. The objects can be of any type.
         """
         pass
 
     @dataclass
     class QueryEntry:
+        """A dataclass to hold the parameters of a prepared query and the transaction id of the transaction that is
+        executing the query. This is used to execute multiple prepared queries with different parameters as a batch.
+        """
+
         # the parameters to use in the query
         parameters: dict[str, object]
 
@@ -89,6 +98,9 @@ class QueryInterface(ABC):
 
         @param queries: A dictionary of prepared query ids and QueryEntries. The keys are the query ids and the
         values is the QueryEntry for this prepared query.
+
+        @return: A dictionary of query ids and the result of the query as an iterator of objects. The objects can be of
+        any type.
         """
         return {
             query_id: self.execute_prepared_query(
@@ -99,10 +111,11 @@ class QueryInterface(ABC):
 
 
 class QueryOptimizer(ABC):
+    """Query Optimizer interface"""
 
     @abstractmethod
-    def create_plan(self, query: str) -> QEP:
-        """Create a query execution plan from the query string.
+    def create_QEP(self, query: str) -> QEP:
+        """Create a query execution plan (QEP) from the query string.
         @param query: The query to create a plan for
         @return: The QEP
         """
@@ -112,18 +125,18 @@ class QueryOptimizer(ABC):
     def prepare_query(self, query: str, parameters: list[str]) -> QEP:
         """Prepare a query to be executed multiple times with different parameters.
         @param query: The query to prepare
-        @param parameters: The parameters to use in the query
-        @return: The id of the prepared query as well as the QEP.
+        @param parameters: The list of parameters the query has.
+        @return: The query execution plan (QEP).
         """
         pass
 
     @abstractmethod
     def bind_parameters(
-        self, prepared_query: object, parameters: dict[str, object]
+        self, prepared_query_QEP: QEP, parameters: dict[str, object]
     ) -> QEP:
         """Bind parameters to a prepared qep.
 
-        @param prepared_query: The prepared query to bind parameters to
+        @param prepared_query_QEP: The QEP of the prepared query to bind parameters to
         @param parameters: The parameters to bind
         @return: The QEP with the parameters bound
         """

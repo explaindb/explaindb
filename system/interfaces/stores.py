@@ -10,6 +10,7 @@ class ACIDStore(ABC):
         """Starts a new transaction and returns its transaction id.
         Also adds a new entry with metadata for this transaction in the transaction dictionary.
         """
+        pass
 
     def commit_transaction(self, TA_id: int) -> None:
         """Commit a transaction.
