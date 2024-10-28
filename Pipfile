@@ -18,6 +18,7 @@ pylint = "*"
 nbqa = "*"
 coverage = "*"
 deprecation = "*"
+duckdb = "*"
 
 [requires]
 python_version = "3.12"
