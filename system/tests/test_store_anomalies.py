@@ -400,6 +400,38 @@ class StoreTestAnomalies(unittest.TestCase):
         with self.assertRaises(TransactionAbortedException):
             tkvs.update_object(object_id, StoreTestAnomalies.Stuff(1, 2), TA_ID_2)
 
+    def test_checksums_on_self_updates(self):
+        @dataclass(frozen=True)
+        class T:
+            a: int
+            b: int
+
+        tkvs = TransactionalKeyValueStore(use_brute_force_validation=True)
+
+        tkvs.put("1", T(1, 1))
+
+        t1 = tkvs.begin_transaction()
+
+        # read the object:
+        ret1: list[tuple[str, object]] = tkvs.read_objects(
+            t1, WHERE_Clause("a", "==", 1)
+        )
+        self.assertEqual(len(ret1), 1)
+
+        # modify the object such that it does not match the read clause anymore:
+        tkvs.update_object("1", T(2, 2), t1)
+
+        # issue the read again:
+        ret2: list[tuple[str, object]] = tkvs.read_objects(
+            t1, WHERE_Clause("a", "==", 1)
+        )
+        self.assertEqual(len(ret2), 0)
+
+        # following line fails if checksums are not correctly updated,
+        # i.e. if checksums also consider own changes
+        tkvs.commit_transaction(t1)
+        self.assertEqual(tkvs.committed_transactions_log[-1], t1)
+
 
 if __name__ == "__main__":
     unittest.main(argv=["ignored", "-v"], verbosity=2, exit=False)

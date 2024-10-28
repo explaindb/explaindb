@@ -168,7 +168,9 @@ class TransactionalKeyValueStore(KeyValueStore, ACIDStore):
         # a log of the committed transactions:
         self.committed_transactions_log: list[int] = list()
 
-    def _get_visible_object_version(self, object_id: str, timestamp: int) -> object:
+    def _get_visible_object_version(
+        self, object_id: str, timestamp: int, ignore_wip=False
+    ) -> object:
         """
         Gets the visible version of object <object_id> for TA <TA_id> under snapshot isolation.
 
@@ -180,7 +182,7 @@ class TransactionalKeyValueStore(KeyValueStore, ACIDStore):
 
         @param object_id: the object id of the object to be read
         @param timestamp: the timestamp, i.e. the transaction id of the transaction reading the object
-
+        @param ignore_wip: if set to True, the wip entries are ignored, i.e. only committed versions are considered.
         @return: the visible version of the object for TA <TA_id> under snapshot isolation, None if it was deleted
         """
 
@@ -189,7 +191,7 @@ class TransactionalKeyValueStore(KeyValueStore, ACIDStore):
 
         # check whether TA <TA_id> already has a wip entry for this object:
         if (
-            self.key_value_store[object_id].wip is not None
+            not ignore_wip and self.key_value_store[object_id].wip is not None
         ):  # i.e. there is a wip entry for this object
             # get that wip entry:
             wip_entry: KeyValueStore.VersionEntry = self.key_value_store[object_id].wip
@@ -282,15 +284,14 @@ class TransactionalKeyValueStore(KeyValueStore, ACIDStore):
                 yield most_recent_entry.value
 
     def _read_objects_iterable(
-        self,
-        timestamp: int,
-        where: Clause = None,
+        self, timestamp: int, where: Clause = None, ignore_wip=False
     ) -> ItemsView[str, list[object]]:
         """Returns an iterable with all objects that match the WHERE_clause.
 
         @param timestamp: the timestamp to use for reading data, typically a transaction ID,
         required for snapshot isolation
         @param where: a where clause expression that is evaluated against the actual data (not the object ids)
+        @param ignore_wip: if set to True, the wip entries are ignored, i.e. only committed versions are considered.
         @return: an iterator over the object ids that match the given conditions
         """
 
@@ -298,22 +299,28 @@ class TransactionalKeyValueStore(KeyValueStore, ACIDStore):
         object_id: str
         for object_id in self.key_value_store.keys():
             # get the most recent visible version of the object to TA <TA_id> under snapshot isolation:
-            _object: object = self._get_visible_object_version(object_id, timestamp)
+            _object: object = self._get_visible_object_version(
+                object_id, timestamp, ignore_wip=ignore_wip
+            )
 
             if _object is not None and (where is None or where.evaluate(_object)):
                 yield object_id, _object
 
     def _read_snapshot(
-        self, timestamp: int, where: Clause = None
+        self, timestamp: int, where: Clause = None, ignore_wip=False
     ) -> tuple[list[tuple[str, object]], int]:
         """Returns a list with all (object_id,objects)-pairs that match the WHERE_clause for the given snapshot
         <timestamp> plus the checksum. If the store uses brute force validation, the checksum of the returned list
         is also computed.
+        @param timestamp: the timestamp to use for reading data, typically a transaction ID, required for snapshot
+        isolation
+        @param where: a where clause expression that is evaluated against the actual data (not the object ids)
+        @param ignore_wip: if set to True, the wip entries are ignored, i.e. only committed versions are considered
         """
 
         # materialize the iterable to a list in order to be able to compute checksums:
         ret_list: list[tuple[str, object]] = list(
-            self._read_objects_iterable(timestamp, where)
+            self._read_objects_iterable(timestamp, where, ignore_wip=ignore_wip)
         )
 
         checksum: int | None = None
@@ -344,7 +351,12 @@ class TransactionalKeyValueStore(KeyValueStore, ACIDStore):
 
         ret: list[tuple[str, object]]
         checksum: int
-        ret, checksum = self._read_snapshot(TA_id, where)
+        # issue the read twice to get correct checksums:
+        # TODO: this is not efficient, and can be fixed using indexes
+        # (1.) ignore the wip entries for the checksum computation
+        _, checksum = self._read_snapshot(TA_id, where, ignore_wip=True)
+        # (2.) consider the wip entries for the actual returned list
+        ret, _ = self._read_snapshot(TA_id, where)
 
         if collect_read_clause:
             self.TD[TA_id].read_clauses.add(
