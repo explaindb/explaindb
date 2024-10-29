@@ -5,6 +5,7 @@ import deprecation
 from system.interfaces.DBMS import DBMS
 from system.interfaces.query_processing.query_processing import QEP, QueryOptimizer
 from system.interfaces.stores import QEPQueryableACIDStore
+from system.store import KeyValueStore
 
 
 class PyDBMS(DBMS):
@@ -13,16 +14,16 @@ class PyDBMS(DBMS):
     def __init__(
         self,
         QEP_queryable_ACID_store: QEPQueryableACIDStore,
+        persistence_layer: KeyValueStore,
         query_optimizer: QueryOptimizer,
     ):
         """Initialize the DBMS with a store and a query optimizer.
 
         @param QEP_queryable_ACID_store: The store to use
+        @param persistence_layer: The persistence layer to use for durability
         @param query_optimizer: The query optimizer to use
         """
-
-        self.store: QEPQueryableACIDStore = QEP_queryable_ACID_store
-        self.query_optimizer: QueryOptimizer = query_optimizer
+        super().__init__(QEP_queryable_ACID_store, persistence_layer, query_optimizer)
 
         # dict for prepared queries: query_id -> query
         self.prepared_queries: dict[int, QEP] = dict[int, QEP]()
@@ -44,7 +45,7 @@ class PyDBMS(DBMS):
         """Execute a query."""
 
         qep = self.query_optimizer.create_QEP(query)
-        return self.store.execute_query(qep, TA_ID)
+        return self.QEP_queryable_ACID_store.execute_query(qep, TA_ID)
 
     def prepare_query(self, query: str, parameters: list[str]) -> int:
         """Prepare a query to be executed multiple times with different parameters."""
@@ -72,4 +73,6 @@ class PyDBMS(DBMS):
         )
 
         # execute the query and return the result iterator:
-        return self.store.execute_query(qep_with_bound_parameters, TA_ID)
+        return self.QEP_queryable_ACID_store.execute_query(
+            qep_with_bound_parameters, TA_ID
+        )

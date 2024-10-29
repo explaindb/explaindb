@@ -5,7 +5,7 @@ from dataclasses import dataclass
 import copy
 from typing import Dict, ItemsView
 
-from system.interfaces.stores import ACIDStore
+from system.interfaces.stores import ACIDStore, KeyValueStore_API
 from system.query_processing import Clause
 
 
@@ -23,8 +23,11 @@ class TransactionAbortedException(Exception):
     pass
 
 
-class KeyValueStore:
+class KeyValueStore(KeyValueStore_API):
     """A store managing key/value mappings."""
+
+    # TODO: should be split up into two classes: one for the unversioned store and one for the versioned store
+    # KV <- KVWithVersions <- KVWithVersionsAndTransactions
 
     @dataclass
     class VersionEntry:
@@ -61,7 +64,7 @@ class KeyValueStore:
         # optional (SINGLE!) work in progress entry
         wip: KeyValueStore.VersionEntry | None = None
 
-    def __init__(self):
+    def __init__(self, persistence_layer: KeyValueStore_API = None):
         # the actual data kept by this store
         # a mapping from an object_id (which is a string to allow for prefixes) to a list of versions
         # we keep a mapping from object_id_prefix + object_id to KVStoreEntry
@@ -69,6 +72,7 @@ class KeyValueStore:
         # (if they were not garbage collected yet due to ongoing reading TAs)
         # plus AT MOST ONE optional work in progress (wip) entry, i.e. an object currently being modified by an
         # ongoing transaction
+        self.persistence_layer: KeyValueStore_API = persistence_layer
         self.key_value_store: Dict[str, KeyValueStore.KVStoreEntry] = {}
 
     def size(self) -> int:
@@ -99,6 +103,39 @@ class KeyValueStore:
             ],
             wip=None,
         )
+
+    def get(self, object_id: str) -> object:
+        """Returns the most recent entry of the object with the given object_id.
+
+        @param object_id: the object id
+        @return: the object
+        """
+        if object_id not in self.key_value_store:
+            raise Exception(f"object {object_id} not found in the store")
+
+        # get the most recent committed version of the object available:
+        # note: deleted entry not considered here
+        return self.key_value_store[object_id].committed[-1].value
+
+    def delete(self, object_id: str) -> None:
+        """Deletes the object with the given object_id.
+
+        @param object_id: the object id
+        """
+        if object_id not in self.key_value_store:
+            raise Exception(f"object {object_id} not found in the store")
+
+        # create a new entry for the kv store that marks the object as deleted:
+        new_entry: KeyValueStore.VersionEntry = KeyValueStore.VersionEntry(
+            start_validity=0, value=None, deleted=True
+        )
+
+        # add the new entry to the kv store as committed:
+        self.key_value_store[object_id].committed.append(new_entry)
+
+    def flush(self) -> None:
+        """Persists all changes, i.e. any changes done so far in volatile memory only are now made durable."""
+        pass
 
     def bulkload(self, data: list[object], object_id_prefix: str = ""):
         """Bulkloads the given list of data objects into the store. Inserts (puts) a new object_id->_object mappings
@@ -148,13 +185,17 @@ class TransactionalKeyValueStore(KeyValueStore, ACIDStore):
         # the index of the last committed transaction in the committed transactions log when the transaction started:
         last_committed_TA_index_in_TA_log: int | None
 
-    def __init__(self, use_brute_force_validation: bool = False):
+    def __init__(
+        self,
+        use_brute_force_validation: bool = False,
+        persistence_layer: KeyValueStore_API = None,
+    ):
         """Initializes the store.
 
         @param use_brute_force_validation: if set to True, the store will use the brute force validation algorithm in
         the validation phase.
         """
-        super().__init__()
+        super().__init__(persistence_layer=persistence_layer)
         self.use_brute_force_validation: bool = use_brute_force_validation
 
         # transaction id counter:
