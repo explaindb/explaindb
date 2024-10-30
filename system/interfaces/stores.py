@@ -21,10 +21,9 @@ class KeyValueStore(ABC):
 
         The data is recorded as a committed version with a start timestamp of 0.
         So this put is NOT transactional, it is just a simple insert bypassing the transactional semantics of the store.
-        You get transactional semantics by using the UpdatableKeyValueStore.
 
         @param object_id: the object id
-        @param _object: the object to
+        @param _object: the object to store
         """
 
         pass
