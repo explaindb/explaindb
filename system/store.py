@@ -527,11 +527,7 @@ class TransactionalKeyValueStore(VersionedKeyValueStore, ACIDStore):
             read_clauses=set[HashableDict](),
             write_set=set[str](),
             committed_timestamp=None,
-            last_committed_TA_index_in_TA_log=(
-                len(self.committed_transactions_log) - 1
-                if len(self.committed_transactions_log) > 0
-                else -1
-            ),
+            last_committed_TA_index_in_TA_log=len(self.committed_transactions_log) - 1,
         )
 
         return next_TA_id
