@@ -2,7 +2,7 @@ import unittest
 
 from system.query_processing import WHERE_Clause
 from system.store import (
-    KeyValueStore,
+    VersionedKeyValueStore,
     TransactionalKeyValueStore,
     TransactionAbortedException,
 )
@@ -121,7 +121,7 @@ class StoreTestAnomalies(unittest.TestCase):
         # bypass store semantics and add a new committed version
         # simulating an insert from another concurrent transaction with a greater TA_ID than <TA_ID>:
         tkvs.key_value_store["4242"].committed.append(
-            KeyValueStore.VersionEntry(
+            VersionedKeyValueStore.VersionEntry(
                 TA_ID + 1, value=StoreTestAnomalies.Stuff(45, 45)
             )
         )
@@ -145,11 +145,17 @@ class StoreTestAnomalies(unittest.TestCase):
         object_id: str = "4242"
 
         # build a committed list and force it into the store:
-        tkvs.key_value_store[object_id] = KeyValueStore.KVStoreEntry(
+        tkvs.key_value_store[object_id] = VersionedKeyValueStore.KVStoreEntry(
             committed=[
-                KeyValueStore.VersionEntry(0, value=StoreTestAnomalies.Stuff(45, 45)),
-                KeyValueStore.VersionEntry(5, value=StoreTestAnomalies.Stuff(47, 45)),
-                KeyValueStore.VersionEntry(8, value=StoreTestAnomalies.Stuff(49, 45)),
+                VersionedKeyValueStore.VersionEntry(
+                    0, value=StoreTestAnomalies.Stuff(45, 45)
+                ),
+                VersionedKeyValueStore.VersionEntry(
+                    5, value=StoreTestAnomalies.Stuff(47, 45)
+                ),
+                VersionedKeyValueStore.VersionEntry(
+                    8, value=StoreTestAnomalies.Stuff(49, 45)
+                ),
             ]
         )
 
@@ -163,7 +169,9 @@ class StoreTestAnomalies(unittest.TestCase):
 
         # intentionally destroy commit order in the committed list:
         tkvs.key_value_store[object_id].committed.append(
-            KeyValueStore.VersionEntry(4, value=StoreTestAnomalies.Stuff(50, 45))
+            VersionedKeyValueStore.VersionEntry(
+                4, value=StoreTestAnomalies.Stuff(50, 45)
+            )
         )
 
         # assert of the store must fail now:

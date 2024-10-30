@@ -4,7 +4,7 @@ from system.interfaces.query_processing.query_processing import (
     QueryInterface,
     QueryOptimizer,
 )
-from system.interfaces.stores import ACIDStore, QEPQueryableACIDStore, KeyValueStore_API
+from system.interfaces.stores import ACIDStore, QEPQueryableACIDStore, KeyValueStore
 
 
 class DBMS(QueryInterface, ACIDStore, ABC):
@@ -13,7 +13,7 @@ class DBMS(QueryInterface, ACIDStore, ABC):
     def __init__(
         self,
         QEP_queryable_ACID_store: QEPQueryableACIDStore,
-        persistence_layer: KeyValueStore_API,
+        persistence_layer: KeyValueStore,
         query_optimizer: QueryOptimizer,
     ):
         """Initialize the DBMS with a store and a query optimizer.

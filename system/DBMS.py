@@ -5,7 +5,7 @@ import deprecation
 from system.interfaces.DBMS import DBMS
 from system.interfaces.query_processing.query_processing import QEP, QueryOptimizer
 from system.interfaces.stores import QEPQueryableACIDStore
-from system.store import KeyValueStore
+from system.store import VersionedKeyValueStore
 
 
 class PyDBMS(DBMS):
@@ -14,7 +14,7 @@ class PyDBMS(DBMS):
     def __init__(
         self,
         QEP_queryable_ACID_store: QEPQueryableACIDStore,
-        persistence_layer: KeyValueStore,
+        persistence_layer: VersionedKeyValueStore,
         query_optimizer: QueryOptimizer,
     ):
         """Initialize the DBMS with a store and a query optimizer.

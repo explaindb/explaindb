@@ -4,12 +4,12 @@ from dataclasses import dataclass
 from system.interfaces.query_processing.query_processing import QEPQueryable
 
 
-class KeyValueStore_API(ABC):
+class KeyValueStore(ABC):
     """An interface for a store managing key/value mappings."""
 
     @abstractmethod
     def size(self) -> int:
-        """Returns the number of objects in the store."""
+        """Returns the number of objects_ids mapped by the store."""
         pass
 
     @abstractmethod
@@ -49,8 +49,12 @@ class KeyValueStore_API(ABC):
         pass
 
     @abstractmethod
-    def flush(self) -> None:
-        """Persists all changes, i.e. any changes done so far in volatile memory only are now made durable."""
+    def flush(self, object_id: int | None = None) -> None:
+        """Persists all changes, i.e. any changes done so far in volatile memory only are now made durable.
+
+        @param object_id: if given, only the object with the given object_id is flushed, otherwise all objects are
+        flushed.
+        """
         pass
 
     @abstractmethod
@@ -81,9 +85,9 @@ class KeyValueStore_API(ABC):
 class ACIDStore(ABC):
     """Interface for an ACID store"""
 
-    def __init__(self, persistence_layer: KeyValueStore_API):
+    def __init__(self, persistence_layer: KeyValueStore):
         """Initialize the ACID store with a persistence layer, i.e. the layer that actually stores the data."""
-        self.persistence_layer: KeyValueStore_API = persistence_layer
+        self.persistence_layer: KeyValueStore = persistence_layer
 
     def begin_transaction(self) -> int:
         """Starts a new transaction and returns its transaction id.

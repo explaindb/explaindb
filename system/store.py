@@ -5,7 +5,7 @@ from dataclasses import dataclass
 import copy
 from typing import Dict, ItemsView
 
-from system.interfaces.stores import ACIDStore, KeyValueStore_API
+from system.interfaces.stores import ACIDStore, KeyValueStore
 from system.query_processing import Clause
 
 
@@ -23,11 +23,13 @@ class TransactionAbortedException(Exception):
     pass
 
 
-class KeyValueStore(KeyValueStore_API):
-    """A store managing key/value mappings."""
+class VersionedKeyValueStore(KeyValueStore):
+    """A versioned store managing key/value mappings.
+    On the slides we this store a "key value store".
+    """
 
-    # TODO: should be split up into two classes: one for the unversioned store and one for the versioned store
-    # KV <- KVWithVersions <- KVWithVersionsAndTransactions
+    # TODO: could be split up into two classes: one for the non-versioned store and one for the versioned store
+    # TODO: KeyValueStore (TODO) <- VersionedKeyValueStore <- TransactionalVersionedKeyValueStore
 
     @dataclass
     class VersionEntry:
@@ -59,24 +61,29 @@ class KeyValueStore(KeyValueStore_API):
         """A class representing a key value store entry."""
 
         # list of committed versions of the object
-        committed: list[KeyValueStore.VersionEntry]
+        committed: list[VersionedKeyValueStore.VersionEntry]
 
         # optional (SINGLE!) work in progress entry
-        wip: KeyValueStore.VersionEntry | None = None
+        wip: VersionedKeyValueStore.VersionEntry | None = None
 
-    def __init__(self, persistence_layer: KeyValueStore_API = None):
-        # the actual data kept by this store
+    def __init__(self, persistence_layer: KeyValueStore = None):
+        """
+        :param persistence_layer: Constructor for the VersionedKeyValueStore class.
+        """
+
+        # the actual data kept by this store:
         # a mapping from an object_id (which is a string to allow for prefixes) to a list of versions
         # we keep a mapping from object_id_prefix + object_id to KVStoreEntry
         # in other words: we may have MULTIPLE committed versions valid at different points in time
         # (if they were not garbage collected yet due to ongoing reading TAs)
         # plus AT MOST ONE optional work in progress (wip) entry, i.e. an object currently being modified by an
         # ongoing transaction
-        self.persistence_layer: KeyValueStore_API = persistence_layer
-        self.key_value_store: Dict[str, KeyValueStore.KVStoreEntry] = {}
+
+        self.persistence_layer: KeyValueStore = persistence_layer
+        self.key_value_store: Dict[str, VersionedKeyValueStore.KVStoreEntry] = {}
 
     def size(self) -> int:
-        """Returns the number of objects in the store."""
+        """Returns the number of objects_ids mapped by the store."""
         return len(self.key_value_store)
 
     def put(self, object_id: str, _object: object) -> None:
@@ -86,18 +93,18 @@ class KeyValueStore(KeyValueStore_API):
         outside the store.
 
         The data is recorded as a committed version with a start timestamp of 0.
-        So this put is NOT transactional, it is just a simple insert bypassing the transactional semantics of the store.
-        You get transactional semantics by using the UpdatableKeyValueStore.
+        So this put is NOT transactional, it is just a simple insert bypassing any transactional semantics of the store.
+        You get transactional semantics by using the TransactionalKeyValueStore.
 
         @param object_id: the object id
-        @param _object: the object to
+        @param _object: the object to use as the value
         """
         if object_id in self.key_value_store:
             raise Exception(f"object {object_id} already exists in the store")
 
-        self.key_value_store[object_id] = KeyValueStore.KVStoreEntry(
+        self.key_value_store[object_id] = VersionedKeyValueStore.KVStoreEntry(
             committed=[
-                KeyValueStore.VersionEntry(
+                VersionedKeyValueStore.VersionEntry(
                     start_validity=0, value=copy.deepcopy(_object)
                 )
             ],
@@ -126,15 +133,21 @@ class KeyValueStore(KeyValueStore_API):
             raise Exception(f"object {object_id} not found in the store")
 
         # create a new entry for the kv store that marks the object as deleted:
-        new_entry: KeyValueStore.VersionEntry = KeyValueStore.VersionEntry(
-            start_validity=0, value=None, deleted=True
+        new_entry: VersionedKeyValueStore.VersionEntry = (
+            VersionedKeyValueStore.VersionEntry(
+                start_validity=0, value=None, deleted=True
+            )
         )
 
         # add the new entry to the kv store as committed:
         self.key_value_store[object_id].committed.append(new_entry)
 
-    def flush(self) -> None:
-        """Persists all changes, i.e. any changes done so far in volatile memory only are now made durable."""
+    def flush(self, object_id: int | None = None) -> None:
+        """Persists all changes, i.e. any changes done so far in volatile memory only are now made durable.
+
+        @param object_id: if given, only the object with the given object_id is flushed, otherwise all objects are
+        flushed.
+        """
         pass
 
     def bulkload(self, data: list[object], object_id_prefix: str = ""):
@@ -161,7 +174,7 @@ class KeyValueStore(KeyValueStore_API):
         pp.pprint(self.key_value_store)
 
 
-class TransactionalKeyValueStore(KeyValueStore, ACIDStore):
+class TransactionalKeyValueStore(VersionedKeyValueStore, ACIDStore):
     """A fully transactional versioned key value store.
     Notice that this store goes far beyond the typical key value store, which typically is only transactional per
     SINGLE key update/insert/delete.
@@ -188,13 +201,15 @@ class TransactionalKeyValueStore(KeyValueStore, ACIDStore):
     def __init__(
         self,
         use_brute_force_validation: bool = False,
-        persistence_layer: KeyValueStore_API = None,
+        persistence_layer: KeyValueStore = None,
     ):
         """Initializes the store.
 
         @param use_brute_force_validation: if set to True, the store will use the brute force validation algorithm in
         the validation phase.
+        @param persistence_layer: the persistence layer to use for the store
         """
+
         super().__init__(persistence_layer=persistence_layer)
         self.use_brute_force_validation: bool = use_brute_force_validation
 
@@ -224,6 +239,7 @@ class TransactionalKeyValueStore(KeyValueStore, ACIDStore):
         @param object_id: the object id of the object to be read
         @param timestamp: the timestamp, i.e. the transaction id of the transaction reading the object
         @param ignore_wip: if set to True, the wip entries are ignored, i.e. only committed versions are considered.
+
         @return: the visible version of the object for TA <TA_id> under snapshot isolation, None if it was deleted
         """
 
@@ -235,7 +251,9 @@ class TransactionalKeyValueStore(KeyValueStore, ACIDStore):
             not ignore_wip and self.key_value_store[object_id].wip is not None
         ):  # i.e. there is a wip entry for this object
             # get that wip entry:
-            wip_entry: KeyValueStore.VersionEntry = self.key_value_store[object_id].wip
+            wip_entry: VersionedKeyValueStore.VersionEntry = self.key_value_store[
+                object_id
+            ].wip
 
             # was this wip entry created by TA <TA_id>?
             if wip_entry.start_validity == timestamp:
@@ -248,7 +266,7 @@ class TransactionalKeyValueStore(KeyValueStore, ACIDStore):
         # post/else: there is no wip entry for object <object_id> by TA <TA_id>
 
         # get all committed versions of this object (under snapshot isolation) from the system:
-        committed_object_versions: list[KeyValueStore.VersionEntry] = (
+        committed_object_versions: list[VersionedKeyValueStore.VersionEntry] = (
             self.key_value_store[object_id].committed
         )
 
@@ -267,7 +285,7 @@ class TransactionalKeyValueStore(KeyValueStore, ACIDStore):
             )
 
         # get the version of this object visible to TA <TA_id> under snapshot isolation:
-        visible_version_to_TA_id_list: list[KeyValueStore.VersionEntry] = list(
+        visible_version_to_TA_id_list: list[VersionedKeyValueStore.VersionEntry] = list(
             filter(
                 # version must have existed (in the sense of committed! NOT started!) before TA_id started:
                 # note: do not filter for deleted at this point!
@@ -280,7 +298,7 @@ class TransactionalKeyValueStore(KeyValueStore, ACIDStore):
         # note that there may be multiple committed and also deleted versions of the object
         # that are visible to TA <TA_id> under snapshot isolation
         # so, we return the last one in the list:
-        last_committed_version_visible_to_TA_id: KeyValueStore.VersionEntry = (
+        last_committed_version_visible_to_TA_id: VersionedKeyValueStore.VersionEntry = (
             visible_version_to_TA_id_list[-1]
         )
 
@@ -310,11 +328,11 @@ class TransactionalKeyValueStore(KeyValueStore, ACIDStore):
         # a better method would be to delegate to the query optimizer and make use of indexes
         # loop over all entries from tuples touched in the kv-store:
         object_id: str
-        entry: KeyValueStore.KVStoreEntry
+        entry: VersionedKeyValueStore.KVStoreEntry
         for object_id, entry in self.key_value_store.items():
             # get the most recent committed version of the object available (rather than the version seen under
             # snapshot isolation), i.e. the last element in the committed list:
-            most_recent_entry: KeyValueStore.VersionEntry = entry.committed[-1]
+            most_recent_entry: VersionedKeyValueStore.VersionEntry = entry.committed[-1]
 
             # if the last committed version was deleted, we skip it:
             if most_recent_entry.deleted:
@@ -353,10 +371,13 @@ class TransactionalKeyValueStore(KeyValueStore, ACIDStore):
         """Returns a list with all (object_id,objects)-pairs that match the WHERE_clause for the given snapshot
         <timestamp> plus the checksum. If the store uses brute force validation, the checksum of the returned list
         is also computed.
+
         @param timestamp: the timestamp to use for reading data, typically a transaction ID, required for snapshot
         isolation
         @param where: a where clause expression that is evaluated against the actual data (not the object ids)
         @param ignore_wip: if set to True, the wip entries are ignored, i.e. only committed versions are considered
+
+        @return: a pair with a list over the (object_id, object)-items in the result, plus a checksum
         """
 
         # materialize the iterable to a list in order to be able to compute checksums:
@@ -382,6 +403,7 @@ class TransactionalKeyValueStore(KeyValueStore, ACIDStore):
         @param TA_id: the transaction id reading the data, required for snapshot isolation
         @param where: a where clause expression that is evaluated against the actual data (not the object ids)
         @param collect_read_clause: if set to True, the where clause is not added to the read set of TA <TA_id>
+
         @return: a list over the object ids that match the given conditions
         """
 
@@ -427,8 +449,10 @@ class TransactionalKeyValueStore(KeyValueStore, ACIDStore):
             )
 
         # create a new entry and copy of the updated object for the kv store:
-        new_entry: KeyValueStore.VersionEntry = KeyValueStore.VersionEntry(
-            start_validity=TA_id, value=copy.deepcopy(updated_object)
+        new_entry: VersionedKeyValueStore.VersionEntry = (
+            VersionedKeyValueStore.VersionEntry(
+                start_validity=TA_id, value=copy.deepcopy(updated_object)
+            )
         )
 
         #  NEW: keep your hands off the old committed version:
@@ -463,8 +487,10 @@ class TransactionalKeyValueStore(KeyValueStore, ACIDStore):
             )
 
         # create a new entry for the kv store that marks the object as deleted:
-        new_entry: KeyValueStore.VersionEntry = KeyValueStore.VersionEntry(
-            start_validity=TA_id, value=None, deleted=True
+        new_entry: VersionedKeyValueStore.VersionEntry = (
+            VersionedKeyValueStore.VersionEntry(
+                start_validity=TA_id, value=None, deleted=True
+            )
         )
 
         # add the new entry to the kv store as wip (work in progress):
@@ -716,7 +742,9 @@ class TransactionalKeyValueStore(KeyValueStore, ACIDStore):
         # let all wip objects of TA <TA_id> become a new committed version:
         # i.e. we move all objects modified by this TA from wip to committed:
         for object_id in self.TD[TA_id].write_set:
-            wip_entry: KeyValueStore.VersionEntry = self.key_value_store[object_id].wip
+            wip_entry: VersionedKeyValueStore.VersionEntry = self.key_value_store[
+                object_id
+            ].wip
 
             # so far, the start validity of the wip entry must be the TA_id:
             assert wip_entry.start_validity == TA_id

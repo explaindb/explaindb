@@ -1,7 +1,7 @@
 import unittest
 
 from system.store import (
-    KeyValueStore,
+    VersionedKeyValueStore,
     TransactionalKeyValueStore,
 )
 from dataclasses import dataclass
@@ -32,8 +32,8 @@ class StoreTestBasics(unittest.TestCase):
 
     def test_KeyValueStore_basics(self):
         """Test basic bulkload functionality of KeyValueStore"""
-        kvs: KeyValueStore
-        for kvs in [KeyValueStore(), TransactionalKeyValueStore()]:
+        kvs: VersionedKeyValueStore
+        for kvs in [VersionedKeyValueStore(), TransactionalKeyValueStore()]:
             kvs.bulkload(self._create_fake_data())
             self.assertTrue(kvs.size() == 100)
             for key, value in kvs.key_value_store.items():
@@ -42,14 +42,14 @@ class StoreTestBasics(unittest.TestCase):
                 self.assertIsInstance(entries, list)
                 self.assertEqual(len(entries), 1)
                 entry = entries[0]
-                self.assertIsInstance(entry, KeyValueStore.VersionEntry)
+                self.assertIsInstance(entry, VersionedKeyValueStore.VersionEntry)
                 self.assertIsInstance(entry.value, StoreTestBasics.Stuff)
                 self.assertEqual(entry.start_validity, 0)
                 self.assertFalse(entry.deleted)
 
     def test_bulkload_with_prefix(self):
         """Test bulkload with object_id_prefix"""
-        kvs: KeyValueStore = KeyValueStore()
+        kvs: VersionedKeyValueStore = VersionedKeyValueStore()
         kvs.bulkload(self._create_fake_data(), object_id_prefix="stuff_")
         self.assertTrue(kvs.size() == 100)
         for key in kvs.key_value_store.keys():
