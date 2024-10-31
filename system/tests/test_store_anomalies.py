@@ -1,6 +1,6 @@
 import unittest
 
-from system.query_processing import WHERE_Clause
+from system.query_processing import WHERE_Clause, TrueClause
 from system.store import (
     VersionedKeyValueStore,
     TransactionalKeyValueStore,
@@ -439,6 +439,47 @@ class StoreTestAnomalies(unittest.TestCase):
         # i.e. if checksums also consider own changes
         tkvs.commit_transaction(t1)
         self.assertEqual(tkvs.committed_transactions_log[-1], t1)
+
+    def test_read_all(self):
+        """Tests if the store correctly handles read_all requests"""
+
+        @dataclass(frozen=True)
+        class T:
+            a: int
+            b: int
+
+        for use_brute_force_validation in [True, False]:
+            for t2_commits in [True, False]:
+                tkvs: TransactionalKeyValueStore = TransactionalKeyValueStore(
+                    use_brute_force_validation=use_brute_force_validation
+                )
+
+                tkvs.put("1", T(1, 1))
+                tkvs.put("2", T(2, 2))
+
+                t1 = tkvs.begin_transaction()
+                t2 = tkvs.begin_transaction()
+
+                # t2 modifies something after t1 started...
+                tkvs.update_object("1", T(11, 11), t2)
+
+                # ... and commits:
+                if t2_commits:
+                    tkvs.commit_transaction(t2)
+
+                # t1 reads everything from its snapshot with a TrueClause:
+                ret1: list[tuple[str, object]] = tkvs.read_objects(t1, TrueClause())
+                self.assertEqual(len(ret1), 2)
+
+                # t1 modifies something (possibly influenced by the previous read)
+                tkvs.update_object("2", T(22, 22), t1)
+
+                # t1 commits and fails validation:
+                if t2_commits:
+                    with self.assertRaises(TransactionAbortedException):
+                        tkvs.commit_transaction(t1)
+                else:
+                    tkvs.commit_transaction(t1)
 
 
 if __name__ == "__main__":
