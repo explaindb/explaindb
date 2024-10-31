@@ -555,12 +555,6 @@ class TransactionalKeyValueStore(VersionedKeyValueStore, ACIDStore):
         if len(self.TD[TA_id].write_set) == 0:
             return True
 
-        # if the read clauses contain a None (placeholder for all data), we return False,
-        # i.e. the validation is not successful as a predicate selected all the data:
-        if None in self.TD[TA_id].read_clauses:
-            # if there is a None in the read clauses, validation fails:
-            return False
-
         if self.use_brute_force_validation:
             # method 1 (brute force re-evaluation of all where-clauses used by TA <TA_id>):
 
