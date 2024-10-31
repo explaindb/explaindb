@@ -1,13 +1,13 @@
 from abc import ABC
 
 from system.interfaces.query_processing.query_processing import (
-    QueryInterface,
+    QueryableComponent,
     QueryOptimizer,
 )
 from system.interfaces.stores import ACIDStore, QEPQueryableACIDStore, KeyValueStore
 
 
-class DBMS(QueryInterface, ACIDStore, ABC):
+class DBMS(ACIDStore, QueryableComponent, ABC):
     """DataBase Management System interface (DBMS)
 
     A DBMS is a decorator for an ACID store that adds query processing capabilities (cf. decorator design pattern).

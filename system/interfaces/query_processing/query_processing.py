@@ -31,8 +31,8 @@ class QEPQueryable(ABC):
         pass
 
 
-class QueryInterface(ABC):
-    """A basic Query Interface"""
+class QueryableComponent(ABC):
+    """A component that can be queried using textual queries. In other words, a component that can execute queries."""
 
     @abstractmethod
     @deprecation.deprecated(details="Use the prepare_query function instead!")
