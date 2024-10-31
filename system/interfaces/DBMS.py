@@ -8,7 +8,13 @@ from system.interfaces.stores import ACIDStore, QEPQueryableACIDStore, KeyValueS
 
 
 class DBMS(QueryInterface, ACIDStore, ABC):
-    """Database Management System interface"""
+    """DataBase Management System interface (DBMS)
+
+    A DBMS is a decorator for an ACID store that adds query processing capabilities (cf. decorator design pattern).
+
+    A DBMS may use a persistence layer different from the one used in the QEP_queryable_ACID_store. This may be useful for
+    persisting data temporarily outside MVCC, e.g. for query processing to store temporary data/intermediate results.
+    """
 
     def __init__(
         self,
@@ -22,6 +28,7 @@ class DBMS(QueryInterface, ACIDStore, ABC):
         @param persistence_layer: The persistence layer to use for durability
         @param query_optimizer: The query optimizer to use
         """
+
         ACIDStore.__init__(self, persistence_layer)
         self.QEP_queryable_ACID_store: QEPQueryableACIDStore = QEP_queryable_ACID_store
         self.query_optimizer: QueryOptimizer = query_optimizer
