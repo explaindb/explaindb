@@ -68,3 +68,19 @@ class Disjunction(Clause):
     def evaluate(self, _object) -> bool:
         """Evaluates the disjunction against a row of data."""
         return any(clause.evaluate(_object) for clause in self.clauses)
+
+
+class TrueClause(Clause):
+    """A clause that always evaluates to True."""
+
+    def evaluate(self, _object) -> bool:
+        """Returns True."""
+        return True
+
+
+class FalseClause(Clause):
+    """A clause that always evaluates to False."""
+
+    def evaluate(self, _object) -> bool:
+        """Returns False."""
+        return False
