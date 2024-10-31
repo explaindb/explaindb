@@ -3,6 +3,7 @@ import unittest
 from system.store import (
     VersionedKeyValueStore,
     TransactionalKeyValueStore,
+    IndexedTransactionalKeyValueStore,
 )
 from dataclasses import dataclass
 from faker import Faker
@@ -33,7 +34,11 @@ class StoreTestBasics(unittest.TestCase):
     def test_KeyValueStore_basics(self):
         """Test basic bulkload functionality of KeyValueStore"""
         kvs: VersionedKeyValueStore
-        for kvs in [VersionedKeyValueStore(), TransactionalKeyValueStore()]:
+        for kvs in [
+            VersionedKeyValueStore(),
+            TransactionalKeyValueStore(),
+            IndexedTransactionalKeyValueStore(),
+        ]:
             kvs.bulkload(self._create_fake_data())
             self.assertTrue(kvs.size() == 100)
             for key, value in kvs.key_value_store.items():
@@ -79,6 +84,16 @@ class StoreTestBasics(unittest.TestCase):
         tkvs.begin_transaction()
         tkvs.commit_transaction(TA_ID)
         self.assertEqual(TD_entry.last_committed_TA_index_in_TA_log, -1)
+
+    def test_IndexedTransactionalKeyValueStore_basics(self):
+        """Test basic functionality of IndexedTransactionalKeyValueStore"""
+        itkvs: IndexedTransactionalKeyValueStore = IndexedTransactionalKeyValueStore()
+        self.assertEqual(itkvs.indexes_by_name, {})
+
+        self.assertEqual(itkvs.indexes_by_properties, {})
+        itkvs.create_index("a", "a", "=")
+
+        itkvs.drop_index("a")
 
 
 if __name__ == "__main__":

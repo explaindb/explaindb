@@ -5,6 +5,7 @@ from dataclasses import dataclass
 import copy
 from typing import Dict, ItemsView
 
+from system.interfaces.indexing.Index import Index, IndexProperties
 from system.interfaces.stores import ACIDStore, KeyValueStore
 from system.query_processing import Clause
 
@@ -777,3 +778,79 @@ class TransactionalKeyValueStore(VersionedKeyValueStore, ACIDStore):
 
         # remove the transaction from the transaction dictionary:
         del self.TD[TA_id]
+
+
+class IndexedTransactionalKeyValueStore(TransactionalKeyValueStore):
+    """A fully transactional versioned key value store with indexes."""
+
+    def __init__(self, use_brute_force_validation: bool = False):
+        # a dictionary of indexes:
+        super().__init__(use_brute_force_validation=use_brute_force_validation)
+
+        # a dictionary mapping from the index name to (IndexProperties, Index):
+        self.indexes_by_name: Dict[
+            str,
+            tuple[
+                IndexProperties,
+                Index | None,
+            ],
+        ] = dict[str, tuple[IndexProperties, Index | None]]()
+
+        # a dictionary mapping from IndexProperties to the index name:
+        self.indexes_by_properties: Dict[IndexProperties, str] = dict[
+            IndexProperties, str
+        ]()
+
+    def create_index(self, index_name: str, attribute: str, operator: str) -> None:
+        """Creates an index on the store with the given name.
+
+        @param index_name: the name of the index
+        @param attribute: the attribute to create the index on
+        @param operator: the operator to use for the index
+        """
+        if index_name in self.indexes_by_name:
+            raise Exception(f"index {index_name} already exists")
+
+        # only equality indexes at the moment:
+        if operator not in ["="]:
+            raise Exception(f"operator {operator} not supported")
+
+        # an index (to start only a python dict) maps from an attribute value to the list of object_ids where there is
+        # at least one version in the committed list or the wip-entry qualifying (not all have to match)
+        # This means, that every index is a filter index, i.e. it does not return the precise result set but a superset
+        # of the result set which then has to be post-filtered.
+
+        # So an index lookup works like this:
+        # 1. call the index to get the object_ids with potential matches
+        # 2. for each object_id returned, get the most recent visible version of the object to TA <TA_id> under
+        # snapshot isolation
+        # 3. check whether the object matches the where clause
+        # 4. if it does, add it to the result set
+
+        index: Dict[object, list[str]] = dict[object, list[str]]()
+
+        # bulkload the index:
+        # TODO
+        index_properties: IndexProperties = IndexProperties(
+            attribute=attribute, operator=operator
+        )
+
+        # insert index metadata into the dictionaries:
+        self.indexes_by_name[index_name] = (
+            index_properties,
+            None,
+        )
+
+        self.indexes_by_properties[index_properties] = index_name
+
+    def drop_index(self, index_name: str) -> None:
+        """Drops the index with the given name.
+
+        @param index_name: the name of the index to drop
+        """
+        if index_name not in self.indexes_by_name:
+            raise Exception(f"index {index_name} does not exist")
+
+        entry: tuple[IndexProperties, Index | None] = self.indexes_by_name[index_name]
+        del self.indexes_by_name[index_name]
+        del self.indexes_by_properties[entry[0]]
