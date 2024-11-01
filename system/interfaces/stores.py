@@ -1,13 +1,7 @@
 from abc import ABC
 
-from system.interfaces.indexing.Index import Index, PointQueryMixIn
+from system.interfaces.indexing.Index import KeyValueStore
 from system.interfaces.query_processing.query_processing import QEPQueryable
-
-
-class KeyValueStore(Index, PointQueryMixIn, ABC):
-    """An interface for a store managing key/value mappings."""
-
-    pass
 
 
 class ACIDStore(ABC):

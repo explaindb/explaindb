@@ -5,8 +5,8 @@ from dataclasses import dataclass
 import copy
 from typing import Dict, ItemsView
 
-from system.interfaces.indexing.Index import Index, IndexProperties
-from system.interfaces.stores import ACIDStore, KeyValueStore
+from system.interfaces.indexing.Index import Index, IndexProperties, KeyValueStore
+from system.interfaces.stores import ACIDStore
 from system.query_processing import Clause
 
 

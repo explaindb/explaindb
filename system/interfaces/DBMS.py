@@ -4,7 +4,8 @@ from system.interfaces.query_processing.query_processing import (
     QueryableComponent,
     QueryOptimizer,
 )
-from system.interfaces.stores import ACIDStore, QEPQueryableACIDStore, KeyValueStore
+from system.interfaces.stores import ACIDStore, QEPQueryableACIDStore
+from system.interfaces.indexing.Index import KeyValueStore
 
 
 class DBMS(ACIDStore, QueryableComponent, ABC):

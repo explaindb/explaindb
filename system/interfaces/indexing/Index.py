@@ -104,6 +104,12 @@ class PredicateQueryMixIn(Generic[Key, Value], ABC):
         pass
 
 
+class KeyValueStore(Index, PointQueryMixIn, ABC):
+    """An interface for a store managing key/value mappings."""
+
+    pass
+
+
 class AbstractBTree(
     Generic[Key, Value],
     Index[Key, Value],
