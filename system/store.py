@@ -24,7 +24,7 @@ class TransactionAbortedException(Exception):
     pass
 
 
-class VersionedKeyValueStore(KeyValueStore):
+class VersionedKeyValueStore(KeyValueStore[str, object]):
     """A versioned store managing key/value mappings.
     On the slides we this store a "key value store".
     """

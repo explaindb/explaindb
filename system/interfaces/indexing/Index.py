@@ -1,6 +1,5 @@
 from abc import abstractmethod, ABC
 from dataclasses import dataclass
-from typing import Generic, TypeVar
 
 from system.query_processing import Clause
 
@@ -17,11 +16,7 @@ class IndexProperties:
     operator: str
 
 
-Key = TypeVar("Key")
-Value = TypeVar("Value")
-
-
-class Index(Generic[Key, Value], ABC):
+class Index[Key, Value](ABC):
     """An API representing an index."""
 
     @abstractmethod
@@ -81,7 +76,7 @@ class Index(Generic[Key, Value], ABC):
         pass
 
 
-class PointQueryMixIn(Generic[Key, Value], ABC):
+class PointQueryMixIn[Key, Value](ABC):
     @abstractmethod
     def get(self, key: Key) -> Value:
         """Returns the value associated with the given object_id.
@@ -92,7 +87,7 @@ class PointQueryMixIn(Generic[Key, Value], ABC):
         pass
 
 
-class PredicateQueryMixIn(Generic[Key, Value], ABC):
+class PredicateQueryMixIn[Key, Value](ABC):
     @abstractmethod
     def get_all(self, where: Clause) -> list[Value]:
         """Returns all values that satisfy the given where clause.
@@ -104,14 +99,13 @@ class PredicateQueryMixIn(Generic[Key, Value], ABC):
         pass
 
 
-class KeyValueStore(Index, PointQueryMixIn, ABC):
+class KeyValueStore[Key, Value](Index[Key, Value], PointQueryMixIn[Key, Value], ABC):
     """An interface for a store managing key/value mappings."""
 
     pass
 
 
-class AbstractBTree(
-    Generic[Key, Value],
+class AbstractBTree[Key, Value](
     Index[Key, Value],
     PointQueryMixIn[Key, Value],
     PredicateQueryMixIn[Key, Value],
