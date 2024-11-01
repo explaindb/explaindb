@@ -29,9 +29,6 @@ class VersionedKeyValueStore(KeyValueStore):
     On the slides we this store a "key value store".
     """
 
-    # TODO: could be split up into two classes: one for the non-versioned store and one for the versioned store
-    # TODO: KeyValueStore (TODO) <- VersionedKeyValueStore <- TransactionalVersionedKeyValueStore
-
     @dataclass
     class VersionEntry:
         """A class representing a version entry in the store, i.e. an entry of a single object/value
