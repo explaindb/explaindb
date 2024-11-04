@@ -5,7 +5,12 @@ from dataclasses import dataclass
 import copy
 from typing import Dict, ItemsView
 
-from system.interfaces.indexing.Index import Index, IndexProperties, KeyValueStore
+from system.interfaces.indexing.Index import (
+    Index,
+    IndexProperties,
+    KeyValueStore,
+    PythonDictionaryWithoutDuplicates,
+)
 from system.interfaces.stores import ACIDStore
 from system.query_processing import Clause
 
@@ -799,7 +804,7 @@ class IndexedTransactionalKeyValueStore(TransactionalKeyValueStore):
         ]()
 
     def create_index(self, index_name: str, attribute: str, operator: str) -> None:
-        """Creates an index on the store with the given name.
+        """Creates an index on the store with the given name. Adds the metadata to the catalog and bulkloads the index
 
         @param index_name: the name of the index
         @param attribute: the attribute to create the index on
@@ -808,7 +813,7 @@ class IndexedTransactionalKeyValueStore(TransactionalKeyValueStore):
         if index_name in self.indexes_by_name:
             raise Exception(f"index {index_name} already exists")
 
-        # only equality indexes at the moment:
+        # only equality indexes are supported at the moment:
         if operator not in ["="]:
             raise Exception(f"operator {operator} not supported")
 
@@ -824,21 +829,28 @@ class IndexedTransactionalKeyValueStore(TransactionalKeyValueStore):
         # 3. check whether the object matches the where clause
         # 4. if it does, add it to the result set
 
-        index: Dict[object, list[str]] = dict[object, list[str]]()
-
-        # bulkload the index:
-        # TODO
+        # add metadata to the catalog:
         index_properties: IndexProperties = IndexProperties(
             attribute=attribute, operator=operator
         )
-
-        # insert index metadata into the dictionaries:
-        self.indexes_by_name[index_name] = (
-            index_properties,
-            None,
-        )
-
+        # the only type of index supported at the moment is a PythonDictionary (wrapping a python dict):
+        index: KeyValueStore[str, object] = PythonDictionaryWithoutDuplicates()
+        self.indexes_by_name[index_name] = (index_properties, index)
         self.indexes_by_properties[index_properties] = index_name
+
+        # bulkload the index:
+        # get all (current) items from the store:
+        object_id: str
+        _object: object
+
+        for object_id, _object in self.key_value_store.items():
+            # does the object have that attribute:
+            if hasattr(_object, index_properties.attribute):
+                # get the value of that attribute
+                attribute_value: object = getattr(_object, index_properties.attribute)
+
+                # add the object_id to the index:
+                index.put(object_id, attribute_value)
 
     def drop_index(self, index_name: str) -> None:
         """Drops the index with the given name.
@@ -851,3 +863,24 @@ class IndexedTransactionalKeyValueStore(TransactionalKeyValueStore):
         entry: tuple[IndexProperties, Index | None] = self.indexes_by_name[index_name]
         del self.indexes_by_name[index_name]
         del self.indexes_by_properties[entry[0]]
+
+    def get_suitable_indexes(self, clause: Clause) -> list[IndexProperties]:
+        """Returns a list of suitable indexes for the given clause.
+
+        @param clause: the clause to check for suitable index
+        @return: a list of suitable indexes
+        """
+        # TODO
+        pass
+
+    def update_object(self, object_id: str, updated_object: object, TA_id: int) -> None:
+        super().update_object(object_id, updated_object, TA_id)
+        # update the index:
+        # TODO
+        pass
+
+    def delete(self, object_id: str) -> None:
+        super().delete(object_id)
+        # update the index:
+        # TODO
+        pass
