@@ -785,18 +785,24 @@ class TransactionalKeyValueStore(VersionedKeyValueStore, ACIDStore):
 class IndexedTransactionalKeyValueStore(TransactionalKeyValueStore):
     """A fully transactional versioned key value store with indexes."""
 
+    @dataclass
+    class IndexCatalogueEntry:
+        """Entries used for the index catalog."""
+
+        # the index properties of the index:
+        index_properties: IndexProperties
+
+        # the index itself:
+        index: Index
+
     def __init__(self, use_brute_force_validation: bool = False):
         # a dictionary of indexes:
         super().__init__(use_brute_force_validation=use_brute_force_validation)
 
         # a dictionary mapping from the index name to (IndexProperties, Index):
         self.indexes_by_name: Dict[
-            str,
-            tuple[
-                IndexProperties,
-                Index | None,
-            ],
-        ] = dict[str, tuple[IndexProperties, Index | None]]()
+            str, IndexedTransactionalKeyValueStore.IndexCatalogueEntry
+        ] = dict[str, IndexedTransactionalKeyValueStore.IndexCatalogueEntry]()
 
         # a dictionary mapping from IndexProperties to the index name:
         self.indexes_by_properties: Dict[IndexProperties, str] = dict[
@@ -833,9 +839,14 @@ class IndexedTransactionalKeyValueStore(TransactionalKeyValueStore):
         index_properties: IndexProperties = IndexProperties(
             attribute=attribute, operator=operator
         )
+
         # the only type of index supported at the moment is a PythonDictionary (wrapping a python dict):
         index: KeyValueStore[str, object] = PythonDictionaryWithoutDuplicates()
-        self.indexes_by_name[index_name] = (index_properties, index)
+        self.indexes_by_name[index_name] = (
+            IndexedTransactionalKeyValueStore.IndexCatalogueEntry(
+                index_properties, index
+            )
+        )
         self.indexes_by_properties[index_properties] = index_name
 
         # bulkload the index:
@@ -844,8 +855,9 @@ class IndexedTransactionalKeyValueStore(TransactionalKeyValueStore):
         _object: object
 
         for object_id, _object in self.key_value_store.items():
-            # does the object have that attribute:
+            # does the _object have that attribute:
             if hasattr(_object, index_properties.attribute):
+                # only then we can add the object_id to the index:
                 # get the value of that attribute
                 attribute_value: object = getattr(_object, index_properties.attribute)
 
@@ -860,9 +872,11 @@ class IndexedTransactionalKeyValueStore(TransactionalKeyValueStore):
         if index_name not in self.indexes_by_name:
             raise Exception(f"index {index_name} does not exist")
 
-        entry: tuple[IndexProperties, Index | None] = self.indexes_by_name[index_name]
+        entry: IndexedTransactionalKeyValueStore.IndexCatalogueEntry = (
+            self.indexes_by_name[index_name]
+        )
         del self.indexes_by_name[index_name]
-        del self.indexes_by_properties[entry[0]]
+        del self.indexes_by_properties[entry.index_properties]
 
     def get_suitable_indexes(self, clause: Clause) -> list[IndexProperties]:
         """Returns a list of suitable indexes for the given clause.
@@ -873,14 +887,20 @@ class IndexedTransactionalKeyValueStore(TransactionalKeyValueStore):
         # TODO
         pass
 
+    def _reindex_all_indexes(self, object_id: str) -> None:
+        # update all indexes, i.e. call _reindex() for each index for the given object_id:
+        index_entry: IndexedTransactionalKeyValueStore.IndexCatalogueEntry
+        for index_entry in self.indexes_by_name.values():
+            index: Index = index_entry.index
+            # TODO
+            # index._reindex(object_id)
+
     def update_object(self, object_id: str, updated_object: object, TA_id: int) -> None:
         super().update_object(object_id, updated_object, TA_id)
-        # update the index:
-        # TODO
-        pass
+
+        self._reindex_all_indexes(object_id)
 
     def delete(self, object_id: str) -> None:
         super().delete(object_id)
-        # update the index:
-        # TODO
-        pass
+
+        self._reindex_all_indexes(object_id)

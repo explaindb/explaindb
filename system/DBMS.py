@@ -13,9 +13,9 @@ class PyDBMS(DBMS):
 
     def __init__(
         self,
-        QEP_queryable_ACID_store: QEPQueryableACIDStore,
+        QEP_queryable_ACID_store: QEPQueryableACIDStore | None,
         persistence_layer: VersionedKeyValueStore,
-        query_optimizer: QueryOptimizer,
+        query_optimizer: QueryOptimizer | None,
     ):
         """Initialize the DBMS with a store and a query optimizer.
 
