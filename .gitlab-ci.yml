@@ -34,7 +34,7 @@ py_test:
     - test
   script:
     # Use most recent version from Pipfile
-    - pipenv sync
+    - pipenv install
     # Run all unit tests
     #- pipenv run python -m unittest discover system/tests/
     # Run all unit tests with coverage
@@ -52,7 +52,7 @@ ipynb_test:
     - test
   script:
     # Use most recent version from Pipfile
-    - pipenv sync
+    - pipenv install
     # Convert all jupyter notebooks into python files
     - pipenv run jupyter nbconvert --to script *.ipynb
     # Run all notebooks
@@ -68,7 +68,7 @@ stats_and_linting:
     # count lines of code for each py and ipynb file, plus the sum:
     - find . \( -iname \*.ipynb -o -iname \*.py \) -not -path "*venv*" -print0 | xargs -0 wc -l > LOC.txt
     # Use most recent version from Pipfile, required for pylint and nbqa
-    - pipenv sync
+    - pipenv install
     # show pylint output of code for each py file:
     - find . -iname \*.py -not -path "*venv*" -print0 | xargs -0 pylint --exit-zero > pylint_py.txt
     # show pylint output of code for each ipynb file:
