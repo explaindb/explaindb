@@ -127,10 +127,11 @@ class VersionedKeyValueStore(KeyValueStore[str, object]):
         # note: deleted entry not considered here
         return self.key_value_store[object_id].committed[-1].value
 
-    def delete(self, object_id: str) -> None:
+    def delete(self, object_id: str, _object: object) -> None:
         """Deletes the object with the given object_id.
 
         @param object_id: the object id
+        @param _object: the object to use as the value
         """
         if object_id not in self.key_value_store:
             raise Exception(f"object {object_id} not found in the store")
@@ -809,6 +810,44 @@ class IndexedTransactionalKeyValueStore(TransactionalKeyValueStore):
             IndexProperties, str
         ]()
 
+    @staticmethod
+    def _deindex_object(
+        index: Index, attribute: str, object_id: str, _object: object
+    ) -> None:
+        """De-indexes the object with the given object_id and object.
+        @param index: the index to use for indexing
+        @param attribute: the attribute to index
+        @param object_id: the object id of the object to be indexed
+        @param _object: the object to be indexed
+        """
+        # does the _object have that attribute:
+        if hasattr(_object, attribute):
+            # only then we can add the object_id to the index:
+            # get the value of that attribute
+            attribute_value: object = getattr(_object, attribute)
+
+            # delete tne entry from the index:
+            index.delete(attribute_value, object_id)
+
+    @staticmethod
+    def _index_object(
+        index: Index, attribute: str, object_id: str, _object: object
+    ) -> None:
+        """Indexes the object with the given object_id and object.
+        @param index: the index to use for indexing
+        @param attribute: the attribute to index
+        @param object_id: the object id of the object to be indexed
+        @param _object: the object to be indexed
+        """
+        # does the _object have that attribute:
+        if hasattr(_object, attribute):
+            # only then we can add the object_id to the index:
+            # get the value of that attribute
+            attribute_value: object = getattr(_object, attribute)
+
+            # add an entry to the index:
+            index.put(attribute_value, object_id)
+
     def create_index(self, index_name: str, attribute: str, operator: str) -> None:
         """Creates an index on the store with the given name. Adds the metadata to the catalog and bulkloads the index
 
@@ -856,13 +895,9 @@ class IndexedTransactionalKeyValueStore(TransactionalKeyValueStore):
 
         for object_id, _object in self.key_value_store.items():
             # does the _object have that attribute:
-            if hasattr(_object, index_properties.attribute):
-                # only then we can add the object_id to the index:
-                # get the value of that attribute
-                attribute_value: object = getattr(_object, index_properties.attribute)
-
-                # add the object_id to the index:
-                index.put(object_id, attribute_value)
+            IndexedTransactionalKeyValueStore._index_object(
+                index, attribute, object_id, _object
+            )
 
     def drop_index(self, index_name: str) -> None:
         """Drops the index with the given name.
@@ -887,20 +922,68 @@ class IndexedTransactionalKeyValueStore(TransactionalKeyValueStore):
         # TODO
         pass
 
-    def _reindex_all_indexes(self, object_id: str) -> None:
+    def _maintain_indexes(
+        self,
+        object_id: str,
+        old_kv_entry: VersionedKeyValueStore.KVStoreEntry = None,
+    ) -> None:
+        """Maintains (re-indexes) the entry <object_id> i all indexes.
+
+        @param object_id: the object id of the object to maintain/reindex
+        @param old_kv_entry: the old KVStoreEntry of the object_id
+        from all indexes
+        """
+
         # update all indexes, i.e. call _reindex() for each index for the given object_id:
         index_entry: IndexedTransactionalKeyValueStore.IndexCatalogueEntry
+
+        # get symmetric difference of the old and new kv_entry, and just their committed lists
+        # convert both to sets and get the symmetric difference of those sets:
+        difference_result = set(
+            self.key_value_store[object_id].committed
+        ).symmetric_difference(set(old_kv_entry.committed))
+
+        # for all indexes
         for index_entry in self.indexes_by_name.values():
             index: Index = index_entry.index
-            # TODO
-            # index._reindex(object_id)
+            attribute: str = index_entry.index_properties.attribute
+
+            # for each change in the symmetric difference:
+            for change in difference_result:
+                self._deindex_object(index, attribute, object_id, change)
+                self._index_object(index, attribute, object_id, change)
 
     def update_object(self, object_id: str, updated_object: object, TA_id: int) -> None:
+        """Updates the entry and maintains all indexes.
+        @param object_id: the object id of the object to be updated
+        @param updated_object: the updated object, i.e. the new value to be associated with the object_id
+        @param TA_id: the transaction id of the transaction that is updating (or trying to update) the object
+        """
+
+        # 1. get a copy of the existing KVStoreEntry of this object_id from the key-value store:
+        old_kv_entry: VersionedKeyValueStore.KVStoreEntry = copy.deepcopy(
+            self.key_value_store[object_id]
+        )
+
+        # 2. only then call the super method performing the actual update in the kv store:
         super().update_object(object_id, updated_object, TA_id)
 
-        self._reindex_all_indexes(object_id)
+        # 3. finally, maintain all indexes for this object_id:
+        self._maintain_indexes(object_id, old_kv_entry=old_kv_entry)
 
-    def delete(self, object_id: str) -> None:
-        super().delete(object_id)
+    def delete(self, object_id: str, _object: object) -> None:
+        """Deletes the entry and maintains all indexes.
+        @param object_id: the object id of the object to be deleted
+        @param _object: the object to be deleted
+        """
 
-        self._reindex_all_indexes(object_id)
+        # 1. get a copy of the existing KVStoreEntry of this object_id from the key-value store:
+        old_kv_entry: VersionedKeyValueStore.KVStoreEntry = copy.deepcopy(
+            self.key_value_store[object_id]
+        )
+
+        # 2. call super method to delete the object_id:
+        super().delete(object_id, _object)
+
+        # 3. maintain all indexes for this object_id:
+        self._maintain_indexes(object_id, old_kv_entry=old_kv_entry)
