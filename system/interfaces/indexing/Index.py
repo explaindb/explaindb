@@ -38,10 +38,12 @@ class Index[Key, Value](ABC):
         pass
 
     @abstractmethod
-    def delete(self, key: Key, value: Value) -> None:
+    def delete(self, key: Key, value: Value = None) -> None:
         """Deletes the key and its associated value from the index.
 
         @param key: the key
+        @param value: the value to delete, if None, all values associated with the key are deleted
+
         """
 
         pass

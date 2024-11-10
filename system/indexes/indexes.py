@@ -15,7 +15,7 @@ class PythonDictionaryWithoutDuplicates[Key, Value](KeyValueStore[Key, Value]):
     def put(self, key: Key, value: Value) -> None:
         self.index[key] = value
 
-    def delete(self, key: Key, value: Value) -> None:
+    def delete(self, key: Key, value: Value = None) -> None:
         if key not in self.index:
             raise KeyError(f"Key {key} not found")
         del self.index[key]
@@ -56,7 +56,7 @@ class PythonDictionaryWithDuplicates[Key, Value](
         """Inserts (puts) a new key->value mapping into the store overwriting any existing mapping."""
         self.index.setdefault(key, []).append(value)
 
-    def delete(self, key: Key, value: Value) -> None:
+    def delete(self, key: Key, value: Value = None) -> None:
         """Deletes the key and all its associated values."""
         if key not in self.index:
             raise KeyError(f"Key {key} not found")

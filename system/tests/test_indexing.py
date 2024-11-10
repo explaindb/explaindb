@@ -5,8 +5,6 @@ from system.indexes.indexes import (
     PythonDictionaryWithDuplicates,
 )
 from system.store import (
-    VersionedKeyValueStore,
-    TransactionalKeyValueStore,
     IndexedTransactionalKeyValueStore,
 )
 from dataclasses import dataclass

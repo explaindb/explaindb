@@ -127,12 +127,14 @@ class VersionedKeyValueStore(KeyValueStore[str, object]):
         # note: deleted entry not considered here
         return self.key_value_store[object_id].committed[-1].value
 
-    def delete(self, object_id: str, _object: object) -> None:
+    def delete(self, object_id: str, _object: object = None) -> None:
         """Deletes the object with the given object_id.
 
         @param object_id: the object id
         @param _object: the object to use as the value
         """
+        assert _object is None
+
         if object_id not in self.key_value_store:
             raise Exception(f"object {object_id} not found in the store")
 
@@ -179,7 +181,8 @@ class VersionedKeyValueStore(KeyValueStore[str, object]):
 
 
 class TransactionalKeyValueStore(VersionedKeyValueStore, ACIDStore):
-    """A fully transactional versioned key value store.
+    """A fully transactional versioned key value store (formerly known as MVCCStore).
+
     Notice that this store goes far beyond the typical key value store, which typically is only transactional per
     SINGLE key update/insert/delete.
     In contrast, this store is FULLY transaction, i.e. it allows for multiple keys to be updated within a single
@@ -925,33 +928,21 @@ class IndexedTransactionalKeyValueStore(TransactionalKeyValueStore):
     def _maintain_indexes(
         self,
         object_id: str,
-        old_kv_entry: VersionedKeyValueStore.KVStoreEntry = None,
+        old_object: object = None,
+        new_object: object = None,
     ) -> None:
         """Maintains (re-indexes) the entry <object_id> i all indexes.
 
         @param object_id: the object id of the object to maintain/reindex
-        @param old_kv_entry: the old KVStoreEntry of the object_id
+        @param old_object: the old object version superseded by the new object version
+        @param new_object: the new object version to be associated with the object_id
         from all indexes
         """
 
         # update all indexes, i.e. call _reindex() for each index for the given object_id:
         index_entry: IndexedTransactionalKeyValueStore.IndexCatalogueEntry
 
-        # get symmetric difference of the old and new kv_entry, and just their committed lists
-        # convert both to sets and get the symmetric difference of those sets:
-        difference_result = set(
-            self.key_value_store[object_id].committed
-        ).symmetric_difference(set(old_kv_entry.committed))
-
-        # for all indexes
-        for index_entry in self.indexes_by_name.values():
-            index: Index = index_entry.index
-            attribute: str = index_entry.index_properties.attribute
-
-            # for each change in the symmetric difference:
-            for change in difference_result:
-                self._deindex_object(index, attribute, object_id, change)
-                self._index_object(index, attribute, object_id, change)
+        # TODO
 
     def update_object(self, object_id: str, updated_object: object, TA_id: int) -> None:
         """Updates the entry and maintains all indexes.
@@ -960,31 +951,43 @@ class IndexedTransactionalKeyValueStore(TransactionalKeyValueStore):
         @param TA_id: the transaction id of the transaction that is updating (or trying to update) the object
         """
 
-        # 1. get a copy of the existing KVStoreEntry of this object_id from the key-value store:
-        # too extreme, we only need the version visible to this TA
-        old_kv_entry: VersionedKeyValueStore.KVStoreEntry = copy.deepcopy(
-            self.key_value_store[object_id]
+        # 1. get a copy of the OLD object version visible to this TA_id:
+        old_object: object = copy.deepcopy(
+            self._get_visible_object_version(object_id, TA_id)
         )
 
-        # 2. only then call the super method performing the actual update in the kv store:
+        # 2. call super method to update the object_id as before:
         super().update_object(object_id, updated_object, TA_id)
 
-        # 3. finally, maintain all indexes for this object_id:
-        self._maintain_indexes(object_id, old_kv_entry=old_kv_entry)
+        # post condition: the committed list of the KVStoreEntry of this object_id is unchanged
+        # (only the wip entry may have been updated)
 
-    def delete(self, object_id: str, _object: object) -> None:
-        """Deletes the entry and maintains all indexes.
-        @param object_id: the object id of the object to be deleted
-        @param _object: the object to be deleted
-        """
-
-        # 1. get a copy of the existing KVStoreEntry of this object_id from the key-value store:
-        old_kv_entry: VersionedKeyValueStore.KVStoreEntry = copy.deepcopy(
-            self.key_value_store[object_id]
+        # 3. get the NEW object version visible to this TA_id (no copy required):
+        new_object: object = copy.deepcopy(
+            self._get_visible_object_version(object_id, TA_id)
         )
 
-        # 2. call super method to delete the object_id:
-        super().delete(object_id, _object)
+        # 4. finally, maintain all indexes for this change:
+        self._maintain_indexes(object_id, old_object=old_object, new_object=new_object)
+
+    def delete_object(self, object_id: str, TA_id: int) -> None:
+        """Deletes the entry and maintains all indexes.
+        @param object_id: the object id of the object to be deleted
+        @param TA_id: the transaction id of the transaction that is deleting (or trying to delete) the object
+        """
+
+        # 1. get a copy of the OLD object version visible to this TA_id:
+        old_object: object = copy.deepcopy(
+            self._get_visible_object_version(object_id, TA_id)
+        )
+
+        # 2. call kv store method to delete the object_id (by adding a wip entry marking the deleted object):
+        super().delete(object_id)
+
+        # 3. get the NEW object version visible to this TA_id (no copy required):
+        new_object: object = copy.deepcopy(
+            self._get_visible_object_version(object_id, TA_id)
+        )
 
         # 3. maintain all indexes for this object_id:
-        self._maintain_indexes(object_id, old_kv_entry=old_kv_entry)
+        self._maintain_indexes(object_id, old_object=old_object, new_object=new_object)
