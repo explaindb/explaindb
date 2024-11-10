@@ -961,6 +961,7 @@ class IndexedTransactionalKeyValueStore(TransactionalKeyValueStore):
         """
 
         # 1. get a copy of the existing KVStoreEntry of this object_id from the key-value store:
+        # too extreme, we only need the version visible to this TA
         old_kv_entry: VersionedKeyValueStore.KVStoreEntry = copy.deepcopy(
             self.key_value_store[object_id]
         )
