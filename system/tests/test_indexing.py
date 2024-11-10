@@ -79,8 +79,35 @@ class IndexingTest(unittest.TestCase):
 
     def test_indexing_transactional_store(self):
         store = IndexedTransactionalKeyValueStore()
-        store.bulkload(self._create_fake_data())
+        fake_data = self._create_fake_data()
+        store.bulkload(fake_data)
+
         self.assertEqual(store.size(), 100)
+        store.create_index("a", "a", "=")
+
+        # check for existence of metadata:
+        self.assertEqual(len(store.indexes_by_properties), 1)
+        self.assertEqual(len(store.indexes_by_name), 1)
+
+        # get the index:
+        index_entry: IndexedTransactionalKeyValueStore.IndexCatalogueEntry = (
+            store.indexes_by_name["a"]
+        )
+        no_unique_keys = len(set([x.a for x in fake_data]))
+        # worst case: all "a" values are unique
+        self.assertGreaterEqual(no_unique_keys, 1)
+
+        # index must have as many entries as unique keys:
+        self.assertEqual(index_entry.index.size(), no_unique_keys)
+
+        # drop the index:
+        store.drop_index("a")
+        self.assertEqual(len(store.indexes_by_properties), 0)
+        self.assertEqual(len(store.indexes_by_name), 0)
+
+        # drop the index again:
+        with self.assertRaises(Exception):
+            store.drop_index("a")
 
 
 if __name__ == "__main__":

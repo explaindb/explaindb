@@ -3,6 +3,7 @@ from __future__ import annotations
 import pprint
 from dataclasses import dataclass
 import copy
+from itertools import chain
 from typing import Dict, ItemsView
 
 from system.interfaces.indexing.Index import (
@@ -10,7 +11,10 @@ from system.interfaces.indexing.Index import (
     IndexProperties,
     KeyValueStore,
 )
-from system.indexes.indexes import PythonDictionaryWithoutDuplicates
+from system.indexes.indexes import (
+    PythonDictionaryWithoutDuplicates,
+    PythonDictionaryWithDuplicates,
+)
 from system.interfaces.stores import ACIDStore
 from system.query_processing import Clause
 
@@ -68,6 +72,12 @@ class VersionedKeyValueStore(KeyValueStore[str, object]):
 
         # optional (SINGLE!) work in progress entry
         wip: VersionedKeyValueStore.VersionEntry | None = None
+
+        def __iter__(self):
+            """Returns an iterator over the committed versions plus the wip entry if it exists."""
+            return chain(
+                self.committed.__iter__(), [self.wip] if self.wip is not None else []
+            )
 
     def __init__(self, persistence_layer: KeyValueStore = None):
         """
@@ -815,40 +825,43 @@ class IndexedTransactionalKeyValueStore(TransactionalKeyValueStore):
 
     @staticmethod
     def _deindex_object(
-        index: Index, attribute: str, object_id: str, _object: object
+        index: Index, attribute: str, object_id: str, old_object: object
     ) -> None:
         """De-indexes the object with the given object_id and object.
         @param index: the index to use for indexing
         @param attribute: the attribute to index
         @param object_id: the object id of the object to be indexed
-        @param _object: the object to be indexed
+        @param old_object: the old object version of the object to be indexed
         """
         # does the _object have that attribute:
-        if hasattr(_object, attribute):
+        if hasattr(old_object, attribute):
             # only then we can add the object_id to the index:
             # get the value of that attribute
-            attribute_value: object = getattr(_object, attribute)
+            attribute_value: object = getattr(old_object, attribute)
 
             # delete tne entry from the index:
             index.delete(attribute_value, object_id)
 
     @staticmethod
     def _index_object(
-        index: Index, attribute: str, object_id: str, _object: object
+        index: Index, attribute: str, object_id: str, new_object: object
     ) -> None:
         """Indexes the object with the given object_id and object.
         @param index: the index to use for indexing
         @param attribute: the attribute to index
         @param object_id: the object id of the object to be indexed
-        @param _object: the object to be indexed
+        @param new_object: the new version of the object to be indexed
         """
         # does the _object have that attribute:
-        if hasattr(_object, attribute):
+        if hasattr(new_object, attribute):
             # only then we can add the object_id to the index:
-            # get the value of that attribute
-            attribute_value: object = getattr(_object, attribute)
+            # get the value of that attribute:
+            attribute_value: object = getattr(new_object, attribute)
 
             # add an entry to the index:
+            # here is where the inversion happens,
+            # i.e. the index maps from the attribute value (key) of the object to the object_id (value)
+            # whereas the store maps from the object_id (key) to the object (value)
             index.put(attribute_value, object_id)
 
     def create_index(self, index_name: str, attribute: str, operator: str) -> None:
@@ -883,7 +896,7 @@ class IndexedTransactionalKeyValueStore(TransactionalKeyValueStore):
         )
 
         # the only type of index supported at the moment is a PythonDictionary (wrapping a python dict):
-        index: KeyValueStore[str, object] = PythonDictionaryWithoutDuplicates()
+        index: KeyValueStore[str, object] = PythonDictionaryWithDuplicates()
         self.indexes_by_name[index_name] = (
             IndexedTransactionalKeyValueStore.IndexCatalogueEntry(
                 index_properties, index
@@ -893,14 +906,18 @@ class IndexedTransactionalKeyValueStore(TransactionalKeyValueStore):
 
         # bulkload the index:
         # get all (current) items from the store:
+        # TODO: delegate to bulkload method of the index?
         object_id: str
         _object: object
 
-        for object_id, _object in self.key_value_store.items():
-            # does the _object have that attribute:
-            IndexedTransactionalKeyValueStore._index_object(
-                index, attribute, object_id, _object
-            )
+        kv_entry: VersionedKeyValueStore.KVStoreEntry
+        for object_id, kv_entry in self.key_value_store.items():
+
+            version_entry: VersionedKeyValueStore.VersionEntry
+            for version_entry in kv_entry:
+                IndexedTransactionalKeyValueStore._index_object(
+                    index, attribute, object_id, version_entry.value
+                )
 
     def drop_index(self, index_name: str) -> None:
         """Drops the index with the given name.
