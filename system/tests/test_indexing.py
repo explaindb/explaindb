@@ -84,6 +84,8 @@ class IndexingTest(unittest.TestCase):
 
         self.assertEqual(store.size(), 100)
         store.create_index("a", "a", "=")
+        with self.assertRaises(Exception):
+            store.create_index("a", "b", "=")
 
         # check for existence of metadata:
         self.assertEqual(len(store.indexes_by_properties), 1)
@@ -108,6 +110,27 @@ class IndexingTest(unittest.TestCase):
         # drop the index again:
         with self.assertRaises(Exception):
             store.drop_index("a")
+
+        # create the index again:
+        store.create_index("a", "a", "=")
+        self.assertEqual(len(store.indexes_by_properties), 1)
+        self.assertEqual(len(store.indexes_by_name), 1)
+
+        # create a second index on "b":
+        store.create_index("b", "b", "=")
+        self.assertEqual(len(store.indexes_by_properties), 2)
+        self.assertEqual(len(store.indexes_by_name), 2)
+
+        # get index on "b":
+        index_entry_b: IndexedTransactionalKeyValueStore.IndexCatalogueEntry = (
+            store.indexes_by_name["b"]
+        )
+        no_unique_keys_on_b = len(set([x.b for x in fake_data]))
+        # worst case: all "b" values are unique
+        self.assertGreaterEqual(no_unique_keys_on_b, 1)
+
+        # index must have as many entries as unique keys:
+        self.assertEqual(index_entry_b.index.size(), no_unique_keys_on_b)
 
 
 if __name__ == "__main__":
