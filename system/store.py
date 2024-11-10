@@ -9,8 +9,8 @@ from system.interfaces.indexing.Index import (
     Index,
     IndexProperties,
     KeyValueStore,
-    PythonDictionaryWithoutDuplicates,
 )
+from system.indexes.indexes import PythonDictionaryWithoutDuplicates
 from system.interfaces.stores import ACIDStore
 from system.query_processing import Clause
 
