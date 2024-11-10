@@ -77,7 +77,7 @@ class IndexingTest(unittest.TestCase):
         index.delete("key1", "value3")
         self.assertEqual(index.size(), 0)
 
-    def test_indexing_transactional_store(self):
+    def test_create_and_drop_index_transactional_store(self):
         store = IndexedTransactionalKeyValueStore()
         fake_data = self._create_fake_data()
         store.bulkload(fake_data)
