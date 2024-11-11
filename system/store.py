@@ -271,7 +271,7 @@ class TransactionalKeyValueStore(VersionedKeyValueStore, ACIDStore):
                 object_id
             ].wip
 
-            # was this wip entry created by TA <TA_id>?
+            # was this wip entry created by TA <timestamp>?
             if wip_entry.start_validity == timestamp:
                 # wip-entry marks a deleted object, return None
                 if wip_entry.deleted:
@@ -459,7 +459,7 @@ class TransactionalKeyValueStore(VersionedKeyValueStore, ACIDStore):
             raise Exception(f"transaction {TA_id} committed already")
 
         # check that there is no other ongoing version of this object in the system
-        # by another transaction, i.e. no other writer on this object is allowed:
+        # being worked on by another transaction, i.e. no other writer on this object is allowed:
         if (
             self.key_value_store[object_id].wip is not None
             and self.key_value_store[object_id].wip.start_validity != TA_id
@@ -958,24 +958,34 @@ class IndexedTransactionalKeyValueStore(TransactionalKeyValueStore):
     def _maintain_indexes(
         self,
         object_id: str,
-        new_object: object = None,
+        object_to_index: object = None,
+        object_to_deindex: object = None,
     ) -> None:
-        """Maintains (re-indexes) the entry <object_id> i all indexes.
+        """Maintains (re-or de-indexes) the entry <object_id> for all indexes.
 
         @param object_id: the object id of the object to maintain/reindex
-        @param old_object: the old object version superseded by the new object version
-        @param new_object: the new object version to be associated with the object_id
-        from all indexes
+        @param object_to_index: the new object version to be indexed in all indexes
+        @param object_to_deindex: an old version of the object to be deindexed from all indexes (this can only happen
+        when pruning the commited version or superseding a wip-entry from the same TA)
         """
 
         # update all indexes, i.e. call _reindex() for each index for the given object_id:
         # index the new object version only (recall: we are in an append-only store!):
         for index in self.indexes_by_name.values():
-            IndexedTransactionalKeyValueStore._index_object(
-                index.index, index.index_properties.attribute, object_id, new_object
-            )
-
-        print("Indexes maintained")
+            if object_to_index is not None:
+                IndexedTransactionalKeyValueStore._index_object(
+                    index.index,
+                    index.index_properties.attribute,
+                    object_id,
+                    object_to_index,
+                )
+            if object_to_deindex is not None:
+                IndexedTransactionalKeyValueStore._deindex_object(
+                    index.index,
+                    index.index_properties.attribute,
+                    object_id,
+                    object_to_deindex,
+                )
 
     def update_object(self, object_id: str, updated_object: object, TA_id: int) -> None:
         """Updates the entry and maintains all indexes.
@@ -984,44 +994,58 @@ class IndexedTransactionalKeyValueStore(TransactionalKeyValueStore):
         @param TA_id: the transaction id of the transaction that is updating (or trying to update) the object
         """
 
-        # 1. get a copy of the OLD object version visible to this TA_id:
-        old_object: object = copy.deepcopy(
-            self._get_visible_object_version(object_id, TA_id)
-        )
+        # pre-condition: this is not a delete operation: the object must exist in the store either in the commited list
+        # or in the wip entry
 
-        # 2. call super method to update the object_id as before:
+        # 1. call super method to update the object_id as before:
+        # The return value tells us whether we are overwriting an existing wip entry for this TA_id:
+        # i.e. whether this TA already updated this object before
+
+        wip_entry: VersionedKeyValueStore.VersionEntry = self.key_value_store[
+            object_id
+        ].wip
+        existing_wip_entry_object: object = (
+            wip_entry.value if wip_entry is not None else None
+        )
         super().update_object(object_id, updated_object, TA_id)
 
         # post condition: the committed list of the KVStoreEntry of this object_id is unchanged
-        # (only the wip entry may have been updated)
+        # (only the wip entry was updated and must exist):
+        assert self.key_value_store[object_id].wip is not None
 
-        # 3. get the NEW object version visible to this TA_id (no copy required):
-        new_object: object = copy.deepcopy(
-            self._get_visible_object_version(object_id, TA_id)
+        # 2. get the NEW object version visible to this TA_id (no copy required):
+        new_object: object = self._get_visible_object_version(object_id, TA_id)
+
+        # 3. finally, maintain all indexes for this change:
+        # no need to pass the old object version as we are not going to de-index it:
+        self._maintain_indexes(
+            object_id,
+            object_to_index=new_object,
+            object_to_deindex=existing_wip_entry_object,
         )
-
-        # 4. finally, maintain all indexes for this change:
-        self._maintain_indexes(object_id, new_object=new_object)
 
     def delete_object(self, object_id: str, TA_id: int) -> None:
         """Deletes the entry for <object_id> and maintains all indexes.
         @param object_id: the object id of the object to be deleted
         @param TA_id: the transaction id of the transaction that is deleting (or trying to delete) the object
+        @return: True if this object overwrote an already existing wip entry, False otherwise
         """
 
-        # 1. get a copy of the OLD object version visible to this TA_id:
-        # old_object: object = copy.deepcopy(
-        #    self._get_visible_object_version(object_id, TA_id)
-        # )
-
-        # 2. call kv store method to delete the object_id (which actually adds a wip entry marking the deleted object):
+        # 1. call kv store method to delete the object_id (which actually adds a wip entry marking the deleted object):
+        # The return value tells us whether we are overwriting an existing wip entry for this TA_id:
+        # i.e. whether this TA already updated this object before
+        wip_entry: VersionedKeyValueStore.VersionEntry = self.key_value_store[
+            object_id
+        ].wip
+        existing_wip_entry_object: object = (
+            wip_entry.value if wip_entry is not None else None
+        )
         super().delete_object(object_id, TA_id)
 
-        # 3. get the NEW object version visible to this TA_id (no copy required):
-        new_object: object = copy.deepcopy(
-            self._get_visible_object_version(object_id, TA_id)
-        )
-
-        # 3. maintain all indexes for this object_id:
-        # not required!
-        # self._maintain_indexes(object_id, old_object=old_object, is_delete=True)
+        # 2. if we overwrote an existing wip entry, maintain all indexes for this object_id:
+        if existing_wip_entry_object is not None:
+            self._maintain_indexes(
+                object_id,
+                object_to_index=None,  # again: we keep all versions even under deletes!
+                object_to_deindex=existing_wip_entry_object,
+            )
