@@ -7,7 +7,7 @@ class PythonDictionaryWithoutDuplicates[Key, Value](KeyValueStore[Key, Value]):
     store). Does not support duplicates"""
 
     def __init__(self):
-        self.index = {}
+        self.index: dict[Key, Value] = dict[Key, Value]()
 
     def size(self) -> int:
         return len(self.index)
@@ -38,11 +38,6 @@ class PythonDictionaryWithoutDuplicates[Key, Value](KeyValueStore[Key, Value]):
 
         return self.index[key]
 
-    def get_all(self, where: Clause) -> list[Value]:
-        return [
-            self.index[key] for key in self.index if where.evaluate(self.index[key])
-        ]
-
 
 class PythonDictionaryWithDuplicates[Key, Value](
     PythonDictionaryWithoutDuplicates[Key, list[Value]]
@@ -58,6 +53,8 @@ class PythonDictionaryWithDuplicates[Key, Value](
 
     def delete(self, key: Key, value: Value = None) -> None:
         """Deletes the key and all its associated values."""
+        assert value is not None
+
         if key not in self.index:
             raise KeyError(f"Key {key} not found")
 

@@ -408,6 +408,37 @@ class StoreTestAnomalies(unittest.TestCase):
         with self.assertRaises(TransactionAbortedException):
             tkvs.update_object(object_id, StoreTestAnomalies.Stuff(1, 2), TA_ID_2)
 
+    def test_double_update_from_same_transaction(self):
+        tkvs = TransactionalKeyValueStore()
+        object_id = "4242"
+        tkvs.put(object_id, StoreTestAnomalies.Stuff(1, 0))
+
+        TA_ID_1 = tkvs.begin_transaction()
+
+        # where-clause to read the object:
+        where_A: WHERE_Clause = WHERE_Clause("a", "==", 1)
+
+        # first update:
+        tkvs.update_object(object_id, StoreTestAnomalies.Stuff(1, 1), TA_ID_1)
+
+        # now read:
+        result: list[tuple[str, object]] = tkvs.read_objects(TA_ID_1, where_A)
+        self.assertEqual(len(result), 1)
+        self.assertEqual(result[0], (object_id, StoreTestAnomalies.Stuff(1, 1)))
+
+        # second update:
+        tkvs.update_object(object_id, StoreTestAnomalies.Stuff(1, 2), TA_ID_1)
+
+        # now read again:
+        result: list[tuple[str, object]] = tkvs.read_objects(TA_ID_1, where_A)
+        self.assertEqual(len(result), 1)
+        self.assertEqual(result[0], (object_id, StoreTestAnomalies.Stuff(1, 2)))
+
+        # third update, i.e. delete the object:
+        tkvs.delete_object(object_id, TA_ID_1)
+        result: list[tuple[str, object]] = tkvs.read_objects(TA_ID_1, where_A)
+        self.assertEqual(len(result), 0)
+
     def test_checksums_on_self_updates(self):
         @dataclass(frozen=True)
         class T:

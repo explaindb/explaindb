@@ -12,7 +12,6 @@ from system.interfaces.indexing.Index import (
     KeyValueStore,
 )
 from system.indexes.indexes import (
-    PythonDictionaryWithoutDuplicates,
     PythonDictionaryWithDuplicates,
 )
 from system.interfaces.stores import ACIDStore
@@ -274,8 +273,12 @@ class TransactionalKeyValueStore(VersionedKeyValueStore, ACIDStore):
 
             # was this wip entry created by TA <TA_id>?
             if wip_entry.start_validity == timestamp:
-                # i.e. we return the version of the object that is currently being modified by this TA_id:
-                return wip_entry.value
+                # wip-entry marks a deleted object, return None
+                if wip_entry.deleted:
+                    return None
+                else:
+                    # i.e. we return the version of the object that is currently being modified by this TA_id:
+                    return wip_entry.value
 
             # else:
             # wip entry belongs to another transaction, nothing to do here
@@ -895,7 +898,8 @@ class IndexedTransactionalKeyValueStore(TransactionalKeyValueStore):
             attribute=attribute, operator=operator
         )
 
-        # the only type of index supported at the moment is a PythonDictionary (wrapping a python dict):
+        # the only type of index supported at the moment is a PythonDictionary (wrapping a python dict) with support
+        # for duplicates:
         index: KeyValueStore[str, object] = PythonDictionaryWithDuplicates()
         self.indexes_by_name[index_name] = (
             IndexedTransactionalKeyValueStore.IndexCatalogueEntry(
@@ -933,6 +937,15 @@ class IndexedTransactionalKeyValueStore(TransactionalKeyValueStore):
         del self.indexes_by_name[index_name]
         del self.indexes_by_properties[entry.index_properties]
 
+    def abort_transaction(self, TA_id: int) -> None:
+        """Aborts the given transaction and removes all changes made by this transaction from the system.
+
+        @param TA_id: the transaction id of the transaction to be aborted
+        """
+
+        # call super method to remove all changes made by this transaction from the system:
+        # TODO: remove wip entries from indexes!
+
     def get_suitable_indexes(self, clause: Clause) -> list[IndexProperties]:
         """Returns a list of suitable indexes for the given clause.
 
@@ -945,7 +958,6 @@ class IndexedTransactionalKeyValueStore(TransactionalKeyValueStore):
     def _maintain_indexes(
         self,
         object_id: str,
-        old_object: object = None,
         new_object: object = None,
     ) -> None:
         """Maintains (re-indexes) the entry <object_id> i all indexes.
@@ -957,9 +969,13 @@ class IndexedTransactionalKeyValueStore(TransactionalKeyValueStore):
         """
 
         # update all indexes, i.e. call _reindex() for each index for the given object_id:
-        index_entry: IndexedTransactionalKeyValueStore.IndexCatalogueEntry
+        # index the new object version only (recall: we are in an append-only store!):
+        for index in self.indexes_by_name.values():
+            IndexedTransactionalKeyValueStore._index_object(
+                index.index, index.index_properties.attribute, object_id, new_object
+            )
 
-        # TODO
+        print("Indexes maintained")
 
     def update_object(self, object_id: str, updated_object: object, TA_id: int) -> None:
         """Updates the entry and maintains all indexes.
@@ -985,21 +1001,21 @@ class IndexedTransactionalKeyValueStore(TransactionalKeyValueStore):
         )
 
         # 4. finally, maintain all indexes for this change:
-        self._maintain_indexes(object_id, old_object=old_object, new_object=new_object)
+        self._maintain_indexes(object_id, new_object=new_object)
 
     def delete_object(self, object_id: str, TA_id: int) -> None:
-        """Deletes the entry and maintains all indexes.
+        """Deletes the entry for <object_id> and maintains all indexes.
         @param object_id: the object id of the object to be deleted
         @param TA_id: the transaction id of the transaction that is deleting (or trying to delete) the object
         """
 
         # 1. get a copy of the OLD object version visible to this TA_id:
-        old_object: object = copy.deepcopy(
-            self._get_visible_object_version(object_id, TA_id)
-        )
+        # old_object: object = copy.deepcopy(
+        #    self._get_visible_object_version(object_id, TA_id)
+        # )
 
-        # 2. call kv store method to delete the object_id (by adding a wip entry marking the deleted object):
-        super().delete(object_id)
+        # 2. call kv store method to delete the object_id (which actually adds a wip entry marking the deleted object):
+        super().delete_object(object_id, TA_id)
 
         # 3. get the NEW object version visible to this TA_id (no copy required):
         new_object: object = copy.deepcopy(
@@ -1007,4 +1023,5 @@ class IndexedTransactionalKeyValueStore(TransactionalKeyValueStore):
         )
 
         # 3. maintain all indexes for this object_id:
-        self._maintain_indexes(object_id, old_object=old_object, new_object=new_object)
+        # not required!
+        # self._maintain_indexes(object_id, old_object=old_object, is_delete=True)
