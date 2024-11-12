@@ -7,6 +7,32 @@ from typing import Self
 from system.interfaces.query_processing.operators import Operator
 
 
+class Relation(Operator):
+    """Relation operator to iterate over the given list of tuples."""
+
+    def __init__(self, name: str, data: list) -> None:
+        super().__init__(None, None)
+        self.name = name
+        self.data = data
+
+    def interpret_open(self):
+        for tup in self.data:
+            self.parent.interpret_next(tup)
+        self.parent.interpret_close()
+
+    def interpret_next(self, tup):
+        raise AssertionError("Expected to be unreachable")
+
+    def interpret_close(self):
+        raise AssertionError("Expected to be unreachable")
+
+    def compile(self, emit):
+        raise NotImplementedError
+
+    def dump(self, indent):
+        print(self.indent_(indent) + f"Relation({self.name})")
+
+
 class Scan(Operator):
     """
     Scan operator to iterate over the given number of tuples in the underlying storage file.
@@ -154,6 +180,63 @@ class SHJ(Operator):
 
     def dump(self, indent):
         print(self.indent_(indent) + f"SHJ on `{self.left_attr}={self.right_attr}`")
+        self.children[0].dump(indent + 2)
+        self.children[1].dump(indent + 2)
+
+
+class SemiJ(Operator):
+    """
+    (Left) Semi-join operator to reduce the first input relation based on the join results according to the given join attributes with the second input relation.
+    """
+
+    def __init__(
+        self,
+        left_child: Operator,
+        right_child: Operator,
+        left_attr: str,
+        right_attr: str,
+    ):
+        super().__init__(None, [left_child, right_child])
+        self.left_attr = left_attr
+        self.right_attr = right_attr
+        left_child.set_parent(self)
+        right_child.set_parent(self)
+
+    def interpret_open(self):
+        # create fresh hash table
+        self.ht = dict()
+        # set to build phase
+        self.is_build_phase = True
+        # open RIGHT child as build operator
+        self.children[1].interpret_open()
+
+    def interpret_next(self, tup):
+        # check if build phase is active
+        if self.is_build_phase:
+            # insert current tuple into hash table
+            self.ht.setdefault(tup[self.right_attr], []).append(tup)
+        else:
+            # probe hash table for current tuple
+            if self.ht.get(tup[self.left_attr], []):
+                # push matching tuple to parent operator
+                self.parent.interpret_next(tup)
+
+    def interpret_close(self):
+        # check if build phase has ended
+        if self.is_build_phase:
+            # set to probe phase
+            self.is_build_phase = False
+            # open probe child operator
+            self.children[0].interpret_open()
+        else:
+            # close parent operator
+            self.parent.interpret_close()
+
+    def compile(self, emit):
+        raise NotImplementedError
+
+    def dump(self, indent):
+        print(self.indent_(indent) + f"SemiJ on `{self.left_attr}={self.right_attr}`")
         self.children[0].dump(indent + 2)
         self.children[1].dump(indent + 2)
 

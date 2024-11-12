@@ -27,3 +27,15 @@ class Book:
 
     def __lt__(self, other):
         return self.title > other.title
+
+
+@dataclass(eq=False)
+class Order:
+    person_name: str
+    book_title: str
+
+    def __eq__(self, other):
+        return (
+            self.person_name == other.person_name
+            and self.book_title == other.book_title
+        )
