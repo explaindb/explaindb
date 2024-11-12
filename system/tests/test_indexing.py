@@ -4,9 +4,7 @@ from system.indexes.indexes import (
     PythonDictionaryWithoutDuplicates,
     PythonDictionaryWithDuplicates,
 )
-from system.store import (
-    IndexedTransactionalKeyValueStore,
-)
+from system.stores.IndexedMVCC import IndexedTransactionalKeyValueStore
 from dataclasses import dataclass
 from faker import Faker
 

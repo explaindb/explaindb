@@ -2,7 +2,7 @@ import unittest
 
 from system.DBMS import PyDBMS
 from system.interfaces.DBMS import DBMS
-from system.store import VersionedKeyValueStore
+from system.stores.VersionedKeyValueStore import VersionedKeyValueStore
 
 
 class DBMSTests(unittest.TestCase):

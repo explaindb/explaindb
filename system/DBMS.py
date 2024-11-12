@@ -5,7 +5,7 @@ import deprecation
 from system.interfaces.DBMS import DBMS
 from system.interfaces.query_processing.query_processing import QEP, QueryOptimizer
 from system.interfaces.stores import QEPQueryableACIDStore
-from system.store import VersionedKeyValueStore
+from system.stores.VersionedKeyValueStore import VersionedKeyValueStore
 
 
 class PyDBMS(DBMS):

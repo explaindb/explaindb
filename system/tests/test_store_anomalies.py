@@ -1,11 +1,8 @@
 import unittest
 
 from system.query_processing import WHERE_Clause, TrueClause
-from system.store import (
-    VersionedKeyValueStore,
-    TransactionalKeyValueStore,
-    TransactionAbortedException,
-)
+from system.stores.VersionedKeyValueStore import VersionedKeyValueStore
+from system.stores.MVCC import TransactionAbortedException, TransactionalKeyValueStore
 from dataclasses import dataclass
 from faker import Faker
 
