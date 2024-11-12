@@ -1,6 +1,5 @@
 from system.data_classes import *
 from faker import Faker
-from system.operators import *
 import unittest
 
 

@@ -5,7 +5,7 @@ from typing import Dict
 
 from system.indexes.indexes import PythonDictionaryWithDuplicates
 from system.interfaces.indexing.Index import IndexProperties, Index, KeyValueStore
-from system.query_processing import Clause
+from system.query_processing.predicates import Clause
 from system.stores.MVCC import TransactionalKeyValueStore
 from system.stores.VersionedKeyValueStore import VersionedKeyValueStore
 

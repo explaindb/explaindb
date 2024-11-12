@@ -1,14 +1,14 @@
 import unittest
-from system.plan_enumeration.subproblems import Subproblem
-from system.plan_enumeration.cost_function import C_Out
+from system.query_optimization.subproblems import Subproblem
+from system.query_optimization.cost_function import C_Out
 from system.interfaces.cost_functions import CostFunction
-from system.plan_enumeration.plan_table import (
+from system.query_optimization.plan_table import (
     StandardPlanTable,
     SizeBasedPlanTable,
 )
 from system.interfaces.query_optimization.planning import PlanTable
-from system.plan_enumeration.cardinality_table import CardinalityTable
-from system.plan_enumeration.join_graph import (
+from system.query_optimization.cardinality_table import CardinalityTable
+from system.query_optimization.join_graph import (
     JoinGraph,
     ChainQueryFactory,
     CycleQueryFactory,

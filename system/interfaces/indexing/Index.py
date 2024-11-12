@@ -1,7 +1,7 @@
 from abc import abstractmethod, ABC
 from dataclasses import dataclass
 
-from system.query_processing import Clause
+from system.query_processing.predicates import Clause
 
 
 @dataclass(frozen=True)

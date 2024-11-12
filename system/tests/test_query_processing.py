@@ -1,7 +1,7 @@
 import unittest
 from dataclasses import dataclass
 
-from system.query_processing import WHERE_Clause, Disjunction
+from system.query_processing.predicates import WHERE_Clause, Disjunction
 
 
 @dataclass

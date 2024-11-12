@@ -1,6 +1,6 @@
 import unittest
 
-from system.query_processing import WHERE_Clause, TrueClause
+from system.query_processing.predicates import WHERE_Clause, TrueClause
 from system.stores.VersionedKeyValueStore import VersionedKeyValueStore
 from system.stores.MVCC import TransactionAbortedException, TransactionalKeyValueStore
 from dataclasses import dataclass

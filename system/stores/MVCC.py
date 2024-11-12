@@ -7,7 +7,7 @@ from typing import Dict, ItemsView
 
 from system.interfaces.indexing.Index import KeyValueStore
 from system.interfaces.stores import ACIDStore
-from system.query_processing import Clause
+from system.query_processing.predicates import Clause
 from system.stores.VersionedKeyValueStore import HashableDict, VersionedKeyValueStore
 
 

@@ -1,8 +1,8 @@
 from __future__ import annotations
 
 from system.interfaces.cost_functions import CostFunction
-from system.plan_enumeration.subproblems import Subproblem
-from system.plan_enumeration.cardinality_table import CardinalityTable
+from system.query_optimization.subproblems import Subproblem
+from system.query_optimization.cardinality_table import CardinalityTable
 
 
 class C_Out(CostFunction):

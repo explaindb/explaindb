@@ -1,5 +1,5 @@
 from __future__ import annotations
-from system.plan_enumeration.subproblems import Subproblem
+from system.query_optimization.subproblems import Subproblem
 
 
 class CardinalityTable:

@@ -2,7 +2,7 @@ import itertools
 from abc import ABC, abstractmethod
 from collections import deque
 from typing import Deque
-from system.plan_enumeration.subproblems import Subproblem
+from system.query_optimization.subproblems import Subproblem
 
 
 class JoinGraph:

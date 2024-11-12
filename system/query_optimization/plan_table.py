@@ -1,10 +1,10 @@
 from __future__ import annotations
 
 from system.interfaces.query_optimization.planning import PlanTable
-from system.plan_enumeration.subproblems import Subproblem
-from system.plan_enumeration.join_graph import JoinGraph
+from system.query_optimization.subproblems import Subproblem
+from system.query_optimization.join_graph import JoinGraph
 from system.interfaces.cost_functions import CostFunction
-from system.plan_enumeration.cardinality_table import CardinalityTable
+from system.query_optimization.cardinality_table import CardinalityTable
 import itertools
 
 

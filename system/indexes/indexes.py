@@ -1,5 +1,5 @@
 from system.interfaces.indexing.Index import KeyValueStore
-from system.query_processing import Clause
+from system.query_processing.predicates import Clause
 
 
 class PythonDictionaryWithoutDuplicates[Key, Value](KeyValueStore[Key, Value]):
