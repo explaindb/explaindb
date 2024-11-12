@@ -1,7 +1,10 @@
+import pickle
+
 from system.data_classes import *
 from faker import Faker
 import unittest
 
+from system.query_processing.operators import Scan, Filter, SHJ, Collect
 
 Faker.seed(42)
 fake = Faker()
