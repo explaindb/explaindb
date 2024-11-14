@@ -91,6 +91,19 @@ class PointQueryMixIn[Key, Value](ABC):
         pass
 
 
+class RangeQueryMixIn[Key, Value](ABC):
+    @abstractmethod
+    def get_all_in_range(self, min_key: Key, max_key: Key) -> list[Value]:
+        """Returns all values that satisfy the given where clause.
+
+        @param min_key: the minimum key including
+        @param max_key: the maximum key including
+
+        @return: a list of values
+        """
+        pass
+
+
 class PredicateQueryMixIn[Key, Value](ABC):
     """An interface mixing in range queries."""
 
