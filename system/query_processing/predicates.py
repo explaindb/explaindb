@@ -14,9 +14,9 @@ class WHERE_Clause(Clause):
 
     def __init__(self, attribute: str, operator: str, constant):
         super().__init__()
-        self.attribute = attribute
-        self.operator = operator
-        self.constant = constant
+        self.attribute: str = attribute
+        self.operator: str = operator
+        self.constant: object = constant
         self.sanitize()
 
     def sanitize(self):

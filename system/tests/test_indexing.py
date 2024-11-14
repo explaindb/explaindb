@@ -139,9 +139,21 @@ class IndexingTest(unittest.TestCase):
         store.create_index("a", "a", "=")
         store.create_index("b", "b", "=")
 
+        # test get_suitable_indexes():
+        suitable_indexes_a = list(store.get_suitable_indexes("a", "="))
+        self.assertEqual(len(suitable_indexes_a), 1)
+
+        suitable_indexes_a_le = list(store.get_suitable_indexes("a", "<="))
+        self.assertEqual(len(suitable_indexes_a_le), 0)
+
+        suitable_indexes_b = list(store.get_suitable_indexes("b", "="))
+        self.assertEqual(len(suitable_indexes_b), 1)
+
+        suitable_indexes_c = list(store.get_suitable_indexes("c", "="))
+        self.assertEqual(len(suitable_indexes_c), 0)
+
         # check for correct index entries of index a:
         self.assertEqual(store.indexes_by_name["a"].index.size(), 2)
-        # TODO: index vs PointQueryMixIn, fix type hinting
         self.assertEqual(store.indexes_by_name["a"].index.get(2), ["1"])
         self.assertEqual(store.indexes_by_name["a"].index.get(4), ["2"])
 
@@ -155,17 +167,17 @@ class IndexingTest(unittest.TestCase):
         # check update functionality:
         store.update_object("1", IndexingTest.Stuff(3, 4), TA_ID_1)
 
-        def check_indexes(self, store):
+        def check_indexes(_self, _store):
             # check for correct index entries of index a:
-            self.assertEqual(store.indexes_by_name["a"].index.size(), 3)
-            self.assertEqual(store.indexes_by_name["a"].index.get(2), ["1"])
-            self.assertEqual(store.indexes_by_name["a"].index.get(3), ["1"])
-            self.assertEqual(store.indexes_by_name["a"].index.get(4), ["2"])
+            _self.assertEqual(_store.indexes_by_name["a"].index.size(), 3)
+            _self.assertEqual(_store.indexes_by_name["a"].index.get(2), ["1"])
+            _self.assertEqual(_store.indexes_by_name["a"].index.get(3), ["1"])
+            _self.assertEqual(_store.indexes_by_name["a"].index.get(4), ["2"])
 
             # check for correct index entries of index b:
-            self.assertEqual(store.indexes_by_name["b"].index.size(), 2)
-            self.assertEqual(store.indexes_by_name["b"].index.get(3), ["1", "2"])
-            self.assertEqual(store.indexes_by_name["b"].index.get(4), ["1"])
+            _self.assertEqual(_store.indexes_by_name["b"].index.size(), 2)
+            _self.assertEqual(_store.indexes_by_name["b"].index.get(3), ["1", "2"])
+            _self.assertEqual(_store.indexes_by_name["b"].index.get(4), ["1"])
 
         check_indexes(self, store)
         # check delete functionality:
