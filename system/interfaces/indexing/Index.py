@@ -58,7 +58,7 @@ class Index[Key, Value](ABC):
         pass
 
     @abstractmethod
-    def bulkload(self, data: list[Value], key_prefix: str = ""):
+    def bulkload(self, data: list[Value], key_prefix: str = "") -> None:
         """Bulkloads the given list of values into the index. Inserts (puts) new key->value mappings
         into the store overwriting any existing mapping.
 
@@ -79,6 +79,8 @@ class Index[Key, Value](ABC):
 
 
 class PointQueryMixIn[Key, Value](ABC):
+    """An interface mixing in point queries."""
+
     @abstractmethod
     def get(self, key: Key) -> Value:
         """Returns the value associated with the given key.
@@ -90,6 +92,8 @@ class PointQueryMixIn[Key, Value](ABC):
 
 
 class PredicateQueryMixIn[Key, Value](ABC):
+    """An interface mixing in range queries."""
+
     @abstractmethod
     def get_all(self, where: Clause) -> list[Value]:
         """Returns all values that satisfy the given where clause.
@@ -102,15 +106,16 @@ class PredicateQueryMixIn[Key, Value](ABC):
 
 
 class KeyValueStore[Key, Value](Index[Key, Value], PointQueryMixIn[Key, Value], ABC):
-    """An interface for a store managing key/value mappings."""
+    """An interface for an index additionally supporting point queries."""
 
     pass
 
 
 class AbstractBTree[Key, Value](
-    Index[Key, Value],
-    PointQueryMixIn[Key, Value],
+    KeyValueStore[Key, Value],
     PredicateQueryMixIn[Key, Value],
     ABC,
 ):
+    """An abstract class representing a B-Tree, i.e. an index supporting both point and range queries."""
+
     pass

@@ -150,7 +150,7 @@ class VersionedKeyValueStore(KeyValueStore[str, object]):
         """
         pass
 
-    def bulkload(self, data: list[object], object_id_prefix: str = ""):
+    def bulkload(self, data: list[object], object_id_prefix: str = "") -> None:
         """Bulkloads the given list of data objects into the store. Inserts (puts) a new object_id->_object mappings
         into the store overwriting any existing mapping.
 

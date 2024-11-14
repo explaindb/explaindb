@@ -25,7 +25,7 @@ class PythonDictionaryWithoutDuplicates[Key, Value](KeyValueStore[Key, Value]):
             raise KeyError(f"Key {key} not found")
         pass
 
-    def bulkload(self, data: list[Value], key_prefix: str = ""):
+    def bulkload(self, data: list[Value], key_prefix: str = "") -> None:
         for i in range(len(data)):
             self.put(i, data[i])
 

@@ -29,7 +29,7 @@ class IndexingTest(unittest.TestCase):
             for _ in range(number_of_tuples)
         ]
 
-    def test_indexing_basics_no_duplicets(self):
+    def test_indexing_basics_no_duplicates(self):
         index: PythonDictionaryWithoutDuplicates = PythonDictionaryWithoutDuplicates()
         index.put("key1", "value1")
         index.put("key2", "value2")
@@ -130,7 +130,7 @@ class IndexingTest(unittest.TestCase):
         # index must have as many entries as unique keys:
         self.assertEqual(index_entry_b.index.size(), no_unique_keys_on_b)
 
-    def test_index_maintenance_transactional_store(self):
+    def test_index_maintenance_transactional_store_commits(self):
         store = IndexedTransactionalKeyValueStore()
 
         store.put("1", IndexingTest.Stuff(2, 3))
@@ -155,21 +155,52 @@ class IndexingTest(unittest.TestCase):
         # check update functionality:
         store.update_object("1", IndexingTest.Stuff(3, 4), TA_ID_1)
 
-        # check for correct index entries of index a:
-        self.assertEqual(store.indexes_by_name["a"].index.size(), 3)
-        self.assertEqual(store.indexes_by_name["a"].index.get(2), ["1"])
-        self.assertEqual(store.indexes_by_name["a"].index.get(3), ["1"])
-        self.assertEqual(store.indexes_by_name["a"].index.get(4), ["2"])
+        def check_indexes(self, store):
+            # check for correct index entries of index a:
+            self.assertEqual(store.indexes_by_name["a"].index.size(), 3)
+            self.assertEqual(store.indexes_by_name["a"].index.get(2), ["1"])
+            self.assertEqual(store.indexes_by_name["a"].index.get(3), ["1"])
+            self.assertEqual(store.indexes_by_name["a"].index.get(4), ["2"])
 
-        # check for correct index entries of index b:
-        self.assertEqual(store.indexes_by_name["b"].index.size(), 2)
-        self.assertEqual(store.indexes_by_name["b"].index.get(3), ["1", "2"])
-        self.assertEqual(store.indexes_by_name["b"].index.get(4), ["1"])
+            # check for correct index entries of index b:
+            self.assertEqual(store.indexes_by_name["b"].index.size(), 2)
+            self.assertEqual(store.indexes_by_name["b"].index.get(3), ["1", "2"])
+            self.assertEqual(store.indexes_by_name["b"].index.get(4), ["1"])
 
+        check_indexes(self, store)
         # check delete functionality:
         store.delete_object("2", TA_ID_1)
 
+        # indexes should be untouched:
+        check_indexes(self, store)
+
         store.commit_transaction(TA_ID_1)
+
+        # indexes should be untouched:
+        check_indexes(self, store)
+
+    def test_index_maintenance_transactional_store_aborts(self):
+        store = IndexedTransactionalKeyValueStore()
+
+        store.put("1", IndexingTest.Stuff(2, 3))
+
+        store.create_index("a", "a", "=")
+        store.create_index("b", "b", "=")
+
+        # check index maintenance while running transactions
+        TA_ID_1: int = store.begin_transaction()
+
+        # check update functionality:
+        store.update_object("1", IndexingTest.Stuff(3, 4), TA_ID_1)
+
+        # abort the transaction:
+        store.abort_transaction(TA_ID_1)
+
+        # check for correct index entries of indexes a and b:
+        self.assertEqual(store.indexes_by_name["a"].index.size(), 1)
+        self.assertEqual(store.indexes_by_name["b"].index.size(), 1)
+        self.assertEqual(store.indexes_by_name["a"].index.get(2), ["1"])
+        self.assertEqual(store.indexes_by_name["b"].index.get(3), ["1"])
 
 
 if __name__ == "__main__":

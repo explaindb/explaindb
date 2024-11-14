@@ -21,7 +21,7 @@ class IndexedTransactionalKeyValueStore(TransactionalKeyValueStore):
         index_properties: IndexProperties
 
         # the index itself:
-        index: Index
+        index: KeyValueStore[object, str]
 
     def __init__(self, use_brute_force_validation: bool = False):
         # a dictionary of indexes:
@@ -154,8 +154,30 @@ class IndexedTransactionalKeyValueStore(TransactionalKeyValueStore):
         @param TA_id: the transaction id of the transaction to be aborted
         """
 
-        # call super method to remove all changes made by this transaction from the system:
-        # TODO: remove wip entries from indexes!
+        # iterate over all wip entries of this TA, i.e. all objects that were updated by this TA but not yet committed:
+        # -> for each object_id in the write set of this TA:
+        object_id: str
+        kv_entry: VersionedKeyValueStore.KVStoreEntry
+        for object_id in self.TD[TA_id].write_set:
+            # get the wip entry of this object_id:
+            wip_entry: VersionedKeyValueStore.VersionEntry = self.key_value_store[
+                object_id
+            ].wip
+            assert wip_entry is not None
+            assert wip_entry.start_validity == TA_id
+
+            # get the old object version of the wip entry:
+            old_object: object = wip_entry.value
+
+            # maintain the indexes for this change, i.e. remove this wip entry from all indexes:
+            self._maintain_indexes(
+                object_id,
+                object_to_index=None,  # we are deleting the object
+                object_to_deindex=old_object,  # object to be de-indexed
+            )
+
+        # call super method to remove all changes made by this transaction from the system including the wip entries:
+        super().abort_transaction(TA_id)
 
     def get_suitable_indexes(self, clause: Clause) -> list[IndexProperties]:
         """Returns a list of suitable indexes for the given clause.
