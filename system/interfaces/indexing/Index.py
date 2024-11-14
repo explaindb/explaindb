@@ -126,7 +126,7 @@ class KeyValueStore[Key, Value](Index[Key, Value], PointQueryMixIn[Key, Value], 
 
 class AbstractBTree[Key, Value](
     KeyValueStore[Key, Value],
-    PredicateQueryMixIn[Key, Value],
+    RangeQueryMixIn[Key, Value],
     ABC,
 ):
     """An abstract class representing a B-Tree, i.e. an index supporting both point and range queries."""
