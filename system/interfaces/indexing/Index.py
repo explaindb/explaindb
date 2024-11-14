@@ -81,7 +81,7 @@ class Index[Key, Value](ABC):
 class PointQueryMixIn[Key, Value](ABC):
     @abstractmethod
     def get(self, key: Key) -> Value:
-        """Returns the value associated with the given object_id.
+        """Returns the value associated with the given key.
 
         @param key: the key
         @return: the value
