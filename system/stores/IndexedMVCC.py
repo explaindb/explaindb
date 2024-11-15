@@ -5,12 +5,12 @@ from typing import Dict, Iterator
 
 from system.indexes.indexes import PythonDictionaryWithDuplicates
 from system.interfaces.indexing.Index import IndexProperties, Index, KeyValueStore
-from system.query_processing.predicates import Clause, WHERE_Clause
+from system.interfaces.stores import IndexedACIDStore
 from system.stores.MVCC import TransactionalKeyValueStore
 from system.stores.VersionedKeyValueStore import VersionedKeyValueStore
 
 
-class IndexedTransactionalKeyValueStore(TransactionalKeyValueStore):
+class IndexedTransactionalKeyValueStore(TransactionalKeyValueStore, IndexedACIDStore):
     """A fully transactional versioned (MVCC) key value store adding support for indexes."""
 
     @dataclass

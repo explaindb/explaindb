@@ -1,6 +1,7 @@
 from abc import ABC
+from typing import Iterator
 
-from system.interfaces.indexing.Index import KeyValueStore
+from system.interfaces.indexing.Index import KeyValueStore, IndexProperties
 from system.interfaces.query_processing.query_processing import QEPQueryable
 
 
@@ -49,7 +50,36 @@ class ACIDStore(ABC):
         pass
 
 
-class QEPQueryableACIDStore(QEPQueryable, ACIDStore, ABC):
-    """Interface for a QEP-queryable ACID store"""
+class IndexedACIDStore(ACIDStore, ABC):
+    """Interface for an indexed ACID store"""
+
+    def create_index(self, index_name: str, attribute: str, operator: str) -> None:
+        """Creates an index on the store with the given name. Adds the metadata to the catalog and bulkloads the index
+
+        @param index_name: the name of the index
+        @param attribute: the attribute to create the index on
+        @param operator: the operator to use for the index
+        """
+
+    def drop_index(self, index_name: str) -> None:
+        """Drops the index with the given name.
+
+        @param index_name: the name of the index to drop
+        """
+        pass
+
+    def get_suitable_indexes(
+        self, attribute: str, operator: str
+    ) -> Iterator[IndexProperties]:
+        """Returns a list of suitable indexes for the given clause.
+
+        @param attribute: the attribute of the clause
+        @param operator: the operator of the clause
+        @return: a list of suitable indexes
+        """
+
+
+class QEPQueryableIndexedACIDStore(QEPQueryable, IndexedACIDStore, ABC):
+    """Interface for a QEP-queryable indexed ACID store"""
 
     pass
