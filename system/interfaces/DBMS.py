@@ -16,28 +16,29 @@ from system.interfaces.indexing.Index import KeyValueStore, IndexProperties
 class DBMS(IndexedACIDStore, QueryableComponent, ABC):
     """DataBase Management System interface (DBMS)
 
-    A DBMS is a decorator for an ACID store that adds query processing capabilities (cf. decorator design pattern).
+    A DBMS is a decorator for an indexed ACID store that adds query processing capabilities (cf. decorator design pattern).
 
-    A DBMS may use a persistence layer different from the one used in the QEP_queryable_ACID_store. This may be useful for
-    persisting data temporarily outside MVCC, e.g. for query processing to store temporary data/intermediate results.
+    A DBMS may use a persistence layer different from the one used in the QEP_queryable_indexed_ACID_store. This may be
+    useful for persisting data temporarily outside MVCC, e.g. for query processing to store temporary data/intermediate
+    results.
     """
 
     def __init__(
         self,
-        QEP_queryable_ACID_store: QEPQueryableIndexedACIDStore,
+        QEP_queryable_indexed_ACID_store: QEPQueryableIndexedACIDStore,
         persistence_layer: KeyValueStore,
         query_optimizer: QueryOptimizer,
     ):
         """Initialize the DBMS with a store and a query optimizer.
 
-        @param QEP_queryable_ACID_store: The store to use
+        @param QEP_queryable_indexed_ACID_store: The indexed store to use
         @param persistence_layer: The persistence layer to use for durability
         @param query_optimizer: The query optimizer to use
         """
 
         ACIDStore.__init__(self, persistence_layer)
         self.QEP_queryable_ACID_store: QEPQueryableIndexedACIDStore = (
-            QEP_queryable_ACID_store
+            QEP_queryable_indexed_ACID_store
         )
         self.query_optimizer: QueryOptimizer = query_optimizer
 

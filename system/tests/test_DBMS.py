@@ -9,7 +9,7 @@ class DBMSTests(unittest.TestCase):
     def test_DBMS(self):
         object_store: VersionedKeyValueStore = VersionedKeyValueStore()
         dbms: DBMS = PyDBMS(
-            QEP_queryable_ACID_store=None,  # the MVCC store
+            QEP_queryable_indexed_ACID_store=None,  # the MVCC store
             persistence_layer=object_store,  # here an object store, but could be any other store like a file system
             query_optimizer=None,  # the query optimizer
         )

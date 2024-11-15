@@ -13,17 +13,19 @@ class PyDBMS(DBMS):
 
     def __init__(
         self,
-        QEP_queryable_ACID_store: QEPQueryableIndexedACIDStore | None,
+        QEP_queryable_indexed_ACID_store: QEPQueryableIndexedACIDStore | None,
         persistence_layer: VersionedKeyValueStore,
         query_optimizer: QueryOptimizer | None,
     ):
         """Initialize the DBMS with a store and a query optimizer.
 
-        @param QEP_queryable_ACID_store: The store to use
+        @param QEP_queryable_indexed_ACID_store: The store to use
         @param persistence_layer: The persistence layer to use for durability
         @param query_optimizer: The query optimizer to use
         """
-        super().__init__(QEP_queryable_ACID_store, persistence_layer, query_optimizer)
+        super().__init__(
+            QEP_queryable_indexed_ACID_store, persistence_layer, query_optimizer
+        )
 
         # dict for prepared queries: query_id -> query
         self.prepared_queries: dict[int, QEP] = dict[int, QEP]()
