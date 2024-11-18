@@ -6,28 +6,12 @@ from system.stores.MVCC import TransactionalKeyValueStore
 from dataclasses import dataclass
 from faker import Faker
 
+from system.tests.abstract_unit_test import AbstractUnitTest
 
 Faker.seed(42)
 
 
-class StoreTestBasics(unittest.TestCase):
-
-    # frozen (read-only) dataclass implicitly creates __eq__ and __hash__ methods
-    @dataclass(frozen=True)
-    class Stuff:
-        a: int
-        b: int
-
-    @staticmethod
-    def _create_fake_data(number_of_tuples: int = 100):
-        fake = Faker()
-
-        return [
-            StoreTestBasics.Stuff(
-                fake.pyint(max_value=1000), fake.pyint(max_value=2000)
-            )
-            for _ in range(number_of_tuples)
-        ]
+class StoreTestBasics(AbstractUnitTest):
 
     def test_KeyValueStore_basics(self):
         """Test basic bulkload functionality of KeyValueStore"""
@@ -37,7 +21,7 @@ class StoreTestBasics(unittest.TestCase):
             TransactionalKeyValueStore(),
             IndexedTransactionalKeyValueStore(),
         ]:
-            kvs.bulkload(self._create_fake_data())
+            kvs.bulkload(self._create_fake_data().__iter__())
             self.assertTrue(kvs.size() == 100)
             for key, value in kvs.key_value_store.items():
                 self.assertIsInstance(key, str)
@@ -49,14 +33,7 @@ class StoreTestBasics(unittest.TestCase):
                 self.assertIsInstance(entry.value, StoreTestBasics.Stuff)
                 self.assertEqual(entry.start_validity, 0)
                 self.assertFalse(entry.deleted)
-
-    def test_bulkload_with_prefix(self):
-        """Test bulkload with object_id_prefix"""
-        kvs: VersionedKeyValueStore = VersionedKeyValueStore()
-        kvs.bulkload(self._create_fake_data(), object_id_prefix="stuff_")
-        self.assertTrue(kvs.size() == 100)
-        for key in kvs.key_value_store.keys():
-            self.assertTrue(key.startswith("stuff_"))
+                self.assertEqual(list(kvs.get(key))[0], entry.value)
 
     def test_TransactionalKeyValueStore(self):
         tkvs: TransactionalKeyValueStore = TransactionalKeyValueStore()

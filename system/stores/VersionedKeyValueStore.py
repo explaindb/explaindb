@@ -4,7 +4,7 @@ import copy
 import pprint
 from dataclasses import dataclass
 from itertools import chain
-from typing import Dict
+from typing import Dict, Iterator
 
 from system.interfaces.indexing.Index import KeyValueStore
 
@@ -108,18 +108,20 @@ class VersionedKeyValueStore(KeyValueStore[str, object]):
             wip=None,
         )
 
-    def get(self, object_id: str) -> object:
-        """Returns the most recent entry of the object with the given object_id.
+    def get(self, object_id: str) -> Iterator[object]:
+        """Returns the values associated with the given key as in iterator. Note that the iterator is NOT STABLE, i.e.
+        it may change if the underlying data changes concurrently.
 
-        @param object_id: the object id
-        @return: the object
+        @param object_id: the key used in this store
+        @return: an iterator of the values associated with the given key
         """
+
         if object_id not in self.key_value_store:
             raise Exception(f"object {object_id} not found in the store")
 
         # get the most recent committed version of the object available:
         # note: deleted entry not considered here
-        return self.key_value_store[object_id].committed[-1].value
+        yield self.key_value_store[object_id].committed[-1].value
 
     def delete(self, object_id: str, _object: object = None) -> None:
         """Deletes the object with the given object_id.
@@ -149,24 +151,6 @@ class VersionedKeyValueStore(KeyValueStore[str, object]):
         flushed.
         """
         pass
-
-    def bulkload(self, data: list[object], object_id_prefix: str = "") -> None:
-        """Bulkloads the given list of data objects into the store. Inserts (puts) a new object_id->_object mappings
-        into the store overwriting any existing mapping.
-
-        Notice that we DO copy the data objects, so modifying them outside the store will NOT accidentally affect the
-        data in the store.
-
-        @param data: a list of data objects
-        @param object_id_prefix: a prefix to be added as prefix to the object ids, default is an empty string
-        """
-
-        # we use <object_id_prefix> to allow for multiple bulkloads into the same key value store:
-        # like that we can easily mimic different tables in a database
-        # Notice, if you bulkloaded before with the same prefix, an exception is thrown.
-        object_id: int
-        for object_id in range(len(data)):
-            self.put(object_id_prefix + str(object_id), data[object_id])
 
     def show(self) -> None:
         """Shows the content of the store."""

@@ -1,72 +1,35 @@
 import unittest
 
 from system.indexes.indexes import (
-    PythonDictionaryWithoutDuplicates,
-    PythonDictionaryWithDuplicates,
+    PythonDictionaryIndex,
 )
 from system.stores.IndexedMVCC import IndexedTransactionalKeyValueStore
-from dataclasses import dataclass
 from faker import Faker
 
+from system.tests.abstract_unit_test import AbstractUnitTest
 
 Faker.seed(42)
 
 
-class IndexingTest(unittest.TestCase):
-
-    # frozen (read-only) dataclass implicitly creates __eq__ and __hash__ methods
-    @dataclass(frozen=True)
-    class Stuff:
-        a: int
-        b: int
-
-    @staticmethod
-    def _create_fake_data(number_of_tuples: int = 100):
-        fake = Faker()
-
-        return [
-            IndexingTest.Stuff(fake.pyint(max_value=1000), fake.pyint(max_value=2000))
-            for _ in range(number_of_tuples)
-        ]
-
-    def test_indexing_basics_no_duplicates(self):
-        index: PythonDictionaryWithoutDuplicates = PythonDictionaryWithoutDuplicates()
-        index.put("key1", "value1")
-        index.put("key2", "value2")
-        index.put("key3", "value3")
-        self.assertEqual(index.size(), 3)
-
-        index.delete("key1", "value1")
-        self.assertEqual(index.size(), 2)
-
-        with self.assertRaises(KeyError):
-            index.delete("key1", "value1")
-        with self.assertRaises(KeyError):
-            index.get("key1")
-
-        index.put("key1", "value1")
-        self.assertEqual(index.get("key1"), "value1")
-        self.assertEqual(index.size(), 3)
+class IndexingTest(AbstractUnitTest):
 
     def test_indexing_basics_with_duplicates(self):
-        index: PythonDictionaryWithDuplicates[str, str] = (
-            PythonDictionaryWithDuplicates[str, str]()
-        )
+        index: PythonDictionaryIndex[str, str] = PythonDictionaryIndex[str, str]()
         index.put("key1", "value1")
         index.put("key1", "value2")
         index.put("key1", "value3")
         self.assertEqual(index.size(), 1)
-        self.assertEqual(index.get("key1"), ["value1", "value2", "value3"])
+        self.assertEqual(list(index.get("key1")), ["value1", "value2", "value3"])
 
         index.delete("key1", "value1")
         self.assertEqual(index.size(), 1)
-        self.assertEqual(index.get("key1"), ["value2", "value3"])
+        self.assertEqual(list(index.get("key1")), ["value2", "value3"])
 
         index.delete("key1", "value2")
         self.assertEqual(index.size(), 1)
-        self.assertEqual(index.get("key1"), ["value3"])
+        self.assertEqual(list(index.get("key1")), ["value3"])
 
-        with self.assertRaises(ValueError):
+        with self.assertRaises(KeyError):
             index.delete("key1", "value4")
 
         with self.assertRaises(KeyError):
@@ -93,7 +56,7 @@ class IndexingTest(unittest.TestCase):
         index_entry: IndexedTransactionalKeyValueStore.IndexCatalogueEntry = (
             store.indexes_by_name["a"]
         )
-        no_unique_keys = len(set([x.a for x in fake_data]))
+        no_unique_keys = len(set([x[1].a for x in fake_data]))
         # worst case: all "a" values are unique
         self.assertGreaterEqual(no_unique_keys, 1)
 
@@ -123,7 +86,7 @@ class IndexingTest(unittest.TestCase):
         index_entry_b: IndexedTransactionalKeyValueStore.IndexCatalogueEntry = (
             store.indexes_by_name["b"]
         )
-        no_unique_keys_on_b = len(set([x.b for x in fake_data]))
+        no_unique_keys_on_b = len(set([x[1].b for x in fake_data]))
         # worst case: all "b" values are unique
         self.assertGreaterEqual(no_unique_keys_on_b, 1)
 
@@ -154,12 +117,12 @@ class IndexingTest(unittest.TestCase):
 
         # check for correct index entries of index a:
         self.assertEqual(store.indexes_by_name["a"].index.size(), 2)
-        self.assertEqual(store.indexes_by_name["a"].index.get(2), ["1"])
-        self.assertEqual(store.indexes_by_name["a"].index.get(4), ["2"])
+        self.assertEqual(list(store.indexes_by_name["a"].index.get(2)), ["1"])
+        self.assertEqual(list(store.indexes_by_name["a"].index.get(4)), ["2"])
 
         # check for correct index entries of index b:
         self.assertEqual(store.indexes_by_name["b"].index.size(), 1)
-        self.assertEqual(store.indexes_by_name["b"].index.get(3), ["1", "2"])
+        self.assertEqual(list(store.indexes_by_name["b"].index.get(3)), ["1", "2"])
 
         # check index maintenance while running transactions
         TA_ID_1: int = store.begin_transaction()
@@ -170,14 +133,16 @@ class IndexingTest(unittest.TestCase):
         def check_indexes(_self, _store):
             # check for correct index entries of index a:
             _self.assertEqual(_store.indexes_by_name["a"].index.size(), 3)
-            _self.assertEqual(_store.indexes_by_name["a"].index.get(2), ["1"])
-            _self.assertEqual(_store.indexes_by_name["a"].index.get(3), ["1"])
-            _self.assertEqual(_store.indexes_by_name["a"].index.get(4), ["2"])
+            _self.assertEqual(list(_store.indexes_by_name["a"].index.get(2)), ["1"])
+            _self.assertEqual(list(_store.indexes_by_name["a"].index.get(3)), ["1"])
+            _self.assertEqual(list(_store.indexes_by_name["a"].index.get(4)), ["2"])
 
             # check for correct index entries of index b:
             _self.assertEqual(_store.indexes_by_name["b"].index.size(), 2)
-            _self.assertEqual(_store.indexes_by_name["b"].index.get(3), ["1", "2"])
-            _self.assertEqual(_store.indexes_by_name["b"].index.get(4), ["1"])
+            _self.assertEqual(
+                list(_store.indexes_by_name["b"].index.get(3)), ["1", "2"]
+            )
+            _self.assertEqual(list(_store.indexes_by_name["b"].index.get(4)), ["1"])
 
         check_indexes(self, store)
         # check delete functionality:
@@ -211,8 +176,8 @@ class IndexingTest(unittest.TestCase):
         # check for correct index entries of indexes a and b:
         self.assertEqual(store.indexes_by_name["a"].index.size(), 1)
         self.assertEqual(store.indexes_by_name["b"].index.size(), 1)
-        self.assertEqual(store.indexes_by_name["a"].index.get(2), ["1"])
-        self.assertEqual(store.indexes_by_name["b"].index.get(3), ["1"])
+        self.assertEqual(list(store.indexes_by_name["a"].index.get(2)), ["1"])
+        self.assertEqual(list(store.indexes_by_name["b"].index.get(3)), ["1"])
 
 
 if __name__ == "__main__":

@@ -1,5 +1,6 @@
 from abc import abstractmethod, ABC
 from dataclasses import dataclass
+from typing import Iterator
 
 from system.query_processing.predicates import Clause
 
@@ -26,10 +27,10 @@ class Index[Key, Value](ABC):
 
     @abstractmethod
     def put(self, key: Key, value: Value) -> None:
-        """Inserts (puts) a new key->value mapping into the store overwriting any existing mapping.
+        """Adds (puts) a new key->value mapping into the store.
 
-        Note that the value is copied before it is stored in the store to avoid accidental modifications of the value
-        outside the index.
+        Note that the value should be copied in your implementation before it is stored in the store to avoid
+        accidental modifications of the value outside the index.
 
         @param key: the key
         @param value: the value to associate with the key
@@ -39,10 +40,10 @@ class Index[Key, Value](ABC):
 
     @abstractmethod
     def delete(self, key: Key, value: Value = None) -> None:
-        """Deletes the key and its associated value from the index.
+        """Deletes the key->value mapping from the index.
 
         @param key: the key
-        @param value: the value to delete, if None, all values associated with the key are deleted
+        @param value: the value to delete
 
         """
 
@@ -57,23 +58,21 @@ class Index[Key, Value](ABC):
         """
         pass
 
-    @abstractmethod
-    def bulkload(self, data: list[Value], key_prefix: str = "") -> None:
-        """Bulkloads the given list of values into the index. Inserts (puts) new key->value mappings
-        into the store overwriting any existing mapping.
+    def bulkload(self, input_data: Iterator[tuple[Key, Value]]) -> None:
+        """Bulkloads the given list of key->value mappings into the index.
 
         Notice that we DO copy the values, so modifying them outside the index will NOT accidentally affect the
         data in the index.
 
-        @param data: a list of data values
-        @param key_prefix: a prefix to be added as prefix to the object ids, default is an empty string
+        @param input_data: an iterator of key-values pairs to be loaded into the index; in this implementation, for
+        each pair (key, value), we simply call put(key, value) to add the key-value pair to the index.
         """
-
-        pass
+        for item in input_data:
+            self.put(item[0], item[1])
 
     @abstractmethod
     def show(self) -> None:
-        """Shows the content of the store."""
+        """Shows the content of the index."""
 
         pass
 
@@ -82,24 +81,26 @@ class PointQueryMixIn[Key, Value](ABC):
     """An interface mixing in point queries."""
 
     @abstractmethod
-    def get(self, key: Key) -> Value:
-        """Returns the value associated with the given key.
+    def get(self, key: Key) -> Iterator[Value]:
+        """Returns the values associated with the given key as in iterator. Note that the iterator is NOT STABLE, i.e.
+        it may change if the underlying data changes concurrently.
 
         @param key: the key
-        @return: the value
+        @return: an iterator of the values associated with the given key
         """
         pass
 
 
 class RangeQueryMixIn[Key, Value](ABC):
     @abstractmethod
-    def get_all_in_range(self, min_key: Key, max_key: Key) -> list[Value]:
-        """Returns all values that satisfy the given where clause.
+    def get_all_in_range(self, min_key: Key, max_key: Key) -> Iterator[Value]:
+        """Returns all values that satisfy the given where clause. Note that the iterator is NOT STABLE, i.e.
+        it may change if the underlying data changes concurrently.
 
         @param min_key: the minimum key including
         @param max_key: the maximum key including
 
-        @return: a list of values
+        @return: an iterator of values
         """
         pass
 
@@ -108,11 +109,12 @@ class PredicateQueryMixIn[Key, Value](ABC):
     """An interface mixing in range queries."""
 
     @abstractmethod
-    def get_all(self, where: Clause) -> list[Value]:
-        """Returns all values that satisfy the given where clause.
+    def get_all(self, where: Clause) -> Iterator[Value]:
+        """Returns all values that satisfy the given where clause. Note that the iterator is NOT STABLE, i.e.
+        it may change if the underlying data changes concurrently.
 
         @param where: the condition
-        @return: a list of values
+        @return: an iterator of values
         """
 
         pass

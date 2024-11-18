@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Dict, Iterator
 
-from system.indexes.indexes import PythonDictionaryWithDuplicates
+from system.indexes.indexes import PythonDictionaryIndex
 from system.interfaces.indexing.Index import IndexProperties, Index, KeyValueStore
 from system.interfaces.stores import IndexedACIDStore
 from system.stores.MVCC import TransactionalKeyValueStore
@@ -111,7 +111,7 @@ class IndexedTransactionalKeyValueStore(TransactionalKeyValueStore, IndexedACIDS
 
         # the only type of index supported at the moment is a PythonDictionary (wrapping a python dict) with support
         # for duplicates:
-        index: KeyValueStore[str, object] = PythonDictionaryWithDuplicates()
+        index: KeyValueStore[str, object] = PythonDictionaryIndex()
         self.indexes_by_name[index_name] = (
             IndexedTransactionalKeyValueStore.IndexCatalogueEntry(
                 index_properties, index
