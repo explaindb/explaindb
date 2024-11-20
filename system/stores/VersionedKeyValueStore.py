@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from itertools import chain
 from typing import Dict, Iterator
 
-from system.interfaces.indexing.Index import KeyValueStore
+from system.interfaces.indexing.Index import KeyValueStore, PutInfo
 
 
 class HashableDict(dict):
@@ -83,7 +83,7 @@ class VersionedKeyValueStore(KeyValueStore[str, object]):
         """Returns the number of objects_ids mapped by the store."""
         return len(self.key_value_store)
 
-    def put(self, object_id: str, _object: object) -> None:
+    def put(self, object_id: str, _object: object) -> None | PutInfo:
         """Inserts (puts) a new object_id->_object mapping into the store overwriting any existing mapping.
 
         Note that the object is copied before it is stored in the store to avoid accidental modifications of the object

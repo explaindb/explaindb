@@ -1,6 +1,6 @@
 from typing import Iterator
 
-from system.interfaces.indexing.Index import KeyValueStore
+from system.interfaces.indexing.Index import KeyValueStore, PutInfo
 
 
 class PythonDictionaryIndex[Key, Value](KeyValueStore[Key, Value]):
@@ -15,7 +15,7 @@ class PythonDictionaryIndex[Key, Value](KeyValueStore[Key, Value]):
     def size(self) -> int:
         return len(self.index)
 
-    def put(self, key: Key, value: Value) -> None:
+    def put(self, key: Key, value: Value) -> PutInfo | None:
         """Inserts (puts) a new key->value mapping into the store overwriting any existing mapping."""
         self.index.setdefault(key, []).append(value)
 

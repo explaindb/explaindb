@@ -17,6 +17,11 @@ class IndexProperties:
     operator: str
 
 
+@dataclass
+class PutInfo:
+    pass
+
+
 class Index[Key, Value](ABC):
     """An API representing an index."""
 
@@ -26,7 +31,7 @@ class Index[Key, Value](ABC):
         pass
 
     @abstractmethod
-    def put(self, key: Key, value: Value) -> None:
+    def put(self, key: Key, value: Value) -> None | PutInfo:
         """Adds (puts) a new key->value mapping into the store.
 
         Note that the value should be copied in your implementation before it is stored in the store to avoid
@@ -34,6 +39,7 @@ class Index[Key, Value](ABC):
 
         @param key: the key
         @param value: the value to associate with the key
+        @return: None or a PutInfo object
         """
 
         pass
