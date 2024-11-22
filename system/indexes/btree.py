@@ -539,6 +539,55 @@ class BPlusTree[Key, Value](AbstractBTree[Key, Value]):
                 assert type(self.next) == BPlusTree.Leaf, "previous link is not a leaf"
                 assert self.next is not self, "next link is pointing to self"
 
+    class CountingLeaf(AbstractNode):
+        """A leaf node that does not store values but counts the number of put-calls."""
+
+        def __init__(self):
+            super().__init__(0)
+            self.put_calls: int = 0
+
+        def put(self, key: Key, value: Value) -> PutInfo | None:
+            self.put_calls += 1
+            return None
+
+        def split(self) -> SplitHappens[Key]:
+            raise NotImplemented
+
+        def get(self, key: Key) -> Iterator[Value]:
+            raise NotImplemented
+
+        def get_all_in_range(self, min_key: Key, max_key: Key) -> Iterator[Value]:
+            raise NotImplemented
+
+        def is_full(self) -> bool:
+            raise NotImplemented
+
+        def size(self) -> int:
+            return self.put_calls
+
+        def dot(self, s: str) -> str:
+            """Returns a string representation of the leaf node in dot format."""
+
+            s += f"\t{self.id} [label=<\n"
+            s += f'\t\t<TABLE BORDER="0" CELLBORDER="1" CELLSPACING="0" CELLPADDING="4">\n'
+            dot_keys = ""
+            dot_values = ""
+            dot_keys += f'<TD BGCOLOR="lightgreen" WIDTH="20">count</TD>'
+            # TODO: overfitting the data, need max over all leaves here
+            height: int = min(max(15, self.put_calls // 100), 200)
+            dot_values += f'<TD BGCOLOR="silver" WIDTH="20" HEIGHT="{str(height)}">{self.put_calls}</TD>'
+            s += f'\t\t\t<TR>"{dot_keys}</TR>\n'
+            s += f'\t\t\t<TR>"{dot_values}</TR>\n'
+            s += f"\t\t</TABLE>\n"
+            s += f"\t>, shape=plaintext, margin=0];\n"
+            return s
+
+        def consistency_check(self) -> None:
+            raise NotImplemented
+
+        def show(self) -> None:
+            print(self.put_calls)
+
     def __init__(self, inner_capacity: int = 3, leaf_capacity: int = 4):
         """Initializes a B+tree with a given inner node capacity and leaf node capacity.
 
@@ -617,3 +666,37 @@ class BPlusTree[Key, Value](AbstractBTree[Key, Value]):
     def __str__(self):
         s = f"BPlusTree(inner_capacity={self.inner_capacity}, leaf_capacity={self.leaf_capacity})"
         return s
+
+    def _get_lastlevel_inner_nodes(self, node: BPlusTree.Inner) -> set[BPlusTree.Inner]:
+        """Returns all inner nodes of the last level of the tree.
+
+        :param node: an inner node of the tree
+        :return: A set of inner nodes of the last level of the tree.
+        """
+        # last inner before leaf level?:
+        if type(node.children[0]) == BPlusTree.Leaf:
+            return {node}
+        else:
+            # more inner nodes:
+            inner_nodes: set[BPlusTree.Inner] = set()
+            child: BPlusTree.Inner
+            for child in node.children:
+                inner_nodes.update(self._get_lastlevel_inner_nodes(child))
+            return inner_nodes
+
+    def convert_to_counting_leaf_tree(self) -> None:
+        """Keeps all inner nodes but replaces all leaves with CountingLeafs."""
+
+        # get root node:
+        node: BPlusTree[Key, Value].AbstractNode = self.root
+
+        inner_nodes = None
+        # get all inner nodes before the leaf level:
+        if type(self.root) == BPlusTree.Inner:
+            inner_nodes = self._get_lastlevel_inner_nodes(cast(BPlusTree.Inner, node))
+        else:
+            raise ValueError("root is not an inner node")
+        for inner_node in inner_nodes:
+            # convert children to CountingLeafs:
+            for i, child in enumerate(inner_node.children):
+                inner_node.children[i] = BPlusTree.CountingLeaf()
