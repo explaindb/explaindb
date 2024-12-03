@@ -3,7 +3,6 @@ import unittest
 from system.stores.IndexedMVCC import IndexedTransactionalKeyValueStore
 from system.stores.VersionedKeyValueStore import VersionedKeyValueStore
 from system.stores.MVCC import TransactionalKeyValueStore
-from dataclasses import dataclass
 from faker import Faker
 
 from system.tests.abstract_unit_test import AbstractUnitTest
