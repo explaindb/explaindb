@@ -22,7 +22,7 @@ number_of_tuples = 1000
 
 class MyTest(unittest.TestCase):
     @staticmethod
-    def create_data():
+    def create_data() -> None:
         persons = [Person(fake.name(), fake.date()) for _ in range(number_of_tuples)]
         books = [
             Book(

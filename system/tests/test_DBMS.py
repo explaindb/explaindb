@@ -6,7 +6,7 @@ from system.stores.VersionedKeyValueStore import VersionedKeyValueStore
 
 
 class DBMSTests(unittest.TestCase):
-    def test_DBMS(self):
+    def test_DBMS(self) -> None:
         object_store: VersionedKeyValueStore = VersionedKeyValueStore()
         dbms: DBMS = PyDBMS(
             QEP_queryable_indexed_ACID_store=None,  # the MVCC store
