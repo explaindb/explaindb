@@ -1,4 +1,5 @@
 from system.storage.RAID import compute_assignment
+from system.storage.storage_layer import StorageLayer
 from system.tests.abstract_unit_test import AbstractUnitTest
 
 
@@ -35,3 +36,45 @@ class RAIDTest(AbstractUnitTest):
         # ret: list[str] = compute_assignment(20, 3, 5)
         # for row in ret:
         #    print(row)
+
+
+class StorageLayerTest(AbstractUnitTest):
+
+    def test_storage_layer_basics(self):
+
+        # simple storage hierarchy with only two layers:
+        sl_ssd: StorageLayer[str, str] = StorageLayer[str, str](
+            max_capacity=100, name="SSD"
+        )
+        sl_DRAM: StorageLayer[str, str] = StorageLayer[str, str](
+            max_capacity=5, name="DRAM", layer_below=sl_ssd
+        )
+        # insert some entries to force eviction
+        for i in range(10):
+            sl_DRAM.put(str(i), str(i))
+
+        # sl_DRAM.show()
+        # sl_ssd.show()
+
+        self.assertEqual(sl_DRAM.size(), 5)
+        self.assertEqual(sl_ssd.size(), 5)
+
+        self.assertListEqual(list(sl_DRAM.storage.keys()), ["0", "1", "2", "3", "9"])
+        self.assertListEqual(list(sl_ssd.storage.keys()), ["4", "5", "6", "7", "8"])
+
+        # test get:
+        self.assertEqual(sl_DRAM.get("0"), "0")
+        self.assertEqual(sl_DRAM.get("5"), "5")
+
+        self.assertListEqual(list(sl_DRAM.storage.keys()), ["0", "1", "2", "3", "5"])
+        self.assertListEqual(
+            list(sl_ssd.storage.keys()), ["4", "5", "6", "7", "8", "9"]
+        )
+
+        # sl_DRAM.show()
+        # sl_ssd.show()
+
+        # test fix:
+        sl_DRAM.fix("5")
+        with self.assertRaises(ValueError):
+            sl_DRAM.put("42", "42")
