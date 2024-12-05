@@ -36,7 +36,8 @@ class Operator(ABC):
     @abstractmethod
     def interpret_close(self) -> None:
         """
-        Interpreter: `close()` method in push-based iterator model, i.e., closes the operator.
+        Interpreter: `close()` method in push-based iterator model, i.e., closes the operator. This may be used to free
+        resources like temporary files.
         """
         raise NotImplementedError
 

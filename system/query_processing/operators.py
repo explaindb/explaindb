@@ -20,13 +20,13 @@ class Relation(Operator):
         for tup in self.data:
             # push current tuple to parent operator
             self.parent.interpret_next(tup)
-        self.parent.interpret_close()
 
     def interpret_next(self, tup):
+        # unreachable as this operator does not have a child operator that could call this method
         raise AssertionError("Expected to be unreachable")
 
     def interpret_close(self):
-        raise AssertionError("Expected to be unreachable")
+        pass
 
     def compile(self, emit):
         raise NotImplementedError
@@ -60,14 +60,13 @@ class Scan(Operator):
                 else:
                     # abort iteration
                     break
-        # close parent operator
-        self.parent.interpret_close()
 
     def interpret_next(self, tup):
+        # unreachable as this operator does not have a child operator that could call this method
         raise AssertionError("Expected to be unreachable")
 
     def interpret_close(self):
-        raise AssertionError("Expected to be unreachable")
+        pass
 
     def compile(self, emit):
         if self.num_tuples == math.inf:
@@ -106,8 +105,8 @@ class Filter(Operator):
             self.parent.interpret_next(tup)
 
     def interpret_close(self):
-        # close parent operator
-        self.parent.interpret_close()
+        # close child operator
+        self.children[0].interpret_close()
 
     def compile(self, emit):
         compiled_pred = re.sub("([a-zA-Z]+)", r"tup['\1']", self.pred)
@@ -145,6 +144,10 @@ class SHJ(Operator):
         self.is_build_phase = True
         # open build child operator
         self.children[0].interpret_open()
+        # set to probe phase
+        self.is_build_phase = False
+        # open probe child operator
+        self.children[1].interpret_open()
 
     def interpret_next(self, tup):
         # check if build phase is active
@@ -158,15 +161,9 @@ class SHJ(Operator):
                 self.parent.interpret_next(tup | tup2)
 
     def interpret_close(self):
-        # check if build phase has ended
-        if self.is_build_phase:
-            # set to probe phase
-            self.is_build_phase = False
-            # open probe child operator
-            self.children[1].interpret_open()
-        else:
-            # close parent operator
-            self.parent.interpret_close()
+        # close children operators
+        self.children[0].interpret_close()
+        self.children[1].interpret_close()
 
     def compile(self, emit):
         return (
@@ -211,6 +208,10 @@ class SemiJ(Operator):
         self.is_build_phase = True
         # open RIGHT child as build operator
         self.children[1].interpret_open()
+        # set to probe phase
+        self.is_build_phase = False
+        # open LEFT child as probe operator
+        self.children[0].interpret_open()
 
     def interpret_next(self, tup):
         # check if build phase is active
@@ -224,15 +225,9 @@ class SemiJ(Operator):
                 self.parent.interpret_next(tup)
 
     def interpret_close(self):
-        # check if build phase has ended
-        if self.is_build_phase:
-            # set to probe phase
-            self.is_build_phase = False
-            # open probe child operator
-            self.children[0].interpret_open()
-        else:
-            # close parent operator
-            self.parent.interpret_close()
+        # close children operators
+        self.children[0].interpret_close()
+        self.children[1].interpret_close()
 
     def compile(self, emit):
         raise NotImplementedError
@@ -261,7 +256,8 @@ class Print(Operator):
         print(tuple(tup.values()))
 
     def interpret_close(self):
-        pass
+        # close child operator
+        self.children[0].interpret_close()
 
     def compile(self):
         # import pickle module here s.t. it appears at the beginning of the compiled code
@@ -294,7 +290,8 @@ class Collect(Operator):
         self.result.append(tuple(tup.values()))
 
     def interpret_close(self):
-        pass
+        # close child operator
+        self.children[0].interpret_close()
 
     def compile(self):
         # import pickle module here s.t. it appears at the beginning of the compiled code
@@ -327,7 +324,8 @@ class Count(Operator):
         self.num_tuples += 1
 
     def interpret_close(self):
-        pass
+        # close child operator
+        self.children[0].interpret_close()
 
     def compile(self):
         # import pickle module here s.t. it appears at the beginning of the compiled code
