@@ -1,14 +1,14 @@
-from abc import ABC, abstractmethod
 import math
 import pickle
 import re
-from typing import Self
 
 from system.interfaces.query_processing.operators import Operator
 
 
 class Relation(Operator):
-    """Relation operator to iterate over the given list of tuples."""
+    """
+    Relation operator to iterate over the given list of tuples.
+    """
 
     def __init__(self, name: str, data: list) -> None:
         super().__init__(None, None)
@@ -16,7 +16,9 @@ class Relation(Operator):
         self.data = data
 
     def interpret_open(self):
+        # iterate over each tuple in list
         for tup in self.data:
+            # push current tuple to parent operator
             self.parent.interpret_next(tup)
         self.parent.interpret_close()
 
