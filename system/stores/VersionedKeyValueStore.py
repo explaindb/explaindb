@@ -19,28 +19,28 @@ class HashableDict(dict):
 
 
 class VersionedKeyValueStore(KeyValueStore[str, object]):
-    """A versioned store managing key/value mappings.
-    On the slides we this store a "key value store".
-    """
+    """A versioned store managing key/value mappings."""
 
     @dataclass
-    class VersionEntry:
-        # valid from start until the next version in the list of committed entries
-        # this is used to determine the visible version of the object for a given transaction
+    class VersionEntry(ABC):
+        """An abstract class representing a version entry in the store, i.e. an entry of a single object/value
+        plus start_validity information, i.e. when the object was created or updated."""
+
+        # start_validity of the entry
         start_validity: int
 
     @dataclass(kw_only=True)
     class UpdateEntry(VersionEntry):
-        """A class representing a version entry in the store, i.e. an entry of a single object/value
-        plus validity information, i.e. when the object was created/updated/deleted."""
+        """A class representing a n update version entry in the store, i.e. an entry of a single object/value
+        plus start_validity information, i.e. when the object was created or updated."""
 
-        # the value of the object
+        # the value of the object, i. the updated value/object
         value: object
 
     @dataclass(kw_only=True)
     class DeleteEntry(VersionEntry):
-        """A class representing a delete entry in the store, i.e. an entry of a single object/value
-        plus validity information, i.e. when the object was created/updated/deleted."""
+        """A class representing a delete version entry in the store, i.e. just the start_validity information,
+        i.e. since when the object is considered deleted."""
 
         pass
 
