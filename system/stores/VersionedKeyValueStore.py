@@ -57,10 +57,10 @@ class VersionedKeyValueStore(KeyValueStore[str, object]):
         """A class representing a key value store entry."""
 
         # list of committed versions of the object
-        committed: list[VersionedKeyValueStore.UpdateEntry]
+        committed: list[VersionedKeyValueStore.VersionEntry]
 
         # optional (SINGLE!) work in progress entry
-        wip: VersionedKeyValueStore.UpdateEntry | None = None
+        wip: VersionedKeyValueStore.VersionEntry | None = None
 
         def __iter__(self):
             """Returns an iterator over the committed versions plus the wip entry if it exists."""
