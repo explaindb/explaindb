@@ -31,8 +31,8 @@ class VersionedKeyValueStore(KeyValueStore[str, object]):
 
     @dataclass(kw_only=True)
     class UpdateEntry(VersionEntry):
-        """A class representing a n update version entry in the store, i.e. an entry of a single object/value
-        plus start_validity information, i.e. when the object was created or updated."""
+        """A class representing an update or creation entry in the store, i.e. an entry of a single object/value
+        plus start_validity information, i.e. when the object was updated or created."""
 
         # the value of the object, i. the updated value/object
         value: object
