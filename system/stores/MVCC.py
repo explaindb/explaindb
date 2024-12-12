@@ -159,8 +159,6 @@ class TransactionalKeyValueStore(VersionedKeyValueStore, ACIDStore):
             return None
         else:
             # some asserts to (again) check the correctness of the implementation:
-            if last_committed_version_visible_to_TA_id.value is None:
-                print("sdfd")
             assert last_committed_version_visible_to_TA_id.value is not None
             assert last_committed_version_visible_to_TA_id.start_validity is not None
             assert last_committed_version_visible_to_TA_id.start_validity < timestamp
