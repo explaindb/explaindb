@@ -28,10 +28,10 @@ class StoreTestBasics(AbstractUnitTest):
                 self.assertIsInstance(entries, list)
                 self.assertEqual(len(entries), 1)
                 entry = entries[0]
-                self.assertIsInstance(entry, VersionedKeyValueStore.VersionEntry)
+                self.assertIsInstance(entry, VersionedKeyValueStore.UpdateEntry)
                 self.assertIsInstance(entry.value, StoreTestBasics.Stuff)
                 self.assertEqual(entry.start_validity, 0)
-                self.assertFalse(entry.deleted)
+                self.assertTrue(isinstance(entry, VersionedKeyValueStore.UpdateEntry))
                 self.assertEqual(list(kvs.get(key))[0], entry.value)
 
     def test_TransactionalKeyValueStore(self):

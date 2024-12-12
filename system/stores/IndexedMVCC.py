@@ -128,7 +128,7 @@ class IndexedTransactionalKeyValueStore(TransactionalKeyValueStore, IndexedACIDS
         kv_entry: VersionedKeyValueStore.KVStoreEntry
         for object_id, kv_entry in self.key_value_store.items():
 
-            version_entry: VersionedKeyValueStore.VersionEntry
+            version_entry: VersionedKeyValueStore.UpdateEntry
             for version_entry in kv_entry:
                 IndexedTransactionalKeyValueStore._index_object(
                     index, attribute, object_id, version_entry.value
@@ -160,7 +160,7 @@ class IndexedTransactionalKeyValueStore(TransactionalKeyValueStore, IndexedACIDS
         kv_entry: VersionedKeyValueStore.KVStoreEntry
         for object_id in self.TD[TA_id].write_set:
             # get the wip entry of this object_id:
-            wip_entry: VersionedKeyValueStore.VersionEntry = self.key_value_store[
+            wip_entry: VersionedKeyValueStore.UpdateEntry = self.key_value_store[
                 object_id
             ].wip
             assert wip_entry is not None
@@ -247,7 +247,7 @@ class IndexedTransactionalKeyValueStore(TransactionalKeyValueStore, IndexedACIDS
         assert object_id in self.key_value_store
 
         # 1. get the existing wip entry if it exists:
-        wip_entry: VersionedKeyValueStore.VersionEntry = self.key_value_store[
+        wip_entry: VersionedKeyValueStore.UpdateEntry = self.key_value_store[
             object_id
         ].wip
 
@@ -282,7 +282,7 @@ class IndexedTransactionalKeyValueStore(TransactionalKeyValueStore, IndexedACIDS
         """
 
         # 1. get the existing wip entry if it exists:
-        wip_entry: VersionedKeyValueStore.VersionEntry = self.key_value_store[
+        wip_entry: VersionedKeyValueStore.UpdateEntry = self.key_value_store[
             object_id
         ].wip
         existing_wip_entry_object: object = (

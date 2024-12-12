@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import copy
 import pprint
+from abc import ABC
 from dataclasses import dataclass
 from itertools import chain
 from typing import Dict, Iterator
@@ -24,20 +25,24 @@ class VersionedKeyValueStore(KeyValueStore[str, object]):
 
     @dataclass
     class VersionEntry:
-        """A class representing a version entry in the store, i.e. an entry of a single object/value
-        plus validity information, i.e. when the object was created/updated/deleted."""
-
         # valid from start until the next version in the list of committed entries
         # this is used to determine the visible version of the object for a given transaction
-        # start: while in the wip-list used to signal which TA is working on this object
-        # start: when committed used to signal when the object was committed (this is NEVER the same thing!)
         start_validity: int
+
+    @dataclass(kw_only=True)
+    class UpdateEntry(VersionEntry):
+        """A class representing a version entry in the store, i.e. an entry of a single object/value
+        plus validity information, i.e. when the object was created/updated/deleted."""
 
         # the value of the object
         value: object
 
-        # was this entry deleted?
-        deleted: bool = False
+    @dataclass(kw_only=True)
+    class DeleteEntry(VersionEntry):
+        """A class representing a delete entry in the store, i.e. an entry of a single object/value
+        plus validity information, i.e. when the object was created/updated/deleted."""
+
+        pass
 
     # TODO:: could refactor KVStoreEntry.wip with a type like this:
     # @dataclass
@@ -52,10 +57,10 @@ class VersionedKeyValueStore(KeyValueStore[str, object]):
         """A class representing a key value store entry."""
 
         # list of committed versions of the object
-        committed: list[VersionedKeyValueStore.VersionEntry]
+        committed: list[VersionedKeyValueStore.UpdateEntry]
 
         # optional (SINGLE!) work in progress entry
-        wip: VersionedKeyValueStore.VersionEntry | None = None
+        wip: VersionedKeyValueStore.UpdateEntry | None = None
 
         def __iter__(self):
             """Returns an iterator over the committed versions plus the wip entry if it exists."""
@@ -101,7 +106,7 @@ class VersionedKeyValueStore(KeyValueStore[str, object]):
 
         self.key_value_store[object_id] = VersionedKeyValueStore.KVStoreEntry(
             committed=[
-                VersionedKeyValueStore.VersionEntry(
+                VersionedKeyValueStore.UpdateEntry(
                     start_validity=0, value=copy.deepcopy(_object)
                 )
             ],
@@ -135,10 +140,8 @@ class VersionedKeyValueStore(KeyValueStore[str, object]):
             raise Exception(f"object {object_id} not found in the store")
 
         # create a new entry for the kv store that marks the object as deleted:
-        new_entry: VersionedKeyValueStore.VersionEntry = (
-            VersionedKeyValueStore.VersionEntry(
-                start_validity=0, value=None, deleted=True
-            )
+        new_entry: VersionedKeyValueStore.DeleteEntry = (
+            VersionedKeyValueStore.DeleteEntry(start_validity=0)
         )
 
         # add the new entry to the kv store as committed:

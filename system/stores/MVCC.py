@@ -3,7 +3,9 @@ from __future__ import annotations
 import copy
 import pprint
 from dataclasses import dataclass
-from typing import Dict, ItemsView
+from typing import Dict, ItemsView, cast
+
+from astroid import Delete
 
 from system.interfaces.indexing.Index import KeyValueStore
 from system.interfaces.stores import ACIDStore
@@ -95,18 +97,18 @@ class TransactionalKeyValueStore(VersionedKeyValueStore, ACIDStore):
             not ignore_wip and self.key_value_store[object_id].wip is not None
         ):  # i.e. there is a wip entry for this object
             # get that wip entry:
-            wip_entry: VersionedKeyValueStore.VersionEntry = self.key_value_store[
+            wip_entry: VersionedKeyValueStore.UpdateEntry = self.key_value_store[
                 object_id
             ].wip
 
             # was this wip entry created by TA <timestamp>?
             if wip_entry.start_validity == timestamp:
                 # wip-entry marks a deleted object, return None
-                if wip_entry.deleted:
+                if type(wip_entry) is VersionedKeyValueStore.DeleteEntry:
                     return None
                 else:
                     # i.e. we return the version of the object that is currently being modified by this TA_id:
-                    return wip_entry.value
+                    return cast(VersionedKeyValueStore.UpdateEntry, wip_entry).value
 
             # else:
             # wip entry belongs to another transaction, nothing to do here
@@ -114,7 +116,7 @@ class TransactionalKeyValueStore(VersionedKeyValueStore, ACIDStore):
         # post/else: there is no wip entry for object <object_id> by TA <TA_id>
 
         # get all committed versions of this object (under snapshot isolation) from the system:
-        committed_object_versions: list[VersionedKeyValueStore.VersionEntry] = (
+        committed_object_versions: list[VersionedKeyValueStore.UpdateEntry] = (
             self.key_value_store[object_id].committed
         )
 
@@ -133,7 +135,7 @@ class TransactionalKeyValueStore(VersionedKeyValueStore, ACIDStore):
             )
 
         # get the version of this object visible to TA <TA_id> under snapshot isolation:
-        visible_version_to_TA_id_list: list[VersionedKeyValueStore.VersionEntry] = list(
+        visible_version_to_TA_id_list: list[VersionedKeyValueStore.UpdateEntry] = list(
             filter(
                 # version must have existed (in the sense of committed! NOT started!) before TA_id started:
                 # note: do not filter for deleted at this point!
@@ -146,15 +148,19 @@ class TransactionalKeyValueStore(VersionedKeyValueStore, ACIDStore):
         # note that there may be multiple committed and also deleted versions of the object
         # that are visible to TA <TA_id> under snapshot isolation
         # so, we return the last one in the list:
-        last_committed_version_visible_to_TA_id: VersionedKeyValueStore.VersionEntry = (
+        last_committed_version_visible_to_TA_id: VersionedKeyValueStore.UpdateEntry = (
             visible_version_to_TA_id_list[-1]
         )
 
         # if the last committed version was deleted, we return None:
-        if last_committed_version_visible_to_TA_id.deleted:
+        if isinstance(
+            last_committed_version_visible_to_TA_id, VersionedKeyValueStore.DeleteEntry
+        ):
             return None
         else:
             # some asserts to (again) check the correctness of the implementation:
+            if last_committed_version_visible_to_TA_id.value is None:
+                print("sdfd")
             assert last_committed_version_visible_to_TA_id.value is not None
             assert last_committed_version_visible_to_TA_id.start_validity is not None
             assert last_committed_version_visible_to_TA_id.start_validity < timestamp
@@ -180,7 +186,7 @@ class TransactionalKeyValueStore(VersionedKeyValueStore, ACIDStore):
         for object_id, entry in self.key_value_store.items():
             # get the most recent committed version of the object available (rather than the version seen under
             # snapshot isolation), i.e. the last element in the committed list:
-            most_recent_entry: VersionedKeyValueStore.VersionEntry = entry.committed[-1]
+            most_recent_entry: VersionedKeyValueStore.UpdateEntry = entry.committed[-1]
 
             # if the last committed version was deleted, we skip it:
             if most_recent_entry.deleted:
@@ -297,8 +303,8 @@ class TransactionalKeyValueStore(VersionedKeyValueStore, ACIDStore):
             )
 
         # create a new entry and copy of the updated object for the kv store:
-        new_entry: VersionedKeyValueStore.VersionEntry = (
-            VersionedKeyValueStore.VersionEntry(
+        new_entry: VersionedKeyValueStore.UpdateEntry = (
+            VersionedKeyValueStore.UpdateEntry(
                 start_validity=TA_id, value=copy.deepcopy(updated_object)
             )
         )
@@ -335,10 +341,8 @@ class TransactionalKeyValueStore(VersionedKeyValueStore, ACIDStore):
             )
 
         # create a new entry for the kv store that marks the object as deleted:
-        new_entry: VersionedKeyValueStore.VersionEntry = (
-            VersionedKeyValueStore.VersionEntry(
-                start_validity=TA_id, value=None, deleted=True
-            )
+        new_entry: VersionedKeyValueStore.DeleteEntry = (
+            VersionedKeyValueStore.DeleteEntry(start_validity=TA_id)
         )
 
         # add the new entry to the kv store as wip (work in progress):
@@ -580,7 +584,7 @@ class TransactionalKeyValueStore(VersionedKeyValueStore, ACIDStore):
         # let all wip objects of TA <TA_id> become a new committed version:
         # i.e. we move all objects modified by this TA from wip to committed:
         for object_id in self.TD[TA_id].write_set:
-            wip_entry: VersionedKeyValueStore.VersionEntry = self.key_value_store[
+            wip_entry: VersionedKeyValueStore.UpdateEntry = self.key_value_store[
                 object_id
             ].wip
 
@@ -591,7 +595,10 @@ class TransactionalKeyValueStore(VersionedKeyValueStore, ACIDStore):
             assert wip_entry.start_validity < commit_timestamp_for_this_TA
 
             # either the value is not None or the entry is deleted:
-            assert wip_entry.value is not None or wip_entry.deleted
+
+            assert isinstance(
+                wip_entry, VersionedKeyValueStore.UpdateEntry
+            ) or isinstance(wip_entry, VersionedKeyValueStore.DeleteEntry)
 
             # change start_validity to become the commit timestamp:
             wip_entry.start_validity = commit_timestamp_for_this_TA

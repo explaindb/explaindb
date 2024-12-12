@@ -37,7 +37,13 @@ class StoreTestAnomalies(AbstractUnitTest):
                 self.assertEqual(
                     tkvs.key_value_store[object_id].wip.start_validity, TA_id
                 )
-                self.assertFalse(tkvs.key_value_store[object_id].wip.deleted)
+                self.assertTrue(
+                    isinstance(
+                        tkvs.key_value_store[object_id].wip,
+                        VersionedKeyValueStore.UpdateEntry,
+                    )
+                )
+
                 # instances must be different, i.e. we created a copy:
                 self.assertNotEqual(
                     id(_object), id(tkvs.key_value_store[object_id].wip.value)
@@ -102,8 +108,8 @@ class StoreTestAnomalies(AbstractUnitTest):
         # bypass store semantics and add a new committed version
         # simulating an insert from another concurrent transaction with a greater TA_ID than <TA_ID>:
         tkvs.key_value_store["4242"].committed.append(
-            VersionedKeyValueStore.VersionEntry(
-                TA_ID + 1, value=StoreTestAnomalies.Stuff(45, 45)
+            VersionedKeyValueStore.UpdateEntry(
+                start_validity=TA_ID + 1, value=StoreTestAnomalies.Stuff(45, 45)
             )
         )
         self.assertEqual(len(tkvs.key_value_store["4242"].committed), 2)
@@ -128,14 +134,14 @@ class StoreTestAnomalies(AbstractUnitTest):
         # build a committed list and force it into the store:
         tkvs.key_value_store[object_id] = VersionedKeyValueStore.KVStoreEntry(
             committed=[
-                VersionedKeyValueStore.VersionEntry(
-                    0, value=StoreTestAnomalies.Stuff(45, 45)
+                VersionedKeyValueStore.UpdateEntry(
+                    start_validity=0, value=StoreTestAnomalies.Stuff(45, 45)
                 ),
-                VersionedKeyValueStore.VersionEntry(
-                    5, value=StoreTestAnomalies.Stuff(47, 45)
+                VersionedKeyValueStore.UpdateEntry(
+                    start_validity=5, value=StoreTestAnomalies.Stuff(47, 45)
                 ),
-                VersionedKeyValueStore.VersionEntry(
-                    8, value=StoreTestAnomalies.Stuff(49, 45)
+                VersionedKeyValueStore.UpdateEntry(
+                    start_validity=8, value=StoreTestAnomalies.Stuff(49, 45)
                 ),
             ]
         )
@@ -150,7 +156,7 @@ class StoreTestAnomalies(AbstractUnitTest):
 
         # intentionally destroy commit order in the committed list:
         tkvs.key_value_store[object_id].committed.append(
-            VersionedKeyValueStore.VersionEntry(
+            VersionedKeyValueStore.UpdateEntry(
                 4, value=StoreTestAnomalies.Stuff(50, 45)
             )
         )
@@ -337,8 +343,12 @@ class StoreTestAnomalies(AbstractUnitTest):
         # and nothing was added to the commit list:
         self.assertEqual(len(tkvs.key_value_store[object_id].committed), 1)
 
-        # we have a wip entry now:
-        self.assertIsNone(tkvs.key_value_store[object_id].wip.value)
+        # we have aa delete marker now:
+        self.assertTrue(
+            isinstance(
+                tkvs.key_value_store[object_id].wip, VersionedKeyValueStore.DeleteEntry
+            )
+        )
 
         # and it is from TA_ID:
         self.assertEqual(tkvs.key_value_store[object_id].wip.start_validity, TA_ID)
