@@ -6,8 +6,6 @@ from attr import dataclass
 
 from system.interfaces.queues import (
     QueueFactory,
-    WriteQueue,
-    ReadQueue,
     ReadWriteQueue,
 )
 
@@ -20,7 +18,7 @@ logging.basicConfig(
 
 
 class RunMetadata:
-    """RunMetadata is a class to store the name of a run file and its size (number of objects)."""
+    """RunMetadata is a helper class allowing us to keep track of queues in external memory algorithms."""
 
     def __init__(self, queue: ReadWriteQueue, size: int):
         """Initializes the RunMetadata.
@@ -46,7 +44,12 @@ class RunMetadata:
 
 @dataclass
 class RunGenerationResult:
+    """RunGenerationResult is a helper class to store the result of the run generation phase."""
+
+    # list of RunMetadata instances:
     runs_metadata: list[RunMetadata]
+
+    # total number of elements written while creating runs:
     elements_written: int
 
 
@@ -79,7 +82,7 @@ class RunGenerator[ObjectType]:
         while True:
             buffer: list[ObjectType] = list[ObjectType]()
             count: int = 0
-            # draw elements from the input data and append them to the buffer:
+            # draw elements from the input data iterator and append them to the buffer:
             for element in self.input_data:
                 buffer.append(element)
                 count += 1
@@ -100,16 +103,16 @@ class RunGenerator[ObjectType]:
             for element in buffer:
                 queue.insert(element)
 
-            # flush the queue to disk:
+            # flush the queue (to allow memory-backed implementations to flush to disk):
             queue.flush()
 
-            # add the run metadata to the list of run metadata:
             # flush the write queue buffer to disk:
             elements_in_run: int = queue.size()
 
-            # collect metadata about this run:
+            # add the run metadata for this run/queue to the list of run metadata:
             runs_metadata.append(RunMetadata(queue=queue, size=elements_in_run))
 
+            # update the number of elements written:
             elements_written += elements_in_run
 
         return RunGenerationResult(runs_metadata, elements_written)
@@ -117,11 +120,12 @@ class RunGenerator[ObjectType]:
 
 class SingleStreamMerge[ObjectType](Iterator):
     """Merges k sorted input streams into a single sorted output stream. This is a single merge, not a recursive
-    merge."""
+    merge. As this implementation is lazy/demand-driven it can also be used for the final merge of a recursive merge.
+    """
 
     class HeapEntry[ObjectType]:
-        """HeapEntry is a class to store the value of an element and the read queue it came from. It is used to store
-        the smallest element of each run in the heap."""
+        """HeapEntry is a helper class to store the value of an element and the read queue it came from. It is used
+        to store the smallest element (=highest priority) of each run in the heap."""
 
         def __init__(self, queue: ReadWriteQueue):
             """Initializes the HeapEntry.
@@ -129,6 +133,7 @@ class SingleStreamMerge[ObjectType](Iterator):
             @param queue: The queue to get the next element from.
             """
             self.queue = queue
+            # iterator rewiring:
             self.iterator = iter(queue)
             self.value: ObjectType = self.iterator.__next__()
 
@@ -170,6 +175,7 @@ class SingleStreamMerge[ObjectType](Iterator):
         run_info: RunMetadata
         for run_info in self.run_infos:
             queue: ReadWriteQueue[ObjectType] = run_info.queue
+
             # give each queue the same memory limit:
             memory_per_queue: int = self.number_of_tuples_in_main_memory // len(
                 self.run_infos
@@ -220,9 +226,9 @@ class SingleStreamMerge[ObjectType](Iterator):
 
 
 class ExternalMergeSort[ObjectType](Iterator):
-    """ExternalMergeSort is a class to merge sorted runs recursively based on arbitrary queues (which may be external
-    queues). ExternalMergeSort is an iterator that returns the next element in the
-    sorted runs and thus can directly be used in for loops. The last merge is online (on demand).
+    """ExternalMergeSort is a class to merge sorted runs recursively based on arbitrary queues (which may be list-based
+    or external or whatever queues). ExternalMergeSort is an iterator that returns the next element in the
+    sorted runs and thus can directly be used in for loops. The final merge is online (on demand).
     """
 
     def __init__(
@@ -245,11 +251,13 @@ class ExternalMergeSort[ObjectType](Iterator):
         self.number_of_tuples_in_main_memory = number_of_tuples_in_main_memory
         self.fan_in = fan_in
 
+        # heap to keep track of the runs:
         self.heap: list[RunMetadata] = list[RunMetadata]()
+        # final merge iterator:
         self.final_merge: Iterator | None = None
 
     def create_runs(self) -> None:
-        """phase 0: create runs"""
+        """phase 0: create runs for the input data."""
 
         # get a run generator instance that will do all the work of phase 0:
         rg: RunGenerator[ObjectType] = RunGenerator[ObjectType](
@@ -273,7 +281,7 @@ class ExternalMergeSort[ObjectType](Iterator):
 
     def _grab_next_fan_in_runs_and_merge_them(self) -> None:
         """Phase i>0: Merges the next <self.fan_in> runs till only one final merge is left to be done online.
-        This is a helper function to merge().
+        This is a helper function to merge(). This will NOT perform the final merge.
         """
 
         # next_runs will contain the next self.fan_in runs to be merged in a non-online fashion
@@ -310,6 +318,7 @@ class ExternalMergeSort[ObjectType](Iterator):
                 self.number_of_tuples_in_main_memory - memory_for_ssm
             )
 
+            # asserts to check memory distribution:
             assert memory_for_ssm > len(
                 next_runs
             ), "memory_for_ssm too low, not even one element per run available"
@@ -323,6 +332,7 @@ class ExternalMergeSort[ObjectType](Iterator):
                 == self.number_of_tuples_in_main_memory
             )
 
+            # initialize a merge for the next runs:
             ssm: SingleStreamMerge = SingleStreamMerge(
                 next_runs,
                 self.queue_factory,
@@ -337,20 +347,20 @@ class ExternalMergeSort[ObjectType](Iterator):
             for element in ssm:
                 queue.insert(element)
 
-            # force it to disk/SSD:
+            # flush to allow implementations to force it to disk/SSD:
             queue.flush()
 
             # collect metadata about this run:
             new_run_info = RunMetadata(queue=queue, size=queue.size())
 
-            # add metadata to the heap:
+            # add metadata to the heap and maintain heap property:
             heapq.heappush(self.heap, new_run_info)
 
             logger.info("output run:")
             logger.info(new_run_info)
 
     def merge(self) -> None:
-        """Phase i>0: Merges the runs till only one final merge is left to be done online."""
+        """Phase i>0: Merges the runs iteratively till only one final merge is left to be done online."""
 
         # grab next self.fan_in runs and merge them:
         ssm_counter: int = 0
@@ -361,6 +371,7 @@ class ExternalMergeSort[ObjectType](Iterator):
             ssm_counter += 1
 
         # post: only one final merge is left to be done online:
+        # initialize the final merge:
         ssm: SingleStreamMerge = SingleStreamMerge(
             self.heap,
             self.queue_factory,
@@ -369,6 +380,9 @@ class ExternalMergeSort[ObjectType](Iterator):
 
         # set the final merge to be the online merge:
         self.final_merge: Iterable = ssm
+
+        assert len(self.heap) <= self.fan_in
+        # post: runs were merged, now we have <= self.fan_in runs left in the heap
 
     def __next__(self) -> None:
         """Returns the next element in the sorted runs. This is the online merge."""
