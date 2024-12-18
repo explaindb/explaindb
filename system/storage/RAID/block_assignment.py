@@ -6,8 +6,8 @@ from attr import dataclass
 
 @dataclass
 class PhysicalBlockPosition:
-    """Data class to store the physical position of a block in the disk array.
-    Note that (disk_ID, internal_block_ID) is a unique identifier for a block in the disk array.
+    """Data class to store the physical position of a block in the disk subsystem.
+    Note that (disk_ID, internal_block_ID) is a unique identifier for a block in the disk subsystem.
     """
 
     # disk ID where to find this logical block
@@ -26,7 +26,7 @@ class RAID_Level(ABC):
         self, logical_block_ID: int, number_of_disks: int
     ) -> list[PhysicalBlockPosition]:
         """Given a logical block ID and the number of disks, returns a list of the physical block positions of the
-        block in the underlying disk/SSD/whatever array.
+        block in the underlying disk/SSD/whatever subsystem.
 
         @param logical_block_ID: The logical block ID
         @param number_of_disks: The number of available disks
@@ -144,9 +144,9 @@ def compute_assignment(
 ) -> list[str]:
     """Computes the assignment of logical block IDs to physical block IDs for a given RAID level.
 
-    @param rows: The number of rows in the disk array, i.e. the number of internal blocks per disk tom compute for
+    @param rows: The number of rows in the disk subsystem, i.e. the number of internal blocks per disk tom compute for
     all disks
-    @param number_of_disks: The number of disks in the disk array
+    @param number_of_disks: The number of disks in the disk subsystem
     @param RAID_level: The RAID level to compute the assignment for, possible values: 0, 1, 4, 5
 
     @return: A list of strings representing the assignment of logical block IDs to physical block IDs
