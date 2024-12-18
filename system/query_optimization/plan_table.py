@@ -115,11 +115,11 @@ class SizeBasedPlanTable(PlanTable):
         :param costs: The new costs.
         """
         combined: Subproblem = left | right
-        self.entries[len(combined) - 1][combined] = (
+        self.entries[combined.set_bits() - 1][combined] = (
             costs,
             (
-                self.entries[len(left) - 1][left][1],
-                self.entries[len(right) - 1][right][1],
+                self.entries[left.set_bits() - 1][left][1],
+                self.entries[right.set_bits() - 1][right][1],
             ),
         )
 
@@ -129,7 +129,7 @@ class SizeBasedPlanTable(PlanTable):
         :param subproblem: The subproblem to check.
         :return: True, if the subproblem is contained, False if not.
         """
-        return subproblem in self.entries[len(subproblem) - 1]
+        return subproblem in self.entries[subproblem.set_bits() - 1]
 
     def entries_with_size(self, k: int, start_index: int = 0):
         """
@@ -148,7 +148,7 @@ class SizeBasedPlanTable(PlanTable):
         :param subproblem: The subproblem.
         :return: The costs for the subproblem.
         """
-        return self.entries[len(subproblem) - 1][subproblem][0]
+        return self.entries[subproblem.set_bits() - 1][subproblem][0]
 
     def get_plan_for_subproblem(self, subproblem: Subproblem):
         """
@@ -156,4 +156,4 @@ class SizeBasedPlanTable(PlanTable):
         :param subproblem: The subproblem.
         :return: The plan for the subproblem.
         """
-        return self.entries[len(subproblem) - 1][subproblem][1]
+        return self.entries[subproblem.set_bits() - 1][subproblem][1]

@@ -39,3 +39,14 @@ class Order:
             self.person_name == other.person_name
             and self.book_title == other.book_title
         )
+
+
+@dataclass(eq=False)
+class Address:
+    id: int
+    city: str
+    street: str
+    house_number: int
+
+    def __eq__(self, other):
+        return self.id == other.id

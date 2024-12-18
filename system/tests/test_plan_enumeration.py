@@ -19,7 +19,7 @@ from system.query_optimization.join_graph import (
 
 class PlanEnumerationTests(unittest.TestCase):
     def test_SubproblemOperations(self):
-        x: Subproblem = Subproblem(0b1010)
+        x: Subproblem = Subproblem(0b01010)
         y: Subproblem = Subproblem(0b10010)
         self.assertNotEqual(x, y)
         self.assertNotEqual(x, 0b1010)
@@ -31,8 +31,8 @@ class PlanEnumerationTests(unittest.TestCase):
         self.assertEqual(x - y, x - y)
         self.assertEqual(hash(x), 0b1010)
         self.assertEqual(hash(y), 0b10010)
-        self.assertEqual(len(x), 0b10)
-        self.assertEqual(len(x), len(y))
+        self.assertEqual(len(x), 4)
+        self.assertNotEqual(len(x), len(y))
         self.assertSetEqual({1, 3}, x.as_set())
         self.assertSetEqual({1, 4}, y.as_set())
         self.assertEqual(str(x), str(x.as_set()))

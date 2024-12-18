@@ -1,0 +1,6 @@
+[report]
+exclude_also =
+    def __repr__
+    raise
+    pass
+    unittest.main
