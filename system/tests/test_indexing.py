@@ -1,13 +1,16 @@
 import unittest
 
 from system.indexes.btree import BPlusTree
+from system.indexes.christmas_tree import ChristmasTree
 from system.indexes.indexes import (
     PythonDictionaryIndex,
 )
+from system.indexes.radix_trie import RadixTrie, KeyMapping
 from system.stores.IndexedMVCC import IndexedTransactionalKeyValueStore
 from faker import Faker
 
 from system.tests.abstract_unit_test import AbstractUnitTest
+from system.utils import Triangle, Vector, Descriptor
 
 Faker.seed(42)
 
@@ -277,6 +280,111 @@ class BPlusTreeTest(unittest.TestCase):
                 if values_expected != values_got:
                     btree.show()
                 self.assertListEqual(values_expected, values_got)
+
+
+class RadixTrieTest(unittest.TestCase):
+    class PrefixDigitMapping(KeyMapping[str, int]):
+        """A simple implementation of a key mapping that maps a key to a bucket based on a prefix.
+        On each level we take one character of the key and map it to a bucket.
+        """
+
+        def map(self, key: str, level: int, descriptor: Descriptor = None) -> int:
+            """Maps the given key to a bucket at the given level.
+            @param key: The key to map.
+            @param level: The level of the mapping.
+            @param descriptor: The optional descriptor to use for the mapping.
+
+            """
+            assert type(int(key)) == int
+            assert level < len(key)
+
+            return int(key[level : level + 1])
+
+    def test_radix_trie(self):
+
+        prefix_mapping: RadixTrieTest.PrefixDigitMapping = (
+            RadixTrieTest.PrefixDigitMapping()
+        )
+        self.assertEqual(prefix_mapping.map("35576", 0), 3)
+        self.assertEqual(prefix_mapping.map("324564", 1), 2)
+        self.assertEqual(prefix_mapping.map("324456456", 1), 2)
+
+        trie: RadixTrie[str, str] = RadixTrie[str, str](
+            key_mapping=prefix_mapping,
+            children_per_inner_node=4,
+            number_of_inner_node_levels=1,
+        )
+
+        trie.put("32", "g")
+        trie.put("33", "s")
+        trie.put("13", "f")
+        # trie.show()
+
+        trie: RadixTrie[str, str] = RadixTrie[str, str](
+            key_mapping=prefix_mapping,
+            children_per_inner_node=2,
+            number_of_inner_node_levels=3,
+        )
+        trie.put("110", "a")
+        trie.put("101", "b")
+        trie.put("010", "c")
+        # trie.show()
+
+        for number_of_inner_node_levels in [0, 1, 2, 3]:
+            for children_per_inner_node in [2, 3, 7, 15]:
+                trie: RadixTrie[str, str] = RadixTrie[str, str](
+                    key_mapping=prefix_mapping,
+                    children_per_inner_node=children_per_inner_node,
+                    number_of_inner_node_levels=number_of_inner_node_levels,
+                )
+                # nodes created by the trie:
+                actual_nodes: int = trie.number_of_nodes()
+
+                # nodes expected to be created by the trie:
+                inner_nodes: int = sum(
+                    [
+                        children_per_inner_node**level
+                        for level in range(number_of_inner_node_levels)
+                    ]
+                )
+                leaves: int = children_per_inner_node**number_of_inner_node_levels
+                total_nodes: int = inner_nodes + leaves
+
+                self.assertEqual(actual_nodes, total_nodes)
+
+
+class ChristmasTreeTest(unittest.TestCase):
+
+    def test_christmas_tree(self):
+        triangle: Triangle = Triangle(Vector(0, 0), Vector(300, 0), Vector(150, 300))
+
+        # check different variants of the ChristmasTree by varying the inner_node_factory:
+        for node_factory in [
+            ChristmasTree.InnerNodeFactory[Vector, str](config="inner"),
+            ChristmasTree.InnerNodeFactory[Vector, str](config="buffered"),
+            ChristmasTree.InnerNodeFactory[Vector, str](config="crystalball"),
+        ]:
+            christmas_trie: ChristmasTree[Vector, str] = ChristmasTree[Vector, str](
+                children_per_inner_node=4,
+                descriptor=triangle,
+                number_of_inner_node_levels=2,
+                inner_node_factory=node_factory,
+            )
+            # christmas_trie.show()
+
+            for i in range(1000):
+                v: Vector
+                while True:
+                    v = Vector(random.randint(0, 300), random.randint(0, 300))
+                    if triangle.contains(v):
+                        break
+                christmas_trie.put(v, str(i))
+                # christmas_trie.show()
+
+                # test get
+                # christmas_trie.show()
+                self.assertIn(str(i), list(christmas_trie.get(v)))
+            # christmas_trie.show()
 
 
 if __name__ == "__main__":

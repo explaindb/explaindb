@@ -1,0 +1,386 @@
+from __future__ import annotations
+from abc import ABC, abstractmethod
+from typing import Iterator
+
+from IPython.core.display_functions import display
+from ipycanvas import Canvas
+from jedi.inference.gradual.type_var import TypeVar
+
+from system.interfaces.indexing.Index import KeyValueStore, PutInfo
+from system.utils import Descriptor, Drawable
+
+
+class KeyMapping[Key, int](ABC):
+    """Maps a key to a value"""
+
+    @abstractmethod
+    def map(self, key: Key, level: int, descriptor: Descriptor = None) -> int:
+        """Maps the given key to a bucket at the given level.
+
+        @param key: The key to map.
+        @param level: The level of the mapping.
+        @param descriptor: The optional descriptor to use for the mapping.
+
+        @return: The bucket index from 0 to max_buckets of an inner_node - 1.
+        """
+        pass
+
+
+class RadixTrie[Key, Value](KeyValueStore[Key, Value], Drawable):
+    """A simple implementation of a radix trie data structure."""
+
+    class AbstractNode(KeyValueStore[Key, Value], Drawable, ABC):
+
+        def __init__(self):
+            """Create a new abstract node. Sets a node counter to 0"""
+            self.count: int = 0
+
+        def get(self, key: Key, level: int = 0) -> Iterator[Value]:
+            pass
+
+        def put(self, key: Key, value: Value, level: int = 0) -> None | PutInfo:
+            pass
+
+        def size(self) -> int:
+            return self.count
+
+        def flush(self, key: Key | None = None) -> None:
+            raise NotImplementedError
+
+        def delete(self, key: Key, value: Value = None) -> None:
+            raise NotImplementedError
+
+        def show(self, indent: str = "") -> None:
+            pass
+
+        def draw(
+            self,
+            canvas: Canvas,
+            canvas_height: int = 0,
+            x_offset: int = 0,
+            y_offset: int = 0,
+        ):
+            """Draw this instance on the given canvas."""
+            pass
+
+    class InnerNode[Key, Value](AbstractNode[Key, Value]):
+        def __init__(
+            self,
+            key_mapping: KeyMapping[Key, Value] = None,
+            parent_descriptor: Descriptor = None,  # not needed for the index but for the viz
+        ):
+            super().__init__()
+            # derive the child descriptors:
+            self.children_descriptors: list[Descriptor] | None = None
+            if parent_descriptor is not None:
+                self.children_descriptors = list(
+                    parent_descriptor.split_into_sub_descriptors()
+                )
+            self.parent_descriptor = parent_descriptor
+
+            self.key_mapping: KeyMapping[Key, Value] = key_mapping
+            self.children: list[RadixTrie.AbstractNode] = list[RadixTrie.AbstractNode]()
+
+        def show(self, indent: str = "") -> None:
+            print(indent + "InnerNode {")
+            child: RadixTrie.AbstractNode
+            for index, child in enumerate(self.children):
+                if self.children_descriptors is not None:
+                    print(indent + "\tdescriptor: ", self.children_descriptors[index])
+                # print(indent + "\t", index, ":")
+                child.show(indent=indent + "\t")
+            print(indent + "}")
+
+        def draw(
+            self,
+            canvas: Canvas,
+            canvas_height: int = 0,
+            x_offset: int = 0,
+            y_offset: int = 0,
+        ):
+            """Draw this instance on the given canvas."""
+            if self.children_descriptors is not None:
+                for index, child in enumerate(self.children):
+                    self.children_descriptors[index].draw(
+                        canvas,
+                        canvas_height=canvas_height,
+                        x_offset=x_offset,
+                        y_offset=y_offset,
+                    )
+            child: RadixTrie.AbstractNode
+            for child in self.children:
+                child.draw(
+                    canvas,
+                    canvas_height=canvas_height,
+                    x_offset=x_offset,
+                    y_offset=y_offset,
+                )
+
+        def _get_radix(self, key: Key, value: Value, level: int = 0) -> int:
+            """Get the radix for the given key at the given level."""
+            radix: int | None = None
+            if self.children_descriptors is None:
+                # descriptor-free search:
+                radix: int = self.key_mapping.map(key, level)
+            else:
+                # use descriptors to find the correct child:
+                # loop over all children descriptors:
+                for i in range(len(self.children_descriptors)):
+                    # check for containment
+                    if self.children_descriptors[i].contains(key):
+                        # first match wins:
+                        radix: int = i
+                        break
+
+                if radix is None:
+                    raise ValueError(f"Key {key} not contained in any child descriptor")
+
+            return radix
+
+        def get(self, key: Key, level: int = 0) -> Iterator[Value]:
+            radix: int = self._get_radix(key, level)
+            return self.children[radix].get(key, level + 1)
+
+        def put(self, key: Key, value: Value, level: int = 0) -> None | PutInfo:
+            radix: int = self._get_radix(key, level)
+            return self.children[radix].put(key, value, level + 1)
+
+    class LeafNode[Key, Value](AbstractNode[Key, Value]):
+
+        def __init__(
+            self,
+            parent_descriptor: Descriptor = None,
+            left_sibling: RadixTrie.LeafNode[Key, Value] | None = None,
+        ):
+            """Create a new leaf node.
+            @param parent_descriptor: The parent descriptor. THis is technically not needed but required for the
+            visualization.
+            @param left_sibling: The left sibling of this leaf node. This allows us to put all leaves in a chain for
+            ISAM.
+
+            """
+            super().__init__()
+            self.parent_descriptor = parent_descriptor
+            self.values: list[tuple[Key, Value]] = list[tuple[Key, Value]]()
+            self.left_sibling: RadixTrie.LeafNode[Key, Value] | None = left_sibling
+
+        def show(self, indent: str = "") -> None:
+            print(indent + "LeafNode {")
+            print(indent + f"  values: {self.values}")
+            print(indent + "},")
+
+        def draw(
+            self,
+            canvas: Canvas,
+            canvas_height: int = 0,
+            x_offset: int = 0,
+            y_offset: int = 0,
+        ):
+            """Draw this instance on the given canvas. This only works if the key is of type Drawable."""
+            key: Drawable
+            val: Value
+
+            for key, val in self.values:
+                key.draw(canvas, canvas_height, x_offset, y_offset)
+
+            if self.left_sibling is not None:
+                # draw ISAM line, this corresponds to space filling curve over the sub-descriptors!:
+                x_from: int = x_offset + self.left_sibling.parent_descriptor.center().x
+                y_from: int = canvas_height - (
+                    y_offset + self.left_sibling.parent_descriptor.center().y
+                )
+                x_to: int = x_offset + self.parent_descriptor.center().x
+                y_to: int = canvas_height - (
+                    y_offset + self.parent_descriptor.center().y
+                )
+                # yellow golden line:
+                canvas.stroke_style = "#FFD700"
+                canvas.line_width = 5
+                canvas.begin_path()
+                canvas.move_to(x_from, y_from)
+                canvas.line_to(x_to, y_to)
+                canvas.stroke()
+
+        def put(self, key: Key, value: Value, level: int = 0) -> None | PutInfo:
+            self.count += 1
+            self.values.append((key, value))
+            return None
+
+        def get(self, key: Key, level: int = 0) -> Iterator[Value]:
+            for k, v in self.values:
+                if k == key:
+                    yield v
+
+    class InnerNodeFactory[Key, Value]:
+        """A factory that creates new RadixTrie.InnerNode instances."""
+
+        def new_instance(
+            self,
+            key_mapping: KeyMapping[Key, Value] = None,
+            new_descriptor: Descriptor = None,
+        ) -> RadixTrie.InnerNode[Key, Value]:
+
+            return RadixTrie.InnerNode[Key, Value](key_mapping, new_descriptor)
+
+    class LeafFactory[Key, Value]():
+        """A factory that creates new RadixTrie.LeafNode instances."""
+
+        def new_instance(
+            self, parent_descriptor, previous_leaf
+        ) -> RadixTrie.LeafNode[Key, Value]:
+
+            return RadixTrie.LeafNode[Key, Value](parent_descriptor, previous_leaf)
+
+    def __init__(
+        self,
+        key_mapping: KeyMapping[Key, Value],
+        children_per_inner_node: int,
+        inner_node_factory: RadixTrie.InnerNodeFactory[Key, Value] = InnerNodeFactory[
+            Key, Value
+        ](),
+        leaf_factory: RadixTrie.LeafFactory[Key, Value] = LeafFactory[Key, Value](),
+        descriptor: Descriptor = None,
+        number_of_inner_node_levels: int = 0,
+    ):
+        super().__init__()
+        self.key_mapping: KeyMapping[Key, Value] = key_mapping
+        self.children_per_inner_node: int = children_per_inner_node
+        self.inner_node_factory: RadixTrie.InnerNodeFactory[Key, Value] = (
+            inner_node_factory
+        )
+        self.leaf_factory: RadixTrie.LeafFactory[Key, Value] = leaf_factory
+        self.descriptor: Descriptor = descriptor
+        self.number_of_inner_node_levels: int = number_of_inner_node_levels
+
+        # element count for the entire trie:
+        self.count: int = 0
+
+        # root node:
+        self.root: RadixTrie.AbstractNode[Key, Value] | None = None
+
+        self.node_count: int = self._build_trie()
+
+    def number_of_nodes(self) -> int:
+        return self.node_count
+
+    def _build_trie(self) -> int:
+        """Builds the trie based on self.number_of_inner_node_levels and the node and leaf factories given.
+        @return: The number of nodes in this trie."""
+
+        node_count: int = 0
+
+        if self.number_of_inner_node_levels == 0:
+            # no inner nodes, simply create a leaf node and return:
+            self.root: RadixTrie.AbstractNode[Key, Value] = (
+                self.leaf_factory.new_instance(
+                    parent_descriptor=self.descriptor, previous_leaf=None
+                )
+            )
+            node_count = 1
+            return node_count
+
+        # post condition: at least one inner node level:
+
+        # dictionary to store nodes to process at each level:
+        # helper structure to break up the recursion into a level-wise construction of the trie:
+        nodes_to_process: dict[int, list[RadixTrie.AbstractNode[Key, Value]]] = dict[
+            int, list[RadixTrie.AbstractNode[Key, Value]]
+        ]()
+
+        # get the root node:
+        self.root: RadixTrie.AbstractNode[Key, Value] = (
+            self.inner_node_factory.new_instance(
+                key_mapping=self.key_mapping, new_descriptor=self.descriptor
+            )
+        )
+        node_count += 1
+
+        # add the root node to the list of nodes to process at level 0:
+        nodes_to_process[0] = list[RadixTrie.AbstractNode[Key, Value]]([self.root])
+
+        # level-wise construction (expansion) of the trie:
+        for trie_level in range(1, self.number_of_inner_node_levels):
+            node: RadixTrie.InnerNode[Key, Value]
+            nodes_to_process[trie_level] = list[RadixTrie.InnerNode[Key, Value]]()
+
+            # get all nodes from the previous trie_level:
+            for node in nodes_to_process[trie_level - 1]:
+                # for each of those nodes, create children inner nodes:
+                for i in range(self.children_per_inner_node):
+                    # create instance:
+                    new_inner_node: RadixTrie.InnerNode[Key, Value] = (
+                        self.inner_node_factory.new_instance(
+                            self.key_mapping,
+                            (
+                                node.children_descriptors[i]
+                                if node.children_descriptors is not None
+                                else None
+                            ),
+                        )
+                    )
+                    node_count += 1
+                    # append to children list of node:
+                    node.children.append(new_inner_node)
+                    # add to the list of nodes to process at the next level:
+                    nodes_to_process[trie_level].append(new_inner_node)
+
+            # remove all nodes from the previous level from the dictionary as these were processed:
+            del nodes_to_process[trie_level - 1]
+
+        assert len(nodes_to_process) == 1, "nodes from multiple levels in dictionary"
+
+        # maximum key in the dictionary should be the number of inner node levels - 1
+        # This is because the last level is for leaf nodes.
+        max_level: int = max(nodes_to_process.keys())
+        assert max_level == self.number_of_inner_node_levels - 1
+
+        # get the inner nodes from the last level of the trie:
+        previous_leaf = None
+        for node in nodes_to_process[max_level]:
+            assert isinstance(node, RadixTrie.InnerNode), "not an inner node"
+
+            # create leaf nodes as children of the inner node:
+            for i in range(self.children_per_inner_node):
+                new_leaf = self.leaf_factory.new_instance(
+                    node.parent_descriptor, previous_leaf
+                )
+                node.children.append(new_leaf)
+                node_count += 1
+                previous_leaf = new_leaf
+
+        return node_count
+
+    def get(self, key: Key) -> Iterator[Value]:
+        return self.root.get(key, 0)
+
+    def put(self, key: Key, value: Value) -> None | PutInfo:
+        self.count += 1
+        self.root.put(key, value, 0)
+        return None
+
+    def size(self) -> int:
+        return self.count
+
+    def delete(self, key: Key, value: Value = None) -> None:
+        self.count -= 1
+        # TODO: implement delete
+        raise NotImplementedError
+
+    def flush(self, key: Key | None = None) -> None:
+        raise NotImplementedError
+
+    def show(self) -> None:
+        print("RadixTrie:")
+        self.root.show(indent="\t")
+
+    def draw(
+        self,
+        canvas: Canvas,
+        canvas_height: int = 0,
+        x_offset: int = 0,
+        y_offset: int = 0,
+    ):
+        """Draw the radix trie on the given canvas."""
+        self.descriptor.draw(canvas, canvas_height, x_offset, y_offset)
+        self.root.draw(canvas, canvas_height, x_offset, y_offset)
+        # display(canvas)
