@@ -2,9 +2,7 @@ from __future__ import annotations
 from abc import ABC, abstractmethod
 from typing import Iterator
 
-from IPython.core.display_functions import display
 from ipycanvas import Canvas
-from jedi.inference.gradual.type_var import TypeVar
 
 from system.interfaces.indexing.Index import KeyValueStore, PutInfo
 from system.utils import Descriptor, Drawable
@@ -116,12 +114,12 @@ class RadixTrie[Key, Value](KeyValueStore[Key, Value], Drawable):
                     y_offset=y_offset,
                 )
 
-        def _get_radix(self, key: Key, value: Value, level: int = 0) -> int:
+        def _get_radix(self, key: Key, level: int = 0) -> int:
             """Get the radix for the given key at the given level."""
             radix: int | None = None
-            if self.children_descriptors is None:
+            if self.key_mapping:
                 # descriptor-free search:
-                radix: int = self.key_mapping.map(key, level)
+                radix = self.key_mapping.map(key, level)
             else:
                 # use descriptors to find the correct child:
                 # loop over all children descriptors:

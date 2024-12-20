@@ -282,29 +282,28 @@ class BPlusTreeTest(unittest.TestCase):
                 self.assertListEqual(values_expected, values_got)
 
 
-class RadixTrieTest(unittest.TestCase):
-    class PrefixDigitMapping(KeyMapping[str, int]):
-        """A simple implementation of a key mapping that maps a key to a bucket based on a prefix.
-        On each level we take one character of the key and map it to a bucket.
+class PrefixDigitMapping(KeyMapping[str, int]):
+    """A simple implementation of a key mapping that maps a key to a bucket based on a prefix.
+    On each level we take one character of the key and map it to a bucket.
+    """
+
+    def map(self, key: str, level: int, descriptor: Descriptor = None) -> int:
+        """Maps the given key string to a bucket at the given level.
+        @param key: The key string to map.
+        @param level: The level of the mapping.
+        @param descriptor: The optional descriptor to use for the mapping.
+
         """
+        assert level < len(key)
 
-        def map(self, key: str, level: int, descriptor: Descriptor = None) -> int:
-            """Maps the given key to a bucket at the given level.
-            @param key: The key to map.
-            @param level: The level of the mapping.
-            @param descriptor: The optional descriptor to use for the mapping.
+        return int(key[level])
 
-            """
-            assert type(int(key)) == int
-            assert level < len(key)
 
-            return int(key[level : level + 1])
+class RadixTrieTest(unittest.TestCase):
 
     def test_radix_trie(self):
 
-        prefix_mapping: RadixTrieTest.PrefixDigitMapping = (
-            RadixTrieTest.PrefixDigitMapping()
-        )
+        prefix_mapping: PrefixDigitMapping = PrefixDigitMapping()
         self.assertEqual(prefix_mapping.map("35576", 0), 3)
         self.assertEqual(prefix_mapping.map("324564", 1), 2)
         self.assertEqual(prefix_mapping.map("324456456", 1), 2)
