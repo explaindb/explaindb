@@ -1,10 +1,12 @@
 from __future__ import annotations
 import unittest
-from system.interfaces.bit_sequence import BitSequence
 from typing import Type, Generator
 from system.bit_sequences import (
     BitListBitSequence,
     IntegerBitSequence,
+    UncompressedBitSequence,
+    CompressedBitSequence,
+    WAHBitSequence,
 )
 from system.indexes.bitmap_indexes import (
     BitmapIndex,
@@ -16,6 +18,7 @@ from system.data_classes import Address
 
 
 class BitmapIndexTests(unittest.TestCase):
+    WAHBitSequence.WORD_LENGTH = 4
     all_addresses: list[Address] = [
         Address(0, "ac", "as", -2),
         Address(1, "bc", "bs", 1),
@@ -33,7 +36,8 @@ class BitmapIndexTests(unittest.TestCase):
 
     def _test_for_different_settings(
         self,
-        bit_sequence_type: Type[BitSequence],
+        bit_sequence_type: Type[UncompressedBitSequence],
+        compression_type: Type[CompressedBitSequence] | None,
         index_type: Type[BitmapIndex],
     ):
         """
@@ -50,7 +54,7 @@ class BitmapIndexTests(unittest.TestCase):
         )
 
         # Check for cities
-        city_index: index_type = index_type(bit_sequence_type)
+        city_index: index_type = index_type(bit_sequence_type, compression_type)
 
         city_index.bulkload(city_bulkload)
 
@@ -149,7 +153,6 @@ class BitmapIndexTests(unittest.TestCase):
             city_index.get_greater("qc").as_set(),
             set(),
         )
-
         # Greater or Equal
         self.assertEqual(
             city_index.get_greater_or_equal("ac").as_set(),
@@ -181,7 +184,7 @@ class BitmapIndexTests(unittest.TestCase):
         )
 
         # Check for house numbers
-        house_number_index: index_type = index_type(bit_sequence_type)
+        house_number_index: index_type = index_type(bit_sequence_type, compression_type)
 
         house_number_index.bulkload(house_number_bulkload)
 
@@ -268,12 +271,15 @@ class BitmapIndexTests(unittest.TestCase):
             UnsortedEqualityEncodedBitmapIndex,
             RangeEncodedBitmapIndex,
         ]:
-            bit_sequence_type: Type[BitSequence]
+            bit_sequence_type: Type[UncompressedBitSequence]
             for bit_sequence_type in [
                 IntegerBitSequence,
                 BitListBitSequence,
             ]:
-                self._test_for_different_settings(bit_sequence_type, index_type)
+                for compression_type in [WAHBitSequence, None]:
+                    self._test_for_different_settings(
+                        bit_sequence_type, compression_type, index_type
+                    )
 
         index_type: Type[BitmapIndex]
         for index_type in [
@@ -281,13 +287,15 @@ class BitmapIndexTests(unittest.TestCase):
             UnsortedEqualityEncodedBitmapIndex,
             RangeEncodedBitmapIndex,
         ]:
-            bit_sequence_type: Type[BitSequence]
+            bit_sequence_type: Type[UncompressedBitSequence]
             for bit_sequence_type in [
                 IntegerBitSequence,
                 BitListBitSequence,
             ]:
                 # Check for house numbers
-                house_number_index: index_type = index_type(bit_sequence_type)
+                house_number_index: index_type = index_type(
+                    bit_sequence_type, compression_type
+                )
 
                 house_number_bulkload: Generator = (
                     (address.house_number, address.id) for address in self.all_addresses
@@ -295,7 +303,8 @@ class BitmapIndexTests(unittest.TestCase):
 
                 house_number_index.bulkload(house_number_bulkload)
                 self.assertEqual(
-                    house_number_index.stored_bits(), len(self.all_addresses) * 12
+                    house_number_index.get_number_of_bits(),
+                    len(self.all_addresses) * 12,
                 )
 
     def test_unsorted_bit_sequence_list(self):
@@ -327,7 +336,7 @@ class BitmapIndexTests(unittest.TestCase):
                 (data_object.value, data_object.id) for data_object in test_data
             )
 
-        bit_sequence_type: Type[BitSequence]
+        bit_sequence_type: Type[UncompressedBitSequence]
         for bit_sequence_type in [
             IntegerBitSequence,
             BitListBitSequence,

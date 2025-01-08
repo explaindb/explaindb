@@ -4,7 +4,11 @@ from system.interfaces.indexing.bitmap_indexes import (
     BitmapIndex,
 )
 from typing import Type, Iterator
-from system.interfaces.bit_sequence import BitSequence
+from system.interfaces.bit_sequence import (
+    BitSequence,
+    UncompressedBitSequence,
+    CompressedBitSequence,
+)
 from system.bit_sequences import IntegerBitSequence
 
 
@@ -13,8 +17,12 @@ class SortedBitmapIndex[Key, Value](BitmapIndex[Key, Value], ABC):
     Abstract base class for a sorted bitmap index.
     """
 
-    def __init__(self, bit_sequence_type: Type[BitSequence] = IntegerBitSequence):
-        super().__init__(bit_sequence_type)
+    def __init__(
+        self,
+        bit_sequence_type: Type[UncompressedBitSequence] = IntegerBitSequence,
+        compression_type: Type[CompressedBitSequence] | None = None,
+    ):
+        super().__init__(bit_sequence_type, compression_type)
 
         # List of tuples, storing key values and their corresponding bit sequences
         self.key_bit_sequence_list: list[tuple[Key, BitSequence]] = []
@@ -27,8 +35,19 @@ class SortedBitmapIndex[Key, Value](BitmapIndex[Key, Value], ABC):
         self.key_bit_sequence_list.append((key, self._create_empty_bit_sequence()))
 
     def _update_number_of_bits_for_bit_sequences(self, number_of_bits: int) -> None:
-        for _, value in self.key_bit_sequence_list:
-            value.update_number_of_bits(number_of_bits)
+        for _, bit_sequence in self.key_bit_sequence_list:
+            bit_sequence.update_represented_number_of_bits(number_of_bits)
+
+    def _compress_bit_sequences(self) -> None:
+        # Go through each stored bit sequence
+        for idx in range(len(self.key_bit_sequence_list)):
+            # Update the tuple stored by reusing the existing key, and compressing the bit sequence
+            self.key_bit_sequence_list[idx] = (
+                self.key_bit_sequence_list[idx][0],
+                self.compression_type.compress_bit_sequence(
+                    self.key_bit_sequence_list[idx][1]
+                ),
+            )
 
     def bulkload(self, data: Iterator[tuple[Key, Value]], key_prefix: str = "") -> None:
         # Bulkload bit sequences
@@ -41,7 +60,7 @@ class SortedBitmapIndex[Key, Value](BitmapIndex[Key, Value], ABC):
         # Sort list of bit sequences
         self.key_bit_sequence_list.sort(key=lambda x: x[0])  # Sort by key
 
-        # Update key mapping
+        # Update key->bit sequence mapping
         for idx, (key, _) in enumerate(self.key_bit_sequence_list):
             self.key_to_index[key] = idx
 
@@ -55,10 +74,10 @@ class SortedBitmapIndex[Key, Value](BitmapIndex[Key, Value], ABC):
     def size(self) -> int:
         return len(self.key_bit_sequence_list)
 
-    def stored_bits(self) -> int:
+    def get_number_of_bits(self) -> int:
         return sum(
             [
-                bit_sequence.stored_bits()
+                bit_sequence.get_number_of_bits()
                 for (_, bit_sequence) in self.key_bit_sequence_list
             ]
         )
@@ -72,8 +91,12 @@ class UnsortedBitmapIndex[Key, Value](BitmapIndex[Key, Value], ABC):
     Abstract base class for an unsorted bitmap index.
     """
 
-    def __init__(self, bit_sequence_type: Type[BitSequence] = IntegerBitSequence):
-        super().__init__(bit_sequence_type)
+    def __init__(
+        self,
+        bit_sequence_type: Type[UncompressedBitSequence] = IntegerBitSequence,
+        compression_type: Type[CompressedBitSequence] | None = None,
+    ):
+        super().__init__(bit_sequence_type, compression_type)
         # Maps key values to bit sequences
         self.bit_sequence_map: dict[Key, BitSequence] = dict()
 
@@ -82,12 +105,20 @@ class UnsortedBitmapIndex[Key, Value](BitmapIndex[Key, Value], ABC):
 
     def _update_number_of_bits_for_bit_sequences(self, number_of_bits: int) -> None:
         for value in self.bit_sequence_map.values():
-            value.update_number_of_bits(number_of_bits)
+            value.update_represented_number_of_bits(number_of_bits)
 
-    def stored_bits(self) -> int:
+    def _compress_bit_sequences(self) -> None:
+        # Go through each stored bit sequence
+        for key in self.bit_sequence_map:
+            # Compress the bit sequence for each key
+            self.bit_sequence_map[key] = self.compression_type.compress_bit_sequence(
+                self.bit_sequence_map[key]
+            )
+
+    def get_number_of_bits(self) -> int:
         return sum(
             [
-                bit_sequence.stored_bits()
+                bit_sequence.get_number_of_bits()
                 for bit_sequence in self.bit_sequence_map.values()
             ]
         )
@@ -109,10 +140,18 @@ class EqualityEncodedBitmapIndex[Key, Value](BitmapIndex[Key, Value], ABC):
     Implements an equality encoded bitmap index structure.
     """
 
+    def bulkload(self, data: Iterator[tuple[Key, Value]], key_prefix: str = "") -> None:
+        super().bulkload(data, key_prefix)
+
+        # We could also directly insert and compress, which causes notable overhead, thus we first bulkload the
+        # uncompressed bit sequences, and compress them afterward.
+        if self.use_compression:
+            self._compress_bit_sequences()
+
     def get_equal(self, key: Key) -> BitSequence:
         if key not in self:
             # Key is not contained
-            return self._create_empty_bit_sequence()
+            return self._create_empty_bit_sequence(True)
         return self[key]
 
     def _get_smaller_or_equal(self, key: Key) -> BitSequence:
@@ -127,7 +166,9 @@ class SortedEqualityEncodedBitmapIndex[Key, Value](
     """
 
     def _get_smaller(self, key: Key) -> BitSequence:
-        final_result: BitSequence = self._create_empty_bit_sequence()
+        final_result: BitSequence = self._create_empty_bit_sequence(
+            use_compression_if_possible=True
+        )
 
         # Go through and stop when a value was found
         curr_idx: int = 0
@@ -148,7 +189,9 @@ class UnsortedEqualityEncodedBitmapIndex[Key, Value](
     """
 
     def _get_smaller(self, key: Key) -> BitSequence:
-        final_result: BitSequence = self._create_empty_bit_sequence()
+        final_result: BitSequence = self._create_empty_bit_sequence(
+            use_compression_if_possible=True
+        )
 
         # Go through each stored and check whether it is smaller
         for stored_key in self.bit_sequence_map:
@@ -172,6 +215,11 @@ class RangeEncodedBitmapIndex[Key, Value](SortedBitmapIndex[Key, Value]):
         for key, _ in reversed(self.key_bit_sequence_list):
             self._fill_up_range_for_key(key)
 
+        # We could also directly insert and compress, which causes notable overhead, thus we first bulkload the
+        # uncompressed bit sequences, and compress them afterward.
+        if self.use_compression:
+            self._compress_bit_sequences()
+
     def _fill_up_range_for_key(self, key: Key) -> None:
         """
         Inserts a value to all keys which are greater than the current key
@@ -189,7 +237,7 @@ class RangeEncodedBitmapIndex[Key, Value](SortedBitmapIndex[Key, Value]):
 
     def get_equal(self, key: Key) -> BitSequence:
         if key not in self:
-            return self._create_empty_bit_sequence()
+            return self._create_empty_bit_sequence(use_compression_if_possible=True)
 
         # Check index under which the bit_sequence is stored
         index: int = self.key_to_index[key]
@@ -217,7 +265,7 @@ class RangeEncodedBitmapIndex[Key, Value](SortedBitmapIndex[Key, Value]):
 
         # Attribute is smaller than all others -> Empty Result
         if key < self.key_bit_sequence_list[0][0]:
-            return self._create_empty_bit_sequence()
+            return self._create_empty_bit_sequence(use_compression_if_possible=True)
 
         # We need to find the next-smallest value, use binary search for that
         left_idx: int = 0

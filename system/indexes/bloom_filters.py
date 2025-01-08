@@ -1,4 +1,4 @@
-from system.interfaces.bit_sequence import BitSequence
+from system.interfaces.bit_sequence import UncompressedBitSequence
 from typing import Any, Type
 import math
 from abc import ABC, abstractmethod
@@ -63,7 +63,7 @@ class BloomFilter:
         data_objects: list[Any],
         number_of_available_bits: int,
         key_attribute_name: str,
-        bit_sequence_type: Type[BitSequence],
+        bit_sequence_type: Type[UncompressedBitSequence],
         hash_iterator_type: Type[HashIterator] = RNGHashIterator,
     ) -> None:
         """
@@ -79,8 +79,10 @@ class BloomFilter:
         self.number_of_hash_functions: int = int(
             math.ceil(math.log(2) * (number_of_available_bits / len(data_objects)))
         )
-        self.bit_sequence: BitSequence = bit_sequence_type.create_empty_bit_sequence(
-            self.number_of_available_bits
+        self.bit_sequence: UncompressedBitSequence = (
+            bit_sequence_type.create_all_false_bit_sequence(
+                self.number_of_available_bits
+            )
         )
         self.hash_iterator: Type[BloomFilter.HashIterator] = hash_iterator_type
         for obj in data_objects:
@@ -109,6 +111,6 @@ class BloomFilter:
         for hash_value in self.hash_iterator(
             key, self.number_of_hash_functions, self.number_of_available_bits
         ):
-            if not self.bit_sequence.__contains__(hash_value):
+            if hash_value not in self.bit_sequence:
                 return False
         return True

@@ -1,8 +1,8 @@
 from __future__ import annotations
 from abc import ABC, abstractmethod
 from typing import Type, Iterator
-from system.interfaces.bit_sequence import BitSequence
-from system.bit_sequences import IntegerBitSequence
+from system.interfaces.bit_sequence import BitSequence, CompressedBitSequence
+from system.bit_sequences import IntegerBitSequence, UncompressedBitSequence
 from system.interfaces.indexing.Index import Index, PointQueryMixIn, RangeQueryMixIn
 
 
@@ -13,15 +13,33 @@ class BitmapIndex[Key, Value](
     Abstract base class for bitmap index structures that allow for efficient filtering.
     """
 
-    def __init__(self, bit_sequence_type: Type[BitSequence] = IntegerBitSequence):
-        # Bit sequence Type to create new bit sequences
-        self.bit_sequence_type = bit_sequence_type
+    def __init__(
+        self,
+        bit_sequence_type: Type[UncompressedBitSequence] = IntegerBitSequence,
+        compression_type: Type[CompressedBitSequence] | None = None,
+    ):
+        """
+        Initializes a bitmap structure.
+        :param bit_sequence_type: The type of bit sequence to use.
+        :param compression_type: The compression type to use. None if no compression should be used.
+        """
+        # Bit sequence Type to create new, uncompressed bit sequences
+        self.uncompressed_bit_sequence_type: Type[UncompressedBitSequence] = (
+            bit_sequence_type
+        )
 
         # List of values. The index for a value represents its positions in the different bit sequences.
         self.position_to_value: list[Value] = []
 
         # Maps each value to its position in the bit sequences
         self.value_to_position: dict[Value, int] = dict()
+
+        # The compression type to use during bulkloading, if desired
+        if compression_type:
+            self.use_compression: bool = True
+            self.compression_type: Type[CompressedBitSequence] = compression_type
+        else:
+            self.use_compression: bool = False
 
     def _get_values_for_bit_sequence(
         self, bit_sequence: BitSequence
@@ -75,7 +93,7 @@ class BitmapIndex[Key, Value](
             self._insert(key, value)
 
         # During bulkloading we do not know yet how many distinct values we will need to store, so we have to manually
-        # adjust the number of bits at the end. This is necessary for some bitwise operations (e.g. inverse)
+        # adjust the number of bits at the end. This is necessary for some bitwise operations (e.g. inversion)
         self._update_number_of_bits_for_bit_sequences(len(contained_values))
 
     @abstractmethod
@@ -85,6 +103,13 @@ class BitmapIndex[Key, Value](
         the bulkloading we do not know the number of values, and thus the number of bits we have to represent in each
         bit sequence.
         :param number_of_bits: The new number of bits to represent.
+        """
+        pass
+
+    @abstractmethod
+    def _compress_bit_sequences(self) -> None:
+        """
+        Compresses all bit sequences stored in the bitmap index.
         """
         pass
 
@@ -113,14 +138,24 @@ class BitmapIndex[Key, Value](
         """
         pass
 
-    def _create_empty_bit_sequence(self) -> BitSequence:
+    def _create_empty_bit_sequence(
+        self, use_compression_if_possible: bool = False
+    ) -> BitSequence:
         """
         Returns an empty bit_sequence with the length of the amount of values stored with this bitmap index.
+        :param use_compression_if_possible: Returns a compressed bit sequence.
         :return: The empty bit_sequence.
         """
-        return self.bit_sequence_type.create_empty_bit_sequence(
-            len(self.value_to_position)
+        uncompressed_bit_sequence: UncompressedBitSequence = (
+            self.uncompressed_bit_sequence_type.create_all_false_bit_sequence(
+                len(self.value_to_position)
+            )
         )
+        if use_compression_if_possible and self.use_compression:
+            return self.compression_type.compress_bit_sequence(
+                uncompressed_bit_sequence
+            )
+        return uncompressed_bit_sequence
 
     def _insert(self, key: Key, value: Value) -> None:
         """
@@ -130,7 +165,7 @@ class BitmapIndex[Key, Value](
         """
         if len(self[key]) < len(self.value_to_position):
             # Bit sequence too small
-            self[key].update_number_of_bits(len(self.value_to_position))
+            self[key].update_represented_number_of_bits(len(self.value_to_position))
         self[key].set_bit(self.value_to_position[value])
 
     def get(self, key: Key) -> Iterator[Value]:
@@ -142,7 +177,7 @@ class BitmapIndex[Key, Value](
         )
 
     @abstractmethod
-    def stored_bits(self) -> int:
+    def get_number_of_bits(self) -> int:
         """
         Return the number of stored bits in this bitmap index.
         :return: The number of stored bits.
