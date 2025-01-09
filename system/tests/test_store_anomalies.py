@@ -157,7 +157,7 @@ class StoreTestAnomalies(AbstractUnitTest):
         # intentionally destroy commit order in the committed list:
         tkvs.key_value_store[object_id].committed.append(
             VersionedKeyValueStore.UpdateEntry(
-                4, value=StoreTestAnomalies.Stuff(50, 45)
+                start_validity=4, value=StoreTestAnomalies.Stuff(50, 45)
             )
         )
 
@@ -460,7 +460,7 @@ class StoreTestAnomalies(AbstractUnitTest):
         # following line fails if checksums are not correctly updated,
         # i.e. if checksums also consider own changes
         tkvs.commit_transaction(t1)
-        self.assertEqual(tkvs.committed_transactions_log[-1], t1)
+        self.assertEqual(tkvs.committed_transactions_trace[-1], t1)
 
     def test_read_all(self):
         """Tests if the store correctly handles read_all requests"""

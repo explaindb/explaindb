@@ -9,6 +9,8 @@ from typing import Dict, Iterator
 
 from system.interfaces.indexing.Index import KeyValueStore, PutInfo
 
+from pydantic import BaseModel
+
 
 class HashableDict(dict):
     """A hashable dictionary class that can be used as a key in a dictionary. In particular, you can create a set of
@@ -21,15 +23,13 @@ class HashableDict(dict):
 class VersionedKeyValueStore(KeyValueStore[str, object]):
     """A versioned store managing key/value mappings."""
 
-    @dataclass
-    class VersionEntry(ABC):
+    class VersionEntry(ABC, BaseModel):
         """An abstract class representing a version entry in the store, i.e. an entry of a single object/value
         plus start_validity information, i.e. when the object was created or updated."""
 
         # start_validity of the entry
         start_validity: int
 
-    @dataclass(kw_only=True)
     class UpdateEntry(VersionEntry):
         """A class representing an update or creation entry in the store, i.e. an entry of a single object/value
         plus start_validity information, i.e. when the object was updated or created."""
@@ -37,7 +37,6 @@ class VersionedKeyValueStore(KeyValueStore[str, object]):
         # the value of the object, i. the updated value/object
         value: object
 
-    @dataclass(kw_only=True)
     class DeleteEntry(VersionEntry):
         """A class representing a delete version entry in the store, i.e. just the start_validity information,
         i.e. since when the object is considered deleted."""
@@ -45,7 +44,6 @@ class VersionedKeyValueStore(KeyValueStore[str, object]):
         pass
 
     # TODO:: could refactor KVStoreEntry.wip with a type like this:
-    # @dataclass
     # class WIPEntry:
 
     # TA_id: int

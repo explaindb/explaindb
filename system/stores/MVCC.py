@@ -2,11 +2,13 @@ from __future__ import annotations
 
 import copy
 import pprint
+from abc import ABC
 from dataclasses import dataclass
 from typing import Dict, ItemsView, cast
 
-from astroid import Delete
+from pydantic import BaseModel
 
+from system.indexes.indexes import PythonDictionaryIndex
 from system.interfaces.indexing.Index import KeyValueStore
 from system.interfaces.stores import ACIDStore
 from system.query_processing.predicates import Clause
@@ -17,6 +19,43 @@ class TransactionAbortedException(Exception):
     """An exception that is raised when a transaction is aborted by the store."""
 
     pass
+
+
+class JournalEntry(ABC, BaseModel):
+    """An abstract class for journal entries."""
+
+    # the transaction id of the transaction that created this journal entry
+    # note: depending on how these journal entries are used, this might be redundant:
+    TA_id: int
+
+
+class Begin(JournalEntry):
+    pass
+
+
+class Commit(JournalEntry):
+    commit_timestamp: int
+
+
+class Abort(JournalEntry):
+    pass
+
+
+class Update[Key, Value](JournalEntry):
+    """A journal entry for an update operation."""
+
+    # the object id of the object that was updated
+    object_id: Key
+
+    # the new value object
+    nev_value: Value
+
+
+class Delete[Key](JournalEntry):
+    """A journal entry for a delete operation."""
+
+    # the object id of the object that was updated
+    object_id: Key
 
 
 class TransactionalKeyValueStore(VersionedKeyValueStore, ACIDStore):
@@ -41,8 +80,8 @@ class TransactionalKeyValueStore(VersionedKeyValueStore, ACIDStore):
         # the timestamp when the transaction was committed, None if the transaction is still ongoing:
         committed_timestamp: int | None
 
-        # the index of the last committed transaction in the committed transactions log when the transaction started:
-        last_committed_TA_index_in_TA_log: int | None
+        # the index of the last committed transaction in the committed transactions trace when the transaction started:
+        last_committed_TA_index_in_TA_trace: int | None
 
     def __init__(
         self,
@@ -54,9 +93,16 @@ class TransactionalKeyValueStore(VersionedKeyValueStore, ACIDStore):
         @param use_brute_force_validation: if set to True, the store will use the brute force validation algorithm in
         the validation phase.
         @param persistence_layer: the persistence layer to use for the store
+        TODO: DISCUSS the following
+        @param journal: the journal (file) aka journal aka redo journal to use for the store, key: TA_id, list of TA_log_entry,
+                called journal here to avoid confusing it with Python's logging module
         """
 
         super().__init__(persistence_layer=persistence_layer)
+
+        self.journal: KeyValueStore[int, JournalEntry] = PythonDictionaryIndex[
+            int, JournalEntry
+        ]()
         self.use_brute_force_validation: bool = use_brute_force_validation
 
         # transaction id counter:
@@ -67,8 +113,9 @@ class TransactionalKeyValueStore(VersionedKeyValueStore, ACIDStore):
             int, TransactionalKeyValueStore.TDEntry
         ]()
 
-        # a log of the committed transactions:
-        self.committed_transactions_log: list[int] = list()
+        # a trace of the committed transactions:
+        # TODO: integrated with persisted journal
+        self.committed_transactions_trace: list[int] = list[int]()
 
     def _get_visible_object_version(
         self, object_id: str, timestamp: int, ignore_wip=False
@@ -97,7 +144,7 @@ class TransactionalKeyValueStore(VersionedKeyValueStore, ACIDStore):
             not ignore_wip and self.key_value_store[object_id].wip is not None
         ):  # i.e. there is a wip entry for this object
             # get that wip entry:
-            wip_entry: VersionedKeyValueStore.UpdateEntry = self.key_value_store[
+            wip_entry: VersionedKeyValueStore.VersionEntry = self.key_value_store[
                 object_id
             ].wip
 
@@ -116,7 +163,7 @@ class TransactionalKeyValueStore(VersionedKeyValueStore, ACIDStore):
         # post/else: there is no wip entry for object <object_id> by TA <TA_id>
 
         # get all committed versions of this object (under snapshot isolation) from the system:
-        committed_object_versions: list[VersionedKeyValueStore.UpdateEntry] = (
+        committed_object_versions: list[VersionedKeyValueStore.VersionEntry] = (
             self.key_value_store[object_id].committed
         )
 
@@ -282,23 +329,43 @@ class TransactionalKeyValueStore(VersionedKeyValueStore, ACIDStore):
 
     def update_object(self, object_id: str, updated_object: object, TA_id: int) -> None:
         """Updates the object with the given <object_id>. If run in a concurrent environment, this method must be
-        executed atomically.
+        executed atomically. This method also supports inserts.
+
         @param object_id: the object id of the object to be updated
         @param updated_object: the updated object, i.e. the new value to be associated with the object_id
         @param TA_id: the transaction id of the transaction that is updating (or trying to update) the object
         """
+
         if self.TD[TA_id].committed_timestamp is not None:
             raise Exception(f"transaction {TA_id} committed already")
+
+        assert TA_id in self.TD, f"transaction {TA_id} not found in the system"
 
         # check that there is no other ongoing version of this object in the system
         # being worked on by another transaction, i.e. no other writer on this object is allowed:
         if (
-            self.key_value_store[object_id].wip is not None
+            # do we even have an entry for this object_id?, needed to support inserts
+            object_id in self.key_value_store
+            # is there a wip entry for this object_id?
+            and self.key_value_store[object_id].wip is not None
+            # is the wip entry created by another transaction or by the same, i.e. TA_id, transaction?
             and self.key_value_store[object_id].wip.start_validity != TA_id
         ):
+            self.abort_transaction(TA_id)
             raise TransactionAbortedException(
                 f"another transaction is currently modifying object {object_id} already"
             )
+
+        # 1. write to the journal:
+        # update the journal for this TA:
+        self.journal.put(
+            TA_id,
+            Update(TA_id=TA_id, object_id=object_id, nev_value=updated_object),
+        )
+
+        # post: the entry is now considered updated in the journal (might not have been flushed though)
+
+        # 2. now update the actual store:
 
         # create a new entry and copy of the updated object for the kv store:
         new_entry: VersionedKeyValueStore.UpdateEntry = (
@@ -311,8 +378,16 @@ class TransactionalKeyValueStore(VersionedKeyValueStore, ACIDStore):
         #  we do not want to modify the old committed version, because it is still visible to other transactions
         #  effect: now the store is purely append-only (in contrast to PostgreSQL, where old versions are updated)
 
-        # add the new entry to the kv store as wip (work in progress):
-        self.key_value_store[object_id].wip = new_entry
+        # check whether this is an update or an insert:
+        if object_id in self.key_value_store:
+            # update the existing object:
+            self.key_value_store[object_id].wip = new_entry
+        else:
+            # insert the new object:
+            self.key_value_store[object_id] = VersionedKeyValueStore.KVStoreEntry(
+                committed=list[VersionedKeyValueStore.VersionEntry](),
+                wip=new_entry,
+            )
 
         # collect the object_id of the modified object for the validation phase in the write_set for TA <TA_id>:
         self.TD[TA_id].write_set.add(object_id)
@@ -324,6 +399,8 @@ class TransactionalKeyValueStore(VersionedKeyValueStore, ACIDStore):
         @param object_id: the object id of the object to be deleted
         @param TA_id: the transaction id of the transaction that is deleting (or trying to delete) the object
         """
+
+        assert TA_id in self.TD, f"transaction {TA_id} not found in the system"
 
         if self.TD[TA_id].committed_timestamp is not None:
             raise Exception(f"transaction {TA_id} committed already")
@@ -337,6 +414,15 @@ class TransactionalKeyValueStore(VersionedKeyValueStore, ACIDStore):
             raise Exception(
                 f"another transaction is currently modifying object {object_id} already"
             )
+
+        # 1. write to the journal:
+
+        # update the journal for this TA:
+        self.journal.put(TA_id, Delete(TA_id=TA_id, object_id=object_id))
+
+        # post: the entry is now considered deleted in the journal (might not have been flushed though)
+
+        # 2. now update the store:
 
         # create a new entry for the kv store that marks the object as deleted:
         new_entry: VersionedKeyValueStore.DeleteEntry = (
@@ -368,16 +454,21 @@ class TransactionalKeyValueStore(VersionedKeyValueStore, ACIDStore):
         """Starts a new transaction and returns its transaction id.
         Also adds a new entry with metadata for this transaction in the transaction dictionary.
         """
-
         # obtain the next transaction id:
         next_TA_id: int = self._get_next_TA_id()
+
+        # append Begin entry to the journal:
+        self.journal.put(next_TA_id, Begin(TA_id=next_TA_id))
+
+        # post: the transaction is now marked as started in the journal (might not have been flushed though)
 
         # create a new metadata entry for this transaction, i.e. TA <next_TA_id>, in the transaction dictionary TD:
         self.TD[next_TA_id] = TransactionalKeyValueStore.TDEntry(
             read_clauses=set[HashableDict](),
             write_set=set[str](),
             committed_timestamp=None,
-            last_committed_TA_index_in_TA_log=len(self.committed_transactions_log) - 1,
+            last_committed_TA_index_in_TA_trace=len(self.committed_transactions_trace)
+            - 1,
         )
 
         return next_TA_id
@@ -492,16 +583,16 @@ class TransactionalKeyValueStore(VersionedKeyValueStore, ACIDStore):
             combined_write_set: set[str] = set[str]()
 
             TA_id_other: int
-            # alternative method without exploiting the committed transactions log:
+            # alternative method without exploiting the committed transactions journal:
             # for TA_id_other in filter(
             #    # all TA_IDs of TAs that committed after TA <TA_id> started
             #    lambda TA: self.TD[TA].committed_timestamp
             #    and self.TD[TA].committed_timestamp > TA_id,
             #    self.TD.keys(),
             # ):
-            # exploit the committed transactions log to get all TAs that committed after TA <TA_id> started:
-            for TA_id_other in self.committed_transactions_log[
-                (self.TD[TA_id].last_committed_TA_index_in_TA_log + 1) :
+            # exploit the committed transactions journal to get all TAs that committed after TA <TA_id> started:
+            for TA_id_other in self.committed_transactions_trace[
+                (self.TD[TA_id].last_committed_TA_index_in_TA_trace + 1) :
             ]:
                 # for each qualifying TA <TA_id_other>, get the write set of that TA
                 # i.e. all object_ids of objects that were written by TA <TA_id_other>
@@ -558,6 +649,8 @@ class TransactionalKeyValueStore(VersionedKeyValueStore, ACIDStore):
         @param TA_id: the transaction id of the transaction to be committed
         """
 
+        assert TA_id in self.TD, f"transaction {TA_id} not found in the system"
+
         # get a unique commit timestamp just for validating and committing this TA:
         commit_timestamp_for_this_TA: int = self._get_next_TA_id()
 
@@ -578,11 +671,25 @@ class TransactionalKeyValueStore(VersionedKeyValueStore, ACIDStore):
         # do not confuse the commit timestamp with the start timestamp of the transaction:
         assert commit_timestamp_for_this_TA > TA_id
 
+        # I. write to the journal:
+
+        # append Commit entry to the journal, also tracking the commit timestamp (needed for recovery):
+        self.journal.put(
+            TA_id, Commit(TA_id=TA_id, commit_timestamp=commit_timestamp_for_this_TA)
+        )
+
+        # flush the journal for the given key for WAL:
+        self.journal.flush(TA_id)
+
+        # post: the transaction is now marked as committed in the journal (and flushed!)
+
+        # II. update the store:
+
         # 2. commit phase:
         # let all wip objects of TA <TA_id> become a new committed version:
         # i.e. we move all objects modified by this TA from wip to committed:
         for object_id in self.TD[TA_id].write_set:
-            wip_entry: VersionedKeyValueStore.UpdateEntry = self.key_value_store[
+            wip_entry: VersionedKeyValueStore.VersionEntry = self.key_value_store[
                 object_id
             ].wip
 
@@ -612,8 +719,9 @@ class TransactionalKeyValueStore(VersionedKeyValueStore, ACIDStore):
         # mark TA <TA_Id> as committed by setting the committed timestamp:
         self.TD[TA_id].committed_timestamp = commit_timestamp_for_this_TA
 
-        # log the committed transaction:
-        self.committed_transactions_log.append(TA_id)
+        # trace the committed transaction:
+        # TODO: old method, remove it
+        self.committed_transactions_trace.append(TA_id)
 
     def abort_transaction(self, TA_id: int) -> None:
         """Aborts the given transaction and removes all changes made by this transaction from the system.
@@ -621,12 +729,27 @@ class TransactionalKeyValueStore(VersionedKeyValueStore, ACIDStore):
         @param TA_id: the transaction id of the transaction to be aborted
         """
 
-        # remove all wip-entries from the system for all objects updated by this TA (by setting the entry to None):
+        assert TA_id in self.TD, f"transaction {TA_id} not found in the system"
+
+        # append Abort entry to the journal:
+        # note: actually, this entry is of no use: it does not matter whether a transaction has no Commit journal entry
+        # or an Abort journal entry, the transaction is still considered as aborted
+        # so, technically we could also remove all journal entries ever created for this TA_id from the journal
+        # and still be able to detect aborted transactions
+        # del self.journal[TA_id]
+        self.journal.put(TA_id, Abort(TA_id=TA_id))
+
+        # post: the transaction is now marked as Aborted in the journal (might not have been flushed though)
+
+        # and now for the store:
+
+        # remove all wip-entries from the system for all objects updated by this TA (by setting these wip-entries to
+        # None):
         # i.e. we do not want to keep any changes made by this TA, this is important to allow other TAs to modify
         # the objects again
         object_id: str
         for object_id in self.TD[TA_id].write_set:
             self.key_value_store[object_id].wip = None
 
-        # remove the transaction from the transaction dictionary:
+        # remove the transaction from the transaction dictionary (TD):
         del self.TD[TA_id]
