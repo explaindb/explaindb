@@ -3,8 +3,13 @@
 
 .ipynb_checkpoints
 */.ipynb_checkpoints/*
-*pkl
 
 .idea/
 *__pycache__*
+*.pyc
 *.pkl
+
+# Generated notebook outputs
+codegen.py
+column.csv
+row.csv
