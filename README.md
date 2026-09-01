@@ -1,84 +1,61 @@
 # ExplainDB — Database Systems Materials
 
-## Setting Up the Environment with Pipenv
+Teaching materials for a database systems course: a collection of Jupyter notebooks and a didactic
+DBMS implemented in Python (the `system/` package).
 
-### 0. Clone the Repository
+## Setting Up the Environment with uv
 
-Open a terminal (macOS/Linux) or Command Prompt/PowerShell (Windows) and run the following command:
-- **macOS/Linux/Windows**:
-    ```sh
-    git clone https://gitlab.cs.uni-saarland.de:bigdata/dbsys/explaindb.git
-    ```
+This repository uses [uv](https://docs.astral.sh/uv/) to manage its Python version and dependencies.
+uv installs the correct Python interpreter for you, so no separate Python installation is required.
 
-### 1. Install Python 3.12
+### 1. Install uv
 
-This repository strictly requires Python 3.12.
-- **macOS/Linux**: Install Python using your system's package manager like `brew` (macOS) or `apt`, `pacman` (Linux). For example:
-    ```sh
-    brew install python@3.12
-    ```
-    or
-    ```sh
-    sudo pacman -S python
-    ```
-    Note that depending on the Linux distribution, manual installation may be required.
-- **Windows**: Download and install Python from the [official website](https://www.python.org/downloads/). Make sure to check the option to "Add Python to PATH"
-  during installation.
-
-### 2. Install Pipenv
-
-Install `pipenv` using `pip` by running the following command.
 - **macOS/Linux**:
     ```sh
-    pip install --user pipenv
+    curl -LsSf https://astral.sh/uv/install.sh | sh
     ```
-- **Windows**: Open a Command Prompt or PowerShell window with Administrator priviledges and run:
+- **Windows** (PowerShell):
     ```sh
-    pip install pipenv
+    powershell -ExecutionPolicy ByPass -c "irm https://astral.sh/uv/install.ps1 | iex"
     ```
+
+See the [uv installation docs](https://docs.astral.sh/uv/getting-started/installation/) for
+alternatives (Homebrew, pipx, etc.).
+
+### 2. Clone the Repository
+
+```sh
+git clone https://gitlab.cs.uni-saarland.de:bigdata/dbsys/explaindb.git
+cd explaindb
+```
 
 ### 3. Install Dependencies
 
-Navigate to the cloned repository folder, where the `Pipfile` and `Pipfile.lock` are located, and run the following
-command.
-- **macOS/Linux/Windows**:
-    ```sh
-    pipenv install
-    ```
-This will create a virtual environment and install all required packages.
+```sh
+uv sync
+```
 
-### 4. Activate the Virtual Environment
+This creates a virtual environment in `.venv/`, installs Python 3.12 if needed, and installs all
+required packages from `uv.lock`.
 
-To activate the environment and use the installed dependencies, run the following command.
-- **macOS/Linux/Windows**:
-    ```sh
-    pipenv shell
-    ```
+### 4. Run Jupyter Notebook
 
-### 5. Running Jupyter Notebook
+```sh
+uv run jupyter notebook
+```
 
-To start a Jupyter server and run Notebooks, execute the following command
-- **macos/Linux/Windows**: **with** activated virtual environment
-    ```sh
-    jupyter notebook
-    ```
-    or **without** activated virtual environment
-    ```sh
-    pipenv run jupyter notebook
-    ```
-This should open a browser window listing the files in the current directory. The notebooks live in the
-`notebooks/` directory; open them from there.
+This opens a browser window listing the files in the current directory. The notebooks live in the
+`notebooks/` directory; open them from there. Any command can be run inside the project environment by
+prefixing it with `uv run` — no manual environment activation needed.
 
-Alternatively, you may also run Jupyter
-notebooks in an IDE like [PyCharm](https://www.jetbrains.com/pycharm/). See [here](https://www.jetbrains.com/help/pycharm/pipenv.html) for instructions on configuring a pipenv environment in PyCharm and [here](https://www.jetbrains.com/help/pycharm/jupyter-notebook-support.html) for information on Jupyter notebook support in PyCharm.
+Alternatively, you may run the notebooks in an IDE like
+[PyCharm](https://www.jetbrains.com/pycharm/); point its interpreter at the `.venv/` created by uv.
 
-### 6. Deactivate the Virtual Environment
+## Running the Tests
 
-To deactivate the virtual environment, simply run:
-- **macOS/Linux/Windows**:
-    ```sh
-    exit
-    ```
+```sh
+uv run python -m unittest discover system/tests/
+```
 
 ## API Documentation
 
@@ -89,9 +66,8 @@ project's **Deploy → Pages** page and is restricted to project members.
 
 To build it locally:
 ```sh
-pipenv install
-pipenv run sphinx-apidoc --implicit-namespaces --no-toc --force --separate -o docs/api system system/tests
-pipenv run sphinx-build -W -b html docs/api docs/api/_build
+uv run sphinx-apidoc --implicit-namespaces --no-toc --force --separate -o docs/api system system/tests
+uv run sphinx-build -W -b html docs/api docs/api/_build
 ```
 Then open `docs/api/_build/index.html`. The `sphinx-apidoc`-generated stubs and
 the `_build/` output are git-ignored; the CI check (`docs_build`, run on every

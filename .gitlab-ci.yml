@@ -12,10 +12,6 @@ workflow:
       auto_cancel:
         on_new_commit: none
 
-# Suppress certain warnings
-variables:
-  PIPENV_VERBOSITY: -1
-
 stages:
   - prepare
   - test
@@ -30,11 +26,11 @@ stages:
 # tag -- into a hard error. Output goes to public/ as GitLab Pages expects.
 .build_docs:
   script:
-    # --deploy fails the build if Pipfile.lock is out of sync with the Pipfile,
-    # so a stale lockfile is caught rather than silently ignored.
-    - pipenv install --deploy
-    - pipenv run sphinx-apidoc --implicit-namespaces --no-toc --force --separate -o docs/api system system/tests
-    - pipenv run sphinx-build -W -b html docs/api public
+    # --frozen installs exactly what uv.lock pins and never re-resolves, so a
+    # stale lockfile is caught rather than silently updated.
+    - uv sync --frozen
+    - uv run sphinx-apidoc --implicit-namespaces --no-toc --force --separate -o docs/api system system/tests
+    - uv run sphinx-build -W -b html docs/api public
 
 # Detect merge requests that only touch Markdown files. If every file changed
 # against the target branch ends in `.md`, export DOCS_ONLY=true as a dotenv
@@ -77,8 +73,10 @@ formatting:
   script:
     # Skip when the merge request only changes Markdown (see detect-docs-only).
     - if [ "$DOCS_ONLY" = "true" ]; then echo "Only Markdown changed; skipping."; exit 0; fi
+    # Install dependencies (incl. black) from the locked environment
+    - uv sync --frozen
     # Use black to verify the correct formatting of all files
-    - black --check .
+    - uv run black --check .
   interruptible: true
 
 py_test:
@@ -88,14 +86,13 @@ py_test:
   script:
     # Skip when the merge request only changes Markdown (see detect-docs-only).
     - if [ "$DOCS_ONLY" = "true" ]; then echo "Only Markdown changed; skipping."; exit 0; fi
-    # Use most recent version from Pipfile
-    - pipenv install
-    # Run all unit tests
-    #- pipenv run python -m unittest discover system/tests/
+    # Install the locked environment
+    - uv sync --frozen
+    # Show the resolved dependency versions
+    - uv pip freeze
     # Run all unit tests with coverage
-    - pipenv run pip freeze
-    - pipenv run coverage run -m unittest discover system/tests/
-    - pipenv run coverage html
+    - uv run coverage run -m unittest discover system/tests/
+    - uv run coverage html
   interruptible: true
   artifacts:
     paths:
@@ -113,8 +110,8 @@ ipynb_test:
   script:
     # Skip when the merge request only changes Markdown (see detect-docs-only).
     - if [ "$DOCS_ONLY" = "true" ]; then echo "Only Markdown changed; skipping."; exit 0; fi
-    # Use most recent version from Pipfile
-    - pipenv install
+    # Install the locked environment
+    - uv sync --frozen
     # Execute this instance's slice of the notebooks. GitLab sets CI_NODE_INDEX
     # (1..N) and CI_NODE_TOTAL (N); .ci/assign_notebooks.py reads those and packs
     # the notebooks onto the instances by measured run time (LPT bin-packing, see
@@ -126,14 +123,12 @@ ipynb_test:
     # any notebook raises.
     - |
       set -e
-      # pipenv is invoked from notebooks/ below; point it at the repo-root Pipfile.
-      export PIPENV_PIPFILE="$CI_PROJECT_DIR/Pipfile"
       cd notebooks
       python3 "$CI_PROJECT_DIR/.ci/assign_notebooks.py" > /tmp/nb_slice
       while IFS= read -r nb; do
         echo "== [node ${CI_NODE_INDEX:-1}/${CI_NODE_TOTAL:-1}] running $nb =="
-        pipenv run jupyter nbconvert --to script "$nb" --stdout > /tmp/nb.py
-        pipenv run ipython /tmp/nb.py
+        uv run jupyter nbconvert --to script "$nb" --stdout > /tmp/nb.py
+        uv run ipython /tmp/nb.py
       done < /tmp/nb_slice
   interruptible: true
 
@@ -147,12 +142,12 @@ stats_and_linting:
     - if [ "$DOCS_ONLY" = "true" ]; then echo "Only Markdown changed; skipping."; exit 0; fi
     # count lines of code for each py and ipynb file, plus the sum:
     - find . \( -iname \*.ipynb -o -iname \*.py \) -not -path "*venv*" -print0 | xargs -0 wc -l > LOC.txt
-    # Use most recent version from Pipfile, required for pylint and nbqa
-    - pipenv install
+    # Install the locked environment, required for pylint and nbqa
+    - uv sync --frozen
     # show pylint output of code for each py file:
-    - find . -iname \*.py -not -path "*venv*" -print0 | xargs -0 pylint --exit-zero > pylint_py.txt
+    - find . -iname \*.py -not -path "*venv*" -print0 | xargs -0 uv run pylint --exit-zero > pylint_py.txt
     # show pylint output of code for each ipynb file:
-    - find . -iname \*.ipynb -not -path "*venv*" -print0 | xargs -0 nbqa pylint --exit-zero > pylint_ipynb.txt
+    - find . -iname \*.ipynb -not -path "*venv*" -print0 | xargs -0 uv run nbqa pylint --exit-zero > pylint_ipynb.txt
   artifacts:
     paths:
       - LOC.txt

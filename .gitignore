@@ -18,3 +18,6 @@ row.csv
 docs/api/_build/
 docs/api/system*.rst
 docs/api/modules.rst
+
+# uv-managed virtual environment
+.venv/

@@ -1,3 +1,35 @@
+[project]
+name = "dbsys-materials"
+version = "0.1.0"
+description = "Database Systems teaching materials: notebooks and a didactic Python DBMS."
+requires-python = ">=3.12,<3.13"
+dependencies = [
+    "black[jupyter]==24.10.0",
+    "faker==30.8.2",
+    "ipycanvas==0.13.3",
+    "ipywidgets==8.1.5",
+    "jupyter==1.1.1",
+    "matplotlib==3.9.2",
+    "numpy==2.1.3",
+    "pandas==2.2.3",
+    "seaborn==0.13.2",
+    "tqdm==4.67.0",
+    "pylint==4.0.8",
+    "nbqa==1.9.0",
+    "coverage==7.6.4",
+    "deprecation==2.1.0",
+    "duckdb==1.1.3",
+    "graphviz==0.20.3",
+    "pydantic==2.10.4",
+    "sphinx==8.2.3",
+    "furo==2025.12.19",
+]
+
+[tool.uv]
+# This repository is a collection of notebooks plus the `system/` package used
+# via the current working directory; it is not itself an installable package.
+package = false
+
 # Configuration for nbqa (https://github.com/nbQA-dev/nbQA), used by the CI
 # `stats_and_linting` job to run pylint over the notebooks. The .py sources use
 # .pylintrc; here we additionally silence checks that fire on patterns inherent
