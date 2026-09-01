@@ -3,6 +3,7 @@ import pickle
 from system.data_classes import *
 from faker import Faker
 import unittest
+from unittest import mock
 
 from system.query_processing.operators import (
     Scan,
@@ -116,6 +117,66 @@ class OperatorTest(unittest.TestCase):
         query = Collect(semi_join)
         query.interpret_open()
         self.assertListEqual(query.result, result_tuples)
+
+    def test_interpret_close_propagates_to_leaves(self):
+        """Pins that ``interpret_close`` propagates DOWN through a join to both leaf relations.
+
+        Would fail if the fix regressed and a leaf ``Relation.interpret_close`` raised the old
+        ``AssertionError``, or if close ever stopped reaching every leaf under an inner operator.
+        """
+        _, orders, books = self.create_data()
+        rel_orders = Relation("orders", [vars(e) for e in orders])
+        rel_books = Relation("books", [vars(e) for e in books])
+        join = SHJ(rel_books, rel_orders, "title", "book_title")
+        query = Collect(join)
+        query.interpret_open()
+
+        # wrap each leaf's interpret_close to record whether close reaches the leaves
+        with mock.patch.object(
+            rel_orders, "interpret_close", wraps=rel_orders.interpret_close
+        ) as orders_close, mock.patch.object(
+            rel_books, "interpret_close", wraps=rel_books.interpret_close
+        ) as books_close:
+            # must not raise (before the fix the leaf Relation.interpret_close raised AssertionError)
+            query.interpret_close()
+
+        # close must reach BOTH leaves exactly once
+        orders_close.assert_called_once()
+        books_close.assert_called_once()
+
+    def test_shj_build_and_probe_end_to_end(self):
+        """Pins that ``SHJ.interpret_open`` opens build+probe and actually emits the joined rows.
+
+        Would fail if the symmetric hash join regressed to only opening one child and thus
+        produced an empty result (the pre-fix ``[]`` bug).
+        """
+        _, orders, books = self.create_data()
+        rel_orders = Relation("orders", [vars(e) for e in orders])
+        rel_books = Relation("books", [vars(e) for e in books])
+        join = SHJ(rel_books, rel_orders, "title", "book_title")
+        query = Collect(join)
+        query.interpret_open()
+
+        # independently derive the expected join via a plain nested-loop join over the raw data;
+        # SHJ probes orders against books and emits order_dict | book_dict, which Collect turns
+        # into (person_name, book_title, title, author, price)
+        expected = [
+            (
+                order.person_name,
+                order.book_title,
+                book.title,
+                book.author,
+                book.price,
+            )
+            for order in orders
+            for book in books
+            if order.book_title == book.title
+        ]
+
+        # a hash join does not guarantee output order, so compare order-insensitively
+        self.assertCountEqual(query.result, expected)
+        # before the fix the join opened no probe input and produced []
+        self.assertTrue(query.result)
 
 
 if __name__ == "__main__":

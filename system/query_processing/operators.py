@@ -26,6 +26,7 @@ class Relation(Operator):
         raise AssertionError("Expected to be unreachable")
 
     def interpret_close(self):
+        # leaf/source operator: no child operator to close
         pass
 
     def compile(self, emit):
@@ -66,6 +67,7 @@ class Scan(Operator):
         raise AssertionError("Expected to be unreachable")
 
     def interpret_close(self):
+        # leaf/source operator: no child operator to close
         pass
 
     def compile(self, emit):
