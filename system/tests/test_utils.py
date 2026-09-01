@@ -4,7 +4,6 @@ from system.utils import Vector, Triangle
 
 from faker import Faker
 
-
 Faker.seed(42)
 
 import random
