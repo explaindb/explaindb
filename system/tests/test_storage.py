@@ -9,7 +9,7 @@ from system.storage.RAID.cost_model import (
     RAID_5,
     ResilienceScenario,
 )
-from system.storage.storage_layer import StorageLayer
+from system.storage.storage_layer import StorageLayer, AddressConversionStrategy
 from system.tests.abstract_unit_test import AbstractUnitTest
 
 
@@ -448,3 +448,117 @@ class StorageLayerTest(AbstractUnitTest):
         sl_DRAM.fix("5")
         with self.assertRaises(ValueError):
             sl_DRAM.put("42", "42")
+
+    def test_storage_layer_prefix_addressing(self):
+
+        class PrefixConversion(AddressConversionStrategy[str]):
+            def split_address(self, address: str) -> tuple[str, str]:
+                """Split the given address into two parts and return both parts.
+                Returns the first character of the address, second character of the address
+                """
+                return address[:1], address[1:]
+
+        # simple storage hierarchy with only two layers:
+        # adding a prefix conversion strategy to the DRAM layer
+        sl_ssd: StorageLayer[str, str] = StorageLayer[str, str](
+            max_capacity=100, name="SSD"
+        )
+        sl_DRAM: StorageLayer[str, str] = StorageLayer[str, str](
+            max_capacity=5,
+            name="DRAM",
+            layer_below=sl_ssd,
+            address_conversion_strategy=PrefixConversion(),
+        )
+
+        # insert some "pages"
+        # a page id is a 1-digit character -> only 10 different pages possible
+        # each page contains only 4-characters (you can interpret each character to symbolise a byte of data in storage)
+        sl_ssd.put("0", "p7z7")
+        sl_ssd.put("1", "d567")
+        sl_ssd.put("2", "090s")
+        sl_ssd.put("3", "0(2$")
+
+        # from the point of view of DRAM, an address is a 2-digit string
+        # the prefix is the first digit of the address, it signals the page id
+        # the second digit signals the offset within the page
+
+        self.assertEqual(sl_DRAM.get("21"), "9")
+        self.assertEqual(sl_DRAM.get("23"), "s")
+        self.assertEqual(sl_DRAM.get("33"), "$")
+
+        # sl_DRAM.show()
+        # sl_ssd.show()
+
+    def test_storage_layer_prefix_addressing_eviction_keeps_layer_below_intact(self):
+        """
+        Eviction from a layer that uses an address-conversion strategy must not
+        corrupt the layer below.
+
+        Symptom: with a conversion strategy, eviction used the wrong half of the
+        split address and wrote a single extracted sub-unit back to the layer
+        below, clobbering a whole page there.
+        Expected: under a conversion strategy the upper layer is a read cache;
+        eviction drops the entry locally and leaves the layer below unchanged.
+        Observed (before the fix): the page below is overwritten with one byte.
+        """
+
+        class PrefixConversion(AddressConversionStrategy[str]):
+            def split_address(self, address: str) -> tuple[str, str]:
+                """Split into (page id, offset within the page)."""
+                return address[:1], address[1:]
+
+        sl_ssd: StorageLayer[str, str] = StorageLayer[str, str](
+            max_capacity=100, name="SSD"
+        )
+        sl_DRAM: StorageLayer[str, str] = StorageLayer[str, str](
+            max_capacity=2,
+            name="DRAM",
+            layer_below=sl_ssd,
+            address_conversion_strategy=PrefixConversion(),
+        )
+        sl_ssd.put("0", "p0aa")
+        sl_ssd.put("1", "p1bb")
+        sl_ssd.put("2", "p2cc")
+
+        # DRAM holds at most 2 entries; the third distinct get forces one
+        # eviction (the eviction candidate is the max key, "12").
+        self.assertEqual(sl_DRAM.get("01"), "0")  # "p0aa"[1]
+        self.assertEqual(sl_DRAM.get("12"), "b")  # "p1bb"[2]
+        self.assertEqual(sl_DRAM.get("23"), "c")  # "p2cc"[3]
+
+        # the evicted key is dropped locally ...
+        self.assertNotIn("12", sl_DRAM.storage)
+        # ... and every page in the layer below is untouched.
+        self.assertEqual(sl_ssd.get("0"), "p0aa")
+        self.assertEqual(sl_ssd.get("1"), "p1bb")
+        self.assertEqual(sl_ssd.get("2"), "p2cc")
+
+    def test_storage_layer_prefix_addressing_caches_in_upper_layer(self):
+        """
+        The extracted sub-unit is cached in the upper layer, so a second get is
+        served locally without consulting the layer below again.
+        """
+
+        class PrefixConversion(AddressConversionStrategy[str]):
+            def split_address(self, address: str) -> tuple[str, str]:
+                """Split into (page id, offset within the page)."""
+                return address[:1], address[1:]
+
+        sl_ssd: StorageLayer[str, str] = StorageLayer[str, str](
+            max_capacity=100, name="SSD"
+        )
+        sl_DRAM: StorageLayer[str, str] = StorageLayer[str, str](
+            max_capacity=5,
+            name="DRAM",
+            layer_below=sl_ssd,
+            address_conversion_strategy=PrefixConversion(),
+        )
+        sl_ssd.put("2", "090s")
+
+        # first get populates the DRAM cache from the SSD page ...
+        self.assertEqual(sl_DRAM.get("21"), "9")
+        self.assertIn("21", sl_DRAM.storage)
+
+        # ... so it is still served after the SSD entry is removed.
+        sl_ssd.delete("2")
+        self.assertEqual(sl_DRAM.get("21"), "9")
