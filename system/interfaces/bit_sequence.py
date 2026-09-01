@@ -10,8 +10,8 @@ class BitSequence(ABC):
 
     def __init__(self, represented_number_of_bits: int):
         """
-        Create bit-sequence with given number of bits.
-        :param represented_number_of_bits: The number of bits to use.
+        Create bit-sequence representing the given number of bits.
+        :param represented_number_of_bits: The number of bits to represent.
         """
         self.represented_number_of_bits = represented_number_of_bits
 
@@ -53,6 +53,33 @@ class BitSequence(ABC):
         return self.represented_number_of_bits
 
     @abstractmethod
+    def __contains__(self, index: int) -> bool:
+        """
+        Checks if the bit at the index is set in this bit-sequence.
+        :param index: The index whose bit is to be checked.
+        :return: True if the bit is set.
+        """
+        pass
+
+    @abstractmethod
+    def __getitem__(self, index: int) -> bool:
+        """
+        Returns whether the bit at the given index is set to true or not.
+        :param index: The index to be checked.
+        :return: True, if the bit is set, False otherwise.
+        """
+        pass
+
+    @abstractmethod
+    def __setitem__(self, index: int, value: bool) -> None:
+        """
+        Sets the bit at the given index to the given value.
+        :param index: The index to be set.
+        :param value: The value to be set.
+        """
+        pass
+
+    @abstractmethod
     def __eq__(self, other: BitSequence) -> bool:
         """
         Checks two bit-sequences for equality.
@@ -88,15 +115,15 @@ class BitSequence(ABC):
     @abstractmethod
     def __invert__(self) -> BitSequence:
         """
-        Returns the bitwise invert of this bit-sequence
+        Returns the bitwise inversion/negation of this bit-sequence
         :return: The bitwise ~ as a bit-sequence.
         """
         pass
 
     def get_number_of_bits(self) -> int:
         """
-        Returns the number of bits stored in this bit-sequence.
-        :return: The number of bits stored.
+        Returns the number of bits in this bit-sequence.
+        :return: The number of bits.
         """
         return len(self)
 
@@ -114,48 +141,6 @@ class BitSequence(ABC):
         :return: True, if index is out of bounds, False otherwise.
         """
         return index < 0 or index >= len(self)
-
-    def __contains__(self, index: int) -> bool:
-        """
-        Checks if the bit at the index is set in this bit-sequence.
-        :param index: The index whose bit is to be checked.
-        :return: True if the bit is set.
-        """
-        raise NotImplementedError("This function is not yet implemented")
-
-    @staticmethod
-    def create_all_false_bit_sequence(
-        number_of_bits: int = 0,
-    ) -> UncompressedBitSequence:
-        """
-        Creates a bit-sequence where all bits are set to false.
-        :param number_of_bits: The number of bits in the bit-sequence.
-        :return: A bit-sequence of length number_of_bits and all bits set to False.
-        """
-        raise NotImplementedError("This function is not yet implemented")
-
-    def update_represented_number_of_bits(
-        self, updated_represented_number_of_bits: int
-    ) -> None:
-        """
-        Updates the number of bits stored in this bit-sequence.
-        :param updated_represented_number_of_bits: The number of bits to represent.
-        """
-        raise NotImplementedError("This function is not yet implemented")
-
-    def all_bits_set_to_false(self) -> bool:
-        """
-        A predicate checking if all bits in the bit-sequence are set to True.
-        :return: True, if all bits in the bit-sequence are set to True, False if not.
-        """
-        raise NotImplementedError("This function is not yet implemented")
-
-    def all_bits_set_to_true(self) -> bool:
-        """
-        A predicate checking if all bits in the bit-sequence are set to True.
-        :return: True, if all bits in the bit-sequence are set to True, False if not.
-        """
-        raise NotImplementedError("This function is not yet implemented")
 
     def get_bit_sequence_for_range(
         self,
@@ -177,41 +162,9 @@ class BitSequence(ABC):
             lower_idx, upper_idx, represented_number_of_bits
         )
 
-    def _get_bit_sequence_for_range(
-        self,
-        lower_idx: int,
-        upper_idx: int,
-        represented_number_of_bits: int | None = None,
-    ) -> BitSequence:
-        """
-        Returns a bit sequence representing the given range. Assumes out-of-bounds errors were checked.
-        :param lower_idx: The lower index (including) of the range.
-        :param upper_idx: The upper index (including) of the range.
-        :param represented_number_of_bits: Number of bits represented by new the range. If None, the difference between both
-        indices is used
-        :return: The bit sequence for the range.
-        """
-        raise NotImplementedError("This function is not yet implemented")
-
-    def __getitem__(self, index: int) -> bool:
-        """
-        Returns whether the bit at the given index is set or not.
-        :param index: The index to be checked.
-        :return: True, if the bit is set, False otherwise.
-        """
-        raise NotImplementedError("This function is not yet implemented")
-
-    def __setitem__(self, index: int, value: bool) -> None:
-        """
-        Sets the bit at the given index to the given value.
-        :param index: The index to be set.
-        :param value: The value to be set.
-        """
-        raise NotImplementedError("This function is not yet implemented")
-
     def set_bit(self, index: int) -> None:
         """
-        Set the bit at the given index.
+        Set the bit at the given index to true.
         :param index: The index of the bit to set.
         """
         if self._out_of_bounds(index):
@@ -227,27 +180,126 @@ class BitSequence(ABC):
             raise ValueError("Key out of bounds for this bit-sequence.")
         self[index] = False
 
+    @staticmethod
+    def create_all_false_bit_sequence(
+        number_of_bits: int = 0,
+    ) -> BitSequence:
+        """
+        Creates a bit-sequence where all bits are set to false.
+        :param number_of_bits: The number of bits in the bit-sequence.
+        :return: A bit-sequence of length number_of_bits and all bits set to False.
+        """
+        pass
+
+    @abstractmethod
+    def update_represented_number_of_bits(
+        self, updated_represented_number_of_bits: int
+    ) -> None:
+        """
+        Updates the number of bits to be represented by this bit-sequence.
+        :param updated_represented_number_of_bits: The number of bits to represent.
+        """
+        pass
+
+    @abstractmethod
+    def intersects(self, other: BitSequence) -> bool:
+        """
+        Checks whether bit sequences intersect with each other.
+
+        :param other: The other bit sequence.
+        :return: True, if the bit sequences intersect, False if not.
+        """
+        pass
+
+    @abstractmethod
+    def _get_bit_sequence_for_range(
+        self,
+        lower_idx: int,
+        upper_idx: int,
+        represented_number_of_bits: int | None = None,
+    ) -> BitSequence:
+        """
+        Returns a bit sequence representing the given range. Assumes out-of-bounds errors were checked.
+        :param lower_idx: The lower index (including) of the range.
+        :param upper_idx: The upper index (including) of the range.
+        :param represented_number_of_bits: Number of bits represented by new the range. If None, the difference between both
+        indices is used
+        :return: The bit sequence for the range.
+        """
+        pass
+
+    @abstractmethod
+    def all_bits_set_to_false(self) -> bool:
+        """
+        A predicate checking if all bits in the bit-sequence are set to False.
+        :return: True, if all bits in the bit-sequence are set to False, False if not.
+        """
+        pass
+
+    @abstractmethod
+    def all_bits_set_to_true(self) -> bool:
+        """
+        A predicate checking if all bits in the bit-sequence are set to True.
+        :return: True, if all bits in the bit-sequence are set to True, False if not.
+        """
+        pass
+
+    @abstractmethod
+    def get_least_significant_bit(self) -> BitSequence:
+        """
+        Returns a bit sequence only containing the least significant bit of this bit sequence.
+        :return: The bit sequence only containing the least significant bit of this bit sequence.
+        """
+        pass
+
+    @abstractmethod
+    def get_most_significant_bit(self) -> BitSequence:
+        """
+        Returns a bit sequence only containing the most significant bit of this bit sequence.
+        :return: The bit sequence only containing the most significant bit of this bit sequence.
+        """
+        pass
+
+    @abstractmethod
+    def contains_bit_sequence(self, other: BitSequence) -> bool:
+        """
+        Checks whether the other bit sequence is contained in self.
+        :param other: The other bit sequence.
+        :return: True, if other is contained in self, False if not.
+        """
+        pass
+
+    @abstractmethod
+    def bit_count(self) -> int:
+        """Returns the number of set bits in the bit sequence."""
+        pass
+
+    @abstractmethod
     def increase_represented_integer(self, number: int) -> None:
         """
         Increase the integer represented by the bit sequence by the given number.
         """
-        raise NotImplementedError("This function is not yet implemented")
+        pass
 
+    @abstractmethod
     def get_represented_integer(self) -> int:
         """
         Returns the integer represented by this bit sequence.
         :return: The integer represented by this bit sequence.
         """
-        raise NotImplementedError("This function is not yet implemented")
+        pass
 
     class SetBitsIterator(ABC, Iterator[int]):
         """
         An iterator to traverse through all set bits in the given bit-sequence. This iterator returns the integer
-        positions of all set bits in the bit-sequence.
+        positions of all bits that are set to True in the bit_sequence.
         """
 
         @abstractmethod
         def __init__(self, bit_sequence: BitSequence):
+            """
+            :param bit_sequence: The bit sequence to iterate.
+            """
             pass
 
         def __iter__(self):
@@ -262,7 +314,35 @@ class BitSequence(ABC):
         Returns an iterator to iterate through set bits, from the least significant bit to the most significant bit.
         :return: An iterator to iterate through all set bits.
         """
-        return type(self).SetBitsIterator(self)
+        return self.SetBitsIterator(self)
+
+    class SetBitsReverseIterator(ABC, Iterator[int]):
+        """
+        An iterator to traverse the set bits in a bit sequence in reverse order, i.e., starting
+        with the most significant bit.
+        """
+
+        @abstractmethod
+        def __init__(self, bit_sequence: BitSequence):
+            """
+            :param bit_sequence: The bit_sequence to iterate.
+            """
+            pass
+
+        def __iter__(self):
+            return self
+
+        @abstractmethod
+        def __next__(self) -> int:
+            pass
+
+    def __reversed__(self):
+        """
+        Returns an iterator to iterate through set bits in reversed order, from the
+        most significant bit to the least significant bit.
+        :return: An iterator to iterate through all set bits.
+        """
+        return self.SetBitsReverseIterator(self)
 
 
 class UncompressedBitSequence(BitSequence, ABC):
@@ -273,17 +353,23 @@ class UncompressedBitSequence(BitSequence, ABC):
     @abstractmethod
     def _perform_binary_operation(
         self, other: BitSequence, operation: Callable
-    ) -> BitSequence:
+    ) -> UncompressedBitSequence:
         pass
 
-    def __and__(self, other: BitSequence) -> BitSequence:
+    def __and__(self, other: UncompressedBitSequence) -> UncompressedBitSequence:
         return self._perform_binary_operation(other, lambda x, y: x & y)
 
-    def __or__(self, other: BitSequence) -> BitSequence:
+    def __or__(self, other: UncompressedBitSequence) -> UncompressedBitSequence:
         return self._perform_binary_operation(other, lambda x, y: x | y)
 
-    def __xor__(self, other: BitSequence) -> BitSequence:
+    def __xor__(self, other: UncompressedBitSequence) -> UncompressedBitSequence:
         return self._perform_binary_operation(other, lambda x, y: x ^ y)
+
+    @staticmethod
+    def create_all_false_bit_sequence(
+        number_of_bits: int = 0,
+    ) -> UncompressedBitSequence:
+        pass
 
 
 class CompressedBitSequence(BitSequence, ABC):
@@ -301,4 +387,10 @@ class CompressedBitSequence(BitSequence, ABC):
         :param bit_sequence: The bit sequence to compress.
         :return: The compressed bit sequence.
         """
+        pass
+
+    @staticmethod
+    def create_all_false_bit_sequence(
+        number_of_bits: int = 0,
+    ) -> CompressedBitSequence:
         pass

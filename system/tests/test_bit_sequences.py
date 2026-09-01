@@ -8,12 +8,22 @@ from system.bit_sequences import IntegerBitSequence, BitListBitSequence, WAHBitS
 
 
 class BitSequenceTests(unittest.TestCase):
+    def tearDown(self) -> None:
+        # Several tests set the class-level WAHBitSequence.WORD_LENGTH to a small
+        # value; restore the module default after each test so the mutation does
+        # not leak into other tests (here or in other test files).
+        WAHBitSequence.WORD_LENGTH = 64
+
     def test_UncompressedBitSequenceOperations(self):
         """
         Test whether BitSequence operations work as expected.
         """
 
-        def test_operations(x: UncompressedBitSequence, y: UncompressedBitSequence):
+        def test_operations(
+            x: UncompressedBitSequence,
+            y: UncompressedBitSequence,
+            z: UncompressedBitSequence,
+        ):
             """
             Dedicated test to allow for testing both integer and list representations.
             :param x: The left bit-sequence.
@@ -38,11 +48,35 @@ class BitSequenceTests(unittest.TestCase):
             self.assertEqual((x ^ y).as_set(), {3, 4})
             self.assertEqual((~(x ^ y)).as_set(), {0, 1, 2})
             self.assertEqual((y - x).as_set(), {4})
+            self.assertTrue(x.intersects(y))
+            self.assertTrue(y.intersects(x))
+            self.assertFalse(x.contains_bit_sequence(y))
+            self.assertFalse(y.contains_bit_sequence(x))
+            self.assertTrue(x.contains_bit_sequence(x))
+            self.assertTrue(y.contains_bit_sequence(y))
+            self.assertTrue(x.contains_bit_sequence(z))
+            self.assertTrue(y.contains_bit_sequence(z))
+            self.assertEqual(x.bit_count(), 2)
+            self.assertEqual(x.get_least_significant_bit().as_set(), {1})
+            self.assertEqual(x.get_most_significant_bit().as_set(), {3})
+            self.assertEqual(y.get_least_significant_bit().as_set(), {1})
+            self.assertEqual(y.get_most_significant_bit().as_set(), {4})
+            self.assertEqual(y.bit_count(), 2)
             self.assertEqual(len(x), 5)
             self.assertEqual(len(x), len(y))
             self.assertEqual(str(x), str(x.as_set()))
             self.assertEqual(x.get_number_of_bits(), 5)
             self.assertEqual(y.get_number_of_bits(), 5)
+            x.set_bit(2)
+            y.set_bit(3)
+            self.assertTrue(2 in x)
+            self.assertTrue(3 in y)
+            x[2] = False
+            y[3] = False
+            self.assertFalse(2 in x)
+            self.assertEqual(x.as_set(), {1, 3})
+            self.assertFalse(3 in y)
+            self.assertEqual(y.as_set(), {1, 4})
 
         # Check for compressed bit-sequence versions
         bit_sequence_type: type[UncompressedBitSequence]
@@ -62,22 +96,35 @@ class BitSequenceTests(unittest.TestCase):
             i: int
             for i in [1, 4]:
                 bit_sequence_2.set_bit(i)
-            test_operations(bit_sequence_1, bit_sequence_2)
+            bit_sequence_3: bit_sequence_type = (
+                bit_sequence_type.create_all_false_bit_sequence(5)
+            )
+            i: int
+            for i in [1]:
+                bit_sequence_3.set_bit(i)
+            test_operations(bit_sequence_1, bit_sequence_2, bit_sequence_3)
 
     def test_UncompressedIterators(self):
         """
         Test Iterators explicitly for bit-sequences.
         """
         expected_bits: list[int] = [0, 1, 3]
+        expected_reversed_bits: list[int] = [3, 1, 0]
 
         def test_iteration(bit_sequence: UncompressedBitSequence):
             enumerated_bits: list[int] = []
+            reversed_enumerated_bits: list[int] = []
 
             next_bit: int
             for next_bit in bit_sequence:
                 enumerated_bits.append(next_bit)
 
             self.assertListEqual(expected_bits, enumerated_bits)
+
+            for next_bit in reversed(bit_sequence):
+                reversed_enumerated_bits.append(next_bit)
+
+            self.assertListEqual(expected_reversed_bits, reversed_enumerated_bits)
 
         # Check for compressed bit-sequence versions
         bit_sequence_type: type[UncompressedBitSequence]

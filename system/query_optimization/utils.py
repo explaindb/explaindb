@@ -1,5 +1,5 @@
 from __future__ import annotations
-from system.query_optimization.subproblems import Subproblem
+from system.query_optimization.problems import Problem
 from system.query_optimization.join_graph import JoinGraph
 from system.query_optimization.cardinality_table import CardinalityTable
 from system.query_optimization.cost_function import C_Out
@@ -17,10 +17,12 @@ def randomize_cardinalities(
     :param seed: The seed for the random cardinalities.
     """
     random.seed(seed)
-    next_problem: Subproblem = Subproblem(1)
-    complete_problem: Subproblem = Subproblem.get_complete_problem(number_of_relations)
+    next_problem: Problem = Problem(1, number_of_relations)
+    complete_problem: Problem = Problem.get_problem_with_all_relations(
+        number_of_relations
+    )
 
-    while next_problem != Subproblem():
+    while next_problem != Problem():
         cardinalities.update_cardinality_estimation(
             next_problem, random.randint(0, 1000)
         )

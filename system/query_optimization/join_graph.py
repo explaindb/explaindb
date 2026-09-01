@@ -2,7 +2,7 @@ import itertools
 from abc import ABC, abstractmethod
 from collections import deque
 from typing import Deque
-from system.query_optimization.subproblems import Subproblem
+from system.query_optimization.problems import Problem
 
 
 class JoinGraph:
@@ -10,23 +10,18 @@ class JoinGraph:
     A join graph for a query. Internally, it uses an adjacency list to represent the graph.
     """
 
-    def __init__(self):
-        self.adjacency_matrix = dict()
+    def __init__(self, number_of_relations: int):
+        self.number_of_relations: int = number_of_relations
+        self.adjacency_matrix: list[Problem] = [
+            Problem.create_all_false_bit_sequence(self.number_of_relations)
+            for _ in range(number_of_relations)
+        ]
 
     def __len__(self) -> int:
         return len(self.adjacency_matrix)
 
     def __iter__(self):
-        return iter(self.adjacency_matrix)
-
-    def add_relation(self, relation_id: int):
-        """
-        Adds a relation to a join graph.
-        :param relation_id: The number of the relation to be used.
-        """
-
-        # Store relation in adjacency matrix
-        self.adjacency_matrix[relation_id] = Subproblem()
+        return iter(range(len(self)))
 
     def add_join(self, left_relation: int, right_relation: int):
         """
@@ -34,63 +29,65 @@ class JoinGraph:
         :param left_relation: The id of the left relation.
         :param right_relation: The id of the right relation.
         """
-        left_problem = Subproblem.get_problem_for_relation(left_relation)
-        right_problem = Subproblem.get_problem_for_relation(right_relation)
-
-        if (
-            left_relation not in self.adjacency_matrix
-            or right_relation not in self.adjacency_matrix
+        if any(
+            size >= len(self.adjacency_matrix)
+            for size in [left_relation, right_relation]
         ):
-            raise ValueError(
-                "You can not join relation that are not yet added to the join graph"
-            )
+            raise ValueError("A relation is not part of the join graph!")
+        left_problem = Problem.get_problem_for_relation(left_relation, len(self))
+        right_problem = Problem.get_problem_for_relation(right_relation, len(self))
 
         self.adjacency_matrix[left_relation] += right_problem
         self.adjacency_matrix[right_relation] += left_problem
 
-    def are_connected(self, left: Subproblem, right: Subproblem) -> bool:
+    def are_connected(self, left: Problem, right: Problem) -> bool:
         """
-        Checks whether the left and right subproblem are connected.
-        :param left: The left subproblem.
-        :param right: The right subproblem.
-        :return: True, if the subproblems are connected, False if not.
+        Checks whether the left and right problem are connected.
+        :param left: The left problem.
+        :param right: The right problem.
+        :return: True, if the problems are connected, False if not.
         """
-        # Get all subproblems that are connected with the left subproblem
-        connected_with_left: Subproblem = left
+        # Get all problems that are connected with the left problem
+        connected_with_left: Problem = left
         for problem in left:
             connected_with_left |= self.adjacency_matrix[problem.get_relation_id()]
-        return (connected_with_left & right) != Subproblem()
+        return (connected_with_left & right) != Problem()
 
-    def is_connected(self, problem: Subproblem) -> bool:
+    def is_connected(self, problem: Problem) -> bool:
         """
         Checks whether the problem is connected in the join graph.
         :param problem: The problem to be checked.
         :return: True, if the problem is connected, False if not.
         """
         # Starting Singleton for the DFS
-        visited: Subproblem = problem.get_lsb_problem()
+        visited: Problem = problem.get_least_significant_bit()
+
         # Use stack
         to_be_checked: Deque[int] = deque([visited.get_relation_id()])
+
         # Perform regular DFS
         while to_be_checked:
             next_relation: int = to_be_checked.pop()
+
             # Each neighbor is a singleton problem
             for neighbor in self.adjacency_matrix[next_relation] & problem:
-                if not neighbor.overlaps(visited):
+                if not neighbor.intersects(visited):
                     visited |= neighbor
                     to_be_checked.append(neighbor.get_relation_id())
 
         # If all problems were visited, we know that the entire problem is connected
         return visited == problem
 
-    def get_neighbors(self, s: Subproblem) -> Subproblem:
+    def get_neighbors(self, s: Problem) -> Problem:
         """
         Get all neighbors of a given problem s (excluding s).
         :param s: The set whose neighbors are of interest.
-        :return: The neighbors as subproblem.
+        :return: The neighbors as problem.
         """
         # Start with empty problem
-        neighbors: Subproblem = Subproblem()
+        neighbors: Problem = Problem.create_all_false_bit_sequence(
+            self.number_of_relations
+        )
 
         # Add each connected neighbor from all relations in S
         for problem in s:
@@ -124,10 +121,7 @@ class ChainQueryFactory(JoinGraphFactory):
         :return: The chain join graph.
         """
 
-        chain_query = JoinGraph()
-
-        for i in range(num_nodes):
-            chain_query.add_relation(i)
+        chain_query = JoinGraph(num_nodes)
 
         for i in range(num_nodes - 1):
             chain_query.add_join(i, i + 1)
@@ -148,10 +142,7 @@ class StarQueryFactory(JoinGraphFactory):
         :return: The star join graph.
         """
 
-        star_query = JoinGraph()
-
-        for i in range(num_nodes):
-            star_query.add_relation(i)
+        star_query = JoinGraph(num_nodes)
 
         for i in range(1, num_nodes):
             star_query.add_join(0, i)  # 0 is the fact table
@@ -191,10 +182,7 @@ class CliqueQueryFactory(JoinGraphFactory):
         :return: The clique join graph.
         """
 
-        clique_query = JoinGraph()
-
-        for i in range(num_nodes):
-            clique_query.add_relation(i)
+        clique_query = JoinGraph(num_nodes)
 
         for tup in itertools.product(range(num_nodes), range(num_nodes)):
             clique_query.add_join(tup[0], tup[1])

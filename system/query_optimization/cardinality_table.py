@@ -1,43 +1,43 @@
 from __future__ import annotations
-from system.query_optimization.subproblems import Subproblem
+from system.query_optimization.problems import Problem
 
 
 class CardinalityTable:
     """
-    A simple cardinality table used to store cardinalities for subproblems. Normally, cardinalities are obtained by
+    A simple cardinality table used to store cardinalities for problems. Normally, cardinalities are obtained by
     using system statistics to make an estimation about the sizes of the results.
     """
 
     def __init__(self):
-        # A mapping from a subproblem to its cardinality estimation
-        self.entries: dict[Subproblem, int] = dict()
+        # A mapping from a problem to its cardinality estimation
+        self.entries: dict[Problem, int] = dict()
 
-    def get_cardinality_estimation(self, subproblem: Subproblem) -> int:
+    def get_cardinality_estimation(self, problem: Problem) -> int:
         """
-        Returns the cardinality estimation for the subproblem.
-        :param subproblem: The subproblem.
-        :return: The cardinality for the subproblem.
+        Returns the cardinality estimation for the problem.
+        :param problem: The problem.
+        :return: The cardinality for the problem.
         """
-        if subproblem not in self.entries:
-            raise ValueError("Subproblem is not in the cardinality table.")
-        return self.entries[subproblem]
+        if problem not in self.entries:
+            raise ValueError("problem is not in the cardinality table.")
+        return self.entries[problem]
 
-    def update_cardinality_estimation(self, subproblem: Subproblem, cardinality: int):
+    def update_cardinality_estimation(self, problem: Problem, cardinality: int):
         """
-        Updates the cardinality estimation of the subproblem to the given cardinality.
-        :param subproblem: The subproblem.
+        Updates the cardinality estimation of the problem to the given cardinality.
+        :param problem: The problem.
         :param cardinality: The cardinality.
         """
-        self.entries[subproblem] = cardinality
+        self.entries[problem] = cardinality
 
-    def estimate_join_cardinality(self, left: Subproblem, right: Subproblem) -> int:
+    def estimate_join_cardinality(self, left: Problem, right: Problem) -> int:
         """
-        Returns the join cardinality estimation for the left and right subproblem.
-        :param left: The left subproblem.
-        :param right: The right subproblem.
-        :return: The join cardinality of the left and right subproblem.
+        Returns the join cardinality estimation for the left and right problem.
+        :param left: The left problem.
+        :param right: The right problem.
+        :return: The join cardinality of the left and right problem.
         """
-        join_problem: Subproblem = left | right
+        join_problem: Problem = left | right
         if join_problem in self.entries:
             return self.entries[join_problem]
         else:

@@ -46,7 +46,7 @@ class IntegerBitSequence(UncompressedBitSequence):
     def update_represented_number_of_bits(
         self, updated_represented_number_of_bits: int
     ) -> None:
-        if updated_represented_number_of_bits < self.represented_number_of_bits:
+        if updated_represented_number_of_bits < len(self):
             # Set all greater bits to 0
             self.number &= (1 << updated_represented_number_of_bits) - 1
         self.represented_number_of_bits = updated_represented_number_of_bits
@@ -67,11 +67,15 @@ class IntegerBitSequence(UncompressedBitSequence):
     def __contains__(self, index: int) -> bool:
         return (self.number & 1 << index) != 0
 
+    def contains_bit_sequence(self, other: IntegerBitSequence) -> bool:
+        return self.number & other.number == other.number
+
     def all_bits_set_to_false(self) -> bool:
         return self.number == 0
 
     def all_bits_set_to_true(self) -> bool:
-        return self.number == (1 << len(self)) - 1
+        # Bit count refers to the number of bits set to 1
+        return self.number.bit_count() == self.represented_number_of_bits
 
     @staticmethod
     def _full_bitmask_for_range(lower_idx: int, upper_idx: int) -> int:
@@ -111,6 +115,23 @@ class IntegerBitSequence(UncompressedBitSequence):
     def create_all_false_bit_sequence(max_len: int = 0) -> IntegerBitSequence:
         return IntegerBitSequence(0, max_len)
 
+    def intersects(self, other: IntegerBitSequence) -> bool:
+        return (self.number & other.number) != 0
+
+    def bit_count(self) -> int:
+        return self.number.bit_count()
+
+    def get_least_significant_bit(self) -> IntegerBitSequence:
+        # Python utilizes 2-complements for representing unsigned integers, e.g., if we have the number 001100, its'
+        # 2-complements would be 110100, and thus 001100 & 110100 = 000100, which is the least significant bit
+        return type(self)(self.number & -self.number, len(self))
+
+    def get_most_significant_bit(self) -> IntegerBitSequence:
+        # The bit length represents how many bits are utilized to represent a number, e.g., for 01111, we have a
+        # bit length of 4, meaning the most significant bit 3 is at position (bit_length - 1), which is the number of
+        # times we need to bitshift 1 to the left.
+        return type(self)(1 << (self.number.bit_length() - 1), len(self))
+
     def increase_represented_integer(self, number: int) -> None:
         self.number += number
 
@@ -126,16 +147,37 @@ class IntegerBitSequence(UncompressedBitSequence):
             self.number: int = bit_sequence.number
 
         def __next__(self) -> int:
+            # Once we reach a number of 0, there is nothing to enumerate anymore
             if self.number == 0:
                 raise StopIteration
-            key: int = (self.number & -self.number).bit_length() - 1  # trailing zeroes
-            self.number &= self.number - 1  # reset first set bet
-            return key
+            bit: int = (self.number & -self.number).bit_length() - 1  # trailing zeroes
+
+            # We want to reset the least significant bit, as it was just iterated, e.g., in the number 01010, we want
+            # to reset the position. If we compute 01010 - 1, we obtain 01001, and 01010 & 01001 will only set the least
+            # significant bit of 01010 to 0, but no other bit.
+            self.number &= self.number - 1
+            return bit
+
+    class SetBitsReverseIterator(BitSequence.SetBitsReverseIterator):
+
+        def __init__(self, bit_sequence: IntegerBitSequence):
+            """
+            :param bit_sequence: The bit_sequence to iterate.
+            """
+            self.number: int = bit_sequence.number
+
+        def __next__(self) -> int:
+            # No more bits to traverse
+            if self.number == 0:
+                raise StopIteration
+            bit: int = self.number.bit_length() - 1  # id of highest relation
+            self.number &= (1 << bit) - 1  # Set highest bit to 0
+            return bit
 
 
 class BitListBitSequence(UncompressedBitSequence):
     """
-    Represents a bit-sequence as a list of bits.
+    Represents a bit-sequence as a list of booleans.
     """
 
     def __init__(
@@ -144,11 +186,11 @@ class BitListBitSequence(UncompressedBitSequence):
         represented_number_of_bits: int | None = None,
     ):
         """
-        :param bit_list: The list of words.
-        :param represented_number_of_bits: The number of bits represented by the word list.
+        :param bit_list: The list of bits.
+        :param represented_number_of_bits: The number of bits represented by the bit list.
         """
         if not bit_list:
-            self.bit_list = BitListBitSequence._create_empty_bit_list(
+            self.bit_list = BitListBitSequence._create_all_false_bit_list(
                 represented_number_of_bits
             )
         else:
@@ -171,6 +213,36 @@ class BitListBitSequence(UncompressedBitSequence):
 
     def __setitem__(self, index: int, value: bool) -> None:
         self.bit_list[index] = value
+
+    def intersects(self, other: BitListBitSequence) -> bool:
+        for idx in range(min(len(self), len(other))):
+            if self[idx] and other[idx]:
+                return True
+        return False
+
+    def bit_count(self) -> int:
+        count: int = 0
+        for _ in self:
+            count += 1
+        return count
+
+    def get_least_significant_bit(self) -> BitListBitSequence:
+        result_bit_list: BitListBitSequence = (
+            BitListBitSequence.create_all_false_bit_sequence(len(self))
+        )
+        for bit in self:
+            # First bit is the least significant bit, return after
+            result_bit_list.set_bit(bit)
+            return result_bit_list
+
+    def get_most_significant_bit(self) -> BitListBitSequence:
+        result_bit_list: BitListBitSequence = (
+            BitListBitSequence.create_all_false_bit_sequence(len(self))
+        )
+        for bit in reversed(self):
+            # First bit is the most significant bit, return after
+            result_bit_list.set_bit(bit)
+            return result_bit_list
 
     def update_represented_number_of_bits(
         self, updated_represented_number_of_bits: int
@@ -228,20 +300,26 @@ class BitListBitSequence(UncompressedBitSequence):
     def __contains__(self, index: int) -> bool:
         return self[index]
 
+    def contains_bit_sequence(self, other: BitListBitSequence) -> bool:
+        for bit in other:
+            if bit not in self:
+                return False
+        return True
+
     @staticmethod
     def create_all_false_bit_sequence(
         represented_number_of_bits: int = 0,
     ) -> BitListBitSequence:
         return BitListBitSequence(
-            bit_list=BitListBitSequence._create_empty_bit_list(),
+            bit_list=BitListBitSequence._create_all_false_bit_list(),
             represented_number_of_bits=represented_number_of_bits,
         )
 
     @staticmethod
-    def _create_empty_bit_list(represented_number_of_bits: int = 0) -> list[bool]:
+    def _create_all_false_bit_list(represented_number_of_bits: int = 0) -> list[bool]:
         """
         Creates a list of bits represented by the word list, where all bits are set to 0.
-        :param represented_number_of_bits: The number of bits.
+        :param represented_number_of_bits: The number of bits to represent.
         :return: A list of 0-bits.
         """
         return [False for _ in range(represented_number_of_bits)]
@@ -252,7 +330,7 @@ class BitListBitSequence(UncompressedBitSequence):
         upper_idx: int,
         represented_number_of_bits: int | None = None,
     ) -> BitListBitSequence:
-        bit_sequence: BitListBitSequence = type(self).create_all_false_bit_sequence(
+        bit_sequence: BitListBitSequence = self.create_all_false_bit_sequence(
             upper_idx - lower_idx + 1
             if not represented_number_of_bits
             else represented_number_of_bits
@@ -265,7 +343,7 @@ class BitListBitSequence(UncompressedBitSequence):
 
     def increase_represented_integer(self, number: int) -> None:
         # Get bitlist for the number to be added
-        number_bitlist: BitListBitSequence = type(self).create_all_false_bit_sequence(
+        number_bitlist: BitListBitSequence = self.create_all_false_bit_sequence(
             len(self)
         )
         for bit in IntegerBitSequence(number, len(self)):
@@ -297,27 +375,38 @@ class BitListBitSequence(UncompressedBitSequence):
         return resulting_number
 
     class SetBitsIterator(BitSequence.SetBitsIterator):
-        def __init__(
-            self,
-            bitlist: BitListBitSequence,
-        ):
-            self.bitlist: BitListBitSequence = bitlist
+        def __init__(self, bit_sequence: BitListBitSequence):
+            self.bit_sequence: BitListBitSequence = bit_sequence
             self.curr_bit_idx: int = 0
 
         def __next__(self) -> int:
             while (
-                self.curr_bit_idx < len(self.bitlist)
-                and not self.bitlist[self.curr_bit_idx]
+                self.curr_bit_idx < len(self.bit_sequence)
+                and not self.bit_sequence[self.curr_bit_idx]
             ):
                 self.curr_bit_idx += 1
-            if self.curr_bit_idx >= len(self.bitlist):
+            if self.curr_bit_idx >= len(self.bit_sequence):
                 raise StopIteration
             next_result: int = self.curr_bit_idx
             self.curr_bit_idx += 1
             return next_result
 
+    class SetBitsReverseIterator(BitSequence.SetBitsReverseIterator):
+        def __init__(self, bit_sequence: BitListBitSequence):
+            self.bit_sequence: BitListBitSequence = bit_sequence
+            self.curr_bit_idx: int = len(bit_sequence) - 1
+
+        def __next__(self) -> int:
+            while self.curr_bit_idx >= 0 and not self.bit_sequence[self.curr_bit_idx]:
+                self.curr_bit_idx -= 1
+            next_result: int = self.curr_bit_idx
+            if self.curr_bit_idx < 0:
+                raise StopIteration
+            self.curr_bit_idx -= 1
+            return next_result
+
     def __invert__(self) -> BitSequence:
-        return type(self)._create_bit_sequence_with_list(
+        return self._create_bit_sequence_with_list(
             [not value for value in self.bit_list], len(self)
         )
 
@@ -334,7 +423,7 @@ class BitListBitSequence(UncompressedBitSequence):
         """
         Private method to create a new list bit-sequence by passing the given bit list.
         :param bit_list: The value list.
-        :param represented_number_of_bits: The number of bits in the new bit-sequence.
+        :param represented_number_of_bits: The number of bits to be represented by the new bit-sequence.
         :return: The new bit-sequence.
         """
         return BitListBitSequence(
@@ -1074,3 +1163,52 @@ class WAHBitSequence(CompressedBitSequence):
                 # When the current iterator has completed its run, move to the next
                 except StopIteration:
                     self.curr_word_iterator = self.get_next_iterator()
+
+    def __contains__(self, index: int) -> bool:
+        raise NotImplementedError("Method not implemented yet.")
+
+    def __getitem__(self, index: int) -> bool:
+        raise NotImplementedError("Method not implemented yet.")
+
+    def __setitem__(self, index: int, value: bool) -> None:
+        raise NotImplementedError("Method not implemented yet.")
+
+    def all_bits_set_to_false(self) -> bool:
+        raise NotImplementedError("Method not implemented yet.")
+
+    def all_bits_set_to_true(self) -> bool:
+        raise NotImplementedError("Method not implemented yet.")
+
+    def get_least_significant_bit(self) -> BitSequence:
+        raise NotImplementedError("Method not implemented yet.")
+
+    def get_most_significant_bit(self) -> BitSequence:
+        raise NotImplementedError("Method not implemented yet.")
+
+    def contains_bit_sequence(self, other: BitSequence) -> bool:
+        raise NotImplementedError("Method not implemented yet.")
+
+    def bit_count(self) -> int:
+        raise NotImplementedError("Method not implemented yet.")
+
+    def update_represented_number_of_bits(
+        self, updated_represented_number_of_bits: int
+    ) -> None:
+        raise NotImplementedError("Method not implemented yet.")
+
+    def intersects(self, other: BitSequence) -> bool:
+        raise NotImplementedError("Method not implemented yet.")
+
+    def _get_bit_sequence_for_range(
+        self,
+        lower_idx: int,
+        upper_idx: int,
+        represented_number_of_bits: int | None = None,
+    ) -> BitSequence:
+        raise NotImplementedError("Method not implemented yet.")
+
+    def increase_represented_integer(self, number: int) -> None:
+        raise NotImplementedError("Method not implemented yet.")
+
+    def get_represented_integer(self) -> int:
+        raise NotImplementedError("Method not implemented yet.")
