@@ -8,12 +8,8 @@ Notebooks that currently fail when executed are renamed with a `.broken` suffix 
 glob (see `.gitlab-ci.yml`, `ipynb_test`) and `black --check` skip them. Fix the underlying issue,
 then rename the file back to `.ipynb`.
 
-- **`Bitmaps and Bloom Filters.ipynb.broken`** — `RecursionError: maximum recursion depth exceeded`,
-  raised in `system/interfaces/bit_sequence.py` (`_out_of_bounds` calls `len(self)`, which cycles back
-  through `get_bit_sequence_for_range`). Reproducible locally with the pinned dependency versions
-  (numpy 2.1.3, pandas 2.2.3, Python 3.12), so it is a genuine code bug, not dependency drift. The last
-  green pipeline for this notebook was in January 2025; the bug should be fixed via `/fix-bug`
-  (reproduce, add a red regression test, fix, verify green).
+_None currently._ (`Bitmaps and Bloom Filters.ipynb` was fixed — the WAH iterator no longer recurses
+per 0-fill word; see the regression test `test_iterating_sparse_wah_does_not_overflow_recursion`.)
 
 ## CI / tooling debt
 

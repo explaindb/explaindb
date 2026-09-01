@@ -1010,45 +1010,53 @@ class WAHBitSequence(CompressedBitSequence):
         def get_next_iterator(self) -> BitSequence.SetBitsIterator | None:
             """
             Returns the next iterator.
+
+            Skipped 0-fill words are traversed with a loop rather than recursion:
+            a sparse bitmap can contain thousands of consecutive 0-fill words, and
+            recursing once per skipped word would exceed Python's recursion limit.
+            The loop keeps the stack depth constant.
             :return: The iterator.
             """
-            if self.curr_word_idx >= 0 and WAHBitSequence.is_fill(
-                self.get_current_word()
-            ):
-                # Advance this index by as many fills are represented by this fill word
-                self.bit_idx += (
-                    WAHBitSequence.get_number_of_fills_represented_by_fill_word(
-                        self.get_current_word()
-                    )
-                    * (WAHBitSequence.WORD_LENGTH - 1)
-                )
-            else:
-                # We have a literal, thus we also only have to move one step here
-                self.bit_idx += WAHBitSequence.WORD_LENGTH - 1
-
-            # Move to next word in list
-            self.curr_word_idx += 1
-
-            # Do have traversed all words?
-            if self.curr_word_idx == len(self.compressed_bit_sequence.words):
-                # No iterator can found anymore
-                return None
-
-            # Check whether we have to traverse a fill or a literal
-            if WAHBitSequence.is_fill(self.get_current_word()):
-                if WAHBitSequence.get_represented_bit_of_fill_word(
+            while True:
+                if self.curr_word_idx >= 0 and WAHBitSequence.is_fill(
                     self.get_current_word()
                 ):
-                    # If we have a fill representing 1's, create an iterator for it
-                    return WAHBitSequence.FillIterator(
-                        self.get_current_word(), self.bit_idx
+                    # Advance this index by as many fills are represented by this fill word
+                    self.bit_idx += (
+                        WAHBitSequence.get_number_of_fills_represented_by_fill_word(
+                            self.get_current_word()
+                        )
+                        * (WAHBitSequence.WORD_LENGTH - 1)
                     )
+                else:
+                    # We have a literal, thus we also only have to move one step here
+                    self.bit_idx += WAHBitSequence.WORD_LENGTH - 1
 
-                # Only 0's are represented, meaning we can skip this word entirely, try next word
-                return self.get_next_iterator()
+                # Move to next word in list
+                self.curr_word_idx += 1
 
-            # Return literal iterator
-            return WAHBitSequence.LiteralIterator(self.get_current_word(), self.bit_idx)
+                # Do have traversed all words?
+                if self.curr_word_idx == len(self.compressed_bit_sequence.words):
+                    # No iterator can found anymore
+                    return None
+
+                # Check whether we have to traverse a fill or a literal
+                if WAHBitSequence.is_fill(self.get_current_word()):
+                    if WAHBitSequence.get_represented_bit_of_fill_word(
+                        self.get_current_word()
+                    ):
+                        # If we have a fill representing 1's, create an iterator for it
+                        return WAHBitSequence.FillIterator(
+                            self.get_current_word(), self.bit_idx
+                        )
+
+                    # Only 0's are represented, so skip this word entirely and try the next
+                    continue
+
+                # Return literal iterator
+                return WAHBitSequence.LiteralIterator(
+                    self.get_current_word(), self.bit_idx
+                )
 
         def __next__(self) -> int:
             while True:

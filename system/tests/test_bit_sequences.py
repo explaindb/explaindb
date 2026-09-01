@@ -1,3 +1,4 @@
+import sys
 import unittest
 from typing import Type
 from system.interfaces.bit_sequence import (
@@ -342,6 +343,52 @@ class BitSequenceTests(unittest.TestCase):
 
         for bit_sequence_type in [IntegerBitSequence, BitListBitSequence]:
             test_for_different_types(bit_sequence_type)
+
+    def test_iterating_sparse_wah_does_not_overflow_recursion(self):
+        """
+        Iterating a sparse WAH bitmap must not overflow Python's recursion limit.
+
+        Symptom: enumerating the set bits of a WAH-compressed bitmap that
+        contains many consecutive 0-fill words raises
+        ``RecursionError: maximum recursion depth exceeded``.
+
+        Repro: with a small word length, compress an all-false sequence of
+        4000 bits with only the very last bit set. This yields roughly 445
+        consecutive 0-fill words before the single trailing literal. Calling
+        ``as_set()`` on the result must return ``{3999}``.
+
+        Expected: ``compressed.as_set() == {3999}``.
+        Observed (buggy): ``RecursionError`` while iterating.
+
+        The defect is in ``WAHBitSequence.SetBitsIterator.get_next_iterator``
+        in ``system/bit_sequences.py`` (NOT in
+        ``system/interfaces/bit_sequence.py``), which recurses once per
+        skipped 0-fill word instead of iterating.
+        """
+        original_recursion_limit: int = sys.getrecursionlimit()
+        try:
+            # Build and compress at the NORMAL recursion limit so that only the
+            # as_set() iteration below runs under the lowered limit.
+            WAHBitSequence.WORD_LENGTH = 4
+            bits: IntegerBitSequence = IntegerBitSequence.create_all_false_bit_sequence(
+                4000
+            )
+            bits.set_bit(3999)
+            compressed: WAHBitSequence = WAHBitSequence.compress_bit_sequence(bits)
+
+            # 300 is below the ~445-deep recursion of the buggy code (one
+            # recursive call per skipped 0-fill word) but far above the
+            # constant recursion depth of the fixed iterative version. So this
+            # assertion raises RecursionError before the fix (RED) and returns
+            # {3999} after the fix (GREEN).
+            sys.setrecursionlimit(300)
+            self.assertEqual(compressed.as_set(), {3999})
+        finally:
+            # Restore explicitly to the module default (64), not the captured
+            # value: other tests in this file set WORD_LENGTH = 4 without
+            # restoring it, so the captured value may already be 4.
+            WAHBitSequence.WORD_LENGTH = 64
+            sys.setrecursionlimit(original_recursion_limit)
 
 
 if __name__ == "__main__":
