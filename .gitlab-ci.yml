@@ -17,13 +17,50 @@ variables:
   PIPENV_VERBOSITY: -1
 
 stages:
+  - prepare
   - test
+
+# Detect merge requests that only touch Markdown files. If every file changed
+# against the target branch ends in `.md`, export DOCS_ONLY=true as a dotenv
+# artifact. The test jobs below inherit that variable (a job without its own
+# `needs` receives the dotenv reports of earlier-stage jobs) and exit early when
+# it is true, so a docs-only merge request runs none of the tests. The check is
+# conservative: it only skips when *every* changed file is Markdown, and it never
+# skips on the default branch -- anything else leaves DOCS_ONLY=false.
+detect-docs-only:
+  stage: prepare
+  tags:
+    - test
+  # Full history so the diff against the target branch can be computed.
+  variables:
+    GIT_DEPTH: 0
+  script:
+    - |
+      DOCS_ONLY=false
+      if [ "$CI_PIPELINE_SOURCE" = "merge_request_event" ]; then
+        BASE="$(git merge-base "origin/$CI_MERGE_REQUEST_TARGET_BRANCH_NAME" HEAD)"
+        CHANGED="$(git diff --name-only "$BASE" HEAD)"
+        echo "Changed files vs $BASE:"
+        printf '%s\n' "$CHANGED"
+        # docs-only: at least one change, and no changed file is a non-.md file
+        if [ -n "$CHANGED" ] && ! printf '%s\n' "$CHANGED" | grep -qvE '\.md$'; then
+          DOCS_ONLY=true
+        fi
+      fi
+      echo "DOCS_ONLY=$DOCS_ONLY"
+      echo "DOCS_ONLY=$DOCS_ONLY" > docs_only.env
+  artifacts:
+    reports:
+      dotenv: docs_only.env
+  interruptible: true
 
 formatting:
   stage: test
   tags:
     - test
   script:
+    # Skip when the merge request only changes Markdown (see detect-docs-only).
+    - if [ "$DOCS_ONLY" = "true" ]; then echo "Only Markdown changed; skipping."; exit 0; fi
     # Use black to verify the correct formatting of all files
     - black --check .
   interruptible: true
@@ -33,6 +70,8 @@ py_test:
   tags:
     - test
   script:
+    # Skip when the merge request only changes Markdown (see detect-docs-only).
+    - if [ "$DOCS_ONLY" = "true" ]; then echo "Only Markdown changed; skipping."; exit 0; fi
     # Use most recent version from Pipfile
     - pipenv install
     # Run all unit tests
@@ -56,6 +95,8 @@ ipynb_test:
   # so coverage is unchanged, only faster.
   parallel: 3
   script:
+    # Skip when the merge request only changes Markdown (see detect-docs-only).
+    - if [ "$DOCS_ONLY" = "true" ]; then echo "Only Markdown changed; skipping."; exit 0; fi
     # Use most recent version from Pipfile
     - pipenv install
     # Execute this instance's slice of the notebooks. GitLab sets CI_NODE_INDEX
@@ -84,6 +125,8 @@ stats_and_linting:
   tags:
     - test
   script:
+    # Skip when the merge request only changes Markdown (see detect-docs-only).
+    - if [ "$DOCS_ONLY" = "true" ]; then echo "Only Markdown changed; skipping."; exit 0; fi
     # count lines of code for each py and ipynb file, plus the sum:
     - find . \( -iname \*.ipynb -o -iname \*.py \) -not -path "*venv*" -print0 | xargs -0 wc -l > LOC.txt
     # Use most recent version from Pipfile, required for pylint and nbqa
@@ -98,4 +141,3 @@ stats_and_linting:
       - pylint_py.txt
       - pylint_ipynb.txt
   interruptible: true
-
