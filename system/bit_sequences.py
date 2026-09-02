@@ -36,11 +36,21 @@ class IntegerBitSequence(UncompressedBitSequence):
         self.number: int = number
 
     def __eq__(self, other: IntegerBitSequence) -> bool:
+        """See :meth:`BitSequence.__eq__`.
+
+        Equal iff ``other`` is an ``IntegerBitSequence`` with the same backing
+        integer; the represented length is not compared.
+        """
         return isinstance(other, IntegerBitSequence) and other.number == self.number
 
     def _perform_binary_operation(
         self, other: IntegerBitSequence, operation: Callable
     ) -> IntegerBitSequence:
+        """See :meth:`UncompressedBitSequence._perform_binary_operation`.
+
+        Applies ``operation`` directly to the two backing integers; the result
+        represents ``max(len(self), len(other))`` bits.
+        """
         return type(self)(
             operation(self.number, other.number), max(len(self), len(other))
         )
@@ -48,34 +58,60 @@ class IntegerBitSequence(UncompressedBitSequence):
     def update_represented_number_of_bits(
         self, updated_represented_number_of_bits: int
     ) -> None:
+        """See :meth:`BitSequence.update_represented_number_of_bits`.
+
+        When shrinking, masks off all bits above the new length on the backing
+        integer.
+        """
         if updated_represented_number_of_bits < len(self):
             # Set all greater bits to 0
             self.number &= (1 << updated_represented_number_of_bits) - 1
         self.represented_number_of_bits = updated_represented_number_of_bits
 
     def __invert__(self) -> BitSequence:
+        """See :meth:`BitSequence.__invert__`.
+
+        XORs the backing integer with a mask of all ones spanning the
+        represented length.
+        """
         return type(self)(self.number ^ ((1 << len(self)) - 1), len(self))
 
     def __getitem__(self, index: int) -> bool:
+        """See :meth:`BitSequence.__getitem__`."""
         mask: int = 1 << index
         return mask == self.number & mask
 
     def __setitem__(self, index: int, value: bool) -> None:
+        """See :meth:`BitSequence.__setitem__`."""
         if value:
             self.number |= 1 << index
         else:
             self.number &= ~(1 << index)
 
     def __contains__(self, index: int) -> bool:
+        """See :meth:`BitSequence.__contains__`."""
         return (self.number & 1 << index) != 0
 
     def contains_bit_sequence(self, other: IntegerBitSequence) -> bool:
+        """See :meth:`BitSequence.contains_bit_sequence`.
+
+        Uses a bitwise AND: ``other`` is contained iff ANDing both backing
+        integers yields ``other``'s integer.
+        """
         return self.number & other.number == other.number
 
     def all_bits_set_to_false(self) -> bool:
+        """See :meth:`BitSequence.all_bits_set_to_false`.
+
+        Checks whether the backing integer is zero.
+        """
         return self.number == 0
 
     def all_bits_set_to_true(self) -> bool:
+        """See :meth:`BitSequence.all_bits_set_to_true`.
+
+        Compares the popcount of the backing integer to the represented length.
+        """
         # Bit count refers to the number of bits set to 1
         return self.number.bit_count() == self.represented_number_of_bits
 
@@ -101,6 +137,11 @@ class IntegerBitSequence(UncompressedBitSequence):
         upper_idx: int,
         represented_number_of_bits: int | None = None,
     ) -> IntegerBitSequence:
+        """See :meth:`BitSequence._get_bit_sequence_for_range`.
+
+        Masks the range out of the backing integer and shifts it down so the
+        range starts at index 0.
+        """
         mask: int = IntegerBitSequence._full_bitmask_for_range(lower_idx, upper_idx)
 
         # Account for offset in number
@@ -115,40 +156,68 @@ class IntegerBitSequence(UncompressedBitSequence):
 
     @staticmethod
     def create_all_false_bit_sequence(max_len: int = 0) -> IntegerBitSequence:
+        """See :meth:`BitSequence.create_all_false_bit_sequence`.
+
+        :param max_len: The number of bits in the bit-sequence.
+        """
         return IntegerBitSequence(0, max_len)
 
     def intersects(self, other: IntegerBitSequence) -> bool:
+        """See :meth:`BitSequence.intersects`.
+
+        Uses a bitwise AND: the sequences intersect iff ANDing their backing
+        integers is non-zero.
+        """
         return (self.number & other.number) != 0
 
     def bit_count(self) -> int:
+        """See :meth:`BitSequence.bit_count`.
+
+        Uses Python's ``int.bit_count()`` on the backing integer.
+        """
         return self.number.bit_count()
 
     def get_least_significant_bit(self) -> IntegerBitSequence:
+        """See :meth:`BitSequence.get_least_significant_bit`.
+
+        Isolates the lowest set bit via the two's-complement identity
+        ``number & -number``.
+        """
         # Python utilizes 2-complements for representing unsigned integers, e.g., if we have the number 001100, its'
         # 2-complements would be 110100, and thus 001100 & 110100 = 000100, which is the least significant bit
         return type(self)(self.number & -self.number, len(self))
 
     def get_most_significant_bit(self) -> IntegerBitSequence:
+        """See :meth:`BitSequence.get_most_significant_bit`.
+
+        Uses ``int.bit_length()`` to locate the highest set bit.
+        """
         # The bit length represents how many bits are utilized to represent a number, e.g., for 01111, we have a
         # bit length of 4, meaning the most significant bit 3 is at position (bit_length - 1), which is the number of
         # times we need to bitshift 1 to the left.
         return type(self)(1 << (self.number.bit_length() - 1), len(self))
 
     def increase_represented_integer(self, number: int) -> None:
+        """See :meth:`BitSequence.increase_represented_integer`.
+
+        Adds ``number`` to the backing integer directly.
+        """
         self.number += number
 
     def get_represented_integer(self) -> int:
-        """
-        Returns the integer represented by this bit sequence.
-        :return: The integer represented by this bit sequence.
-        """
+        """See :meth:`BitSequence.get_represented_integer`."""
         return self.number
 
     class SetBitsIterator(BitSequence.SetBitsIterator):
         def __init__(self, bit_sequence: IntegerBitSequence):
+            """See :meth:`BitSequence.SetBitsIterator.__init__`."""
             self.number: int = bit_sequence.number
 
         def __next__(self) -> int:
+            """See :meth:`BitSequence.SetBitsIterator.__next__`.
+
+            Yields set-bit positions low to high, isolating and clearing the
+            lowest set bit on each step."""
             # Once we reach a number of 0, there is nothing to enumerate anymore
             if self.number == 0:
                 raise StopIteration
@@ -163,12 +232,14 @@ class IntegerBitSequence(UncompressedBitSequence):
     class SetBitsReverseIterator(BitSequence.SetBitsReverseIterator):
 
         def __init__(self, bit_sequence: IntegerBitSequence):
-            """
-            :param bit_sequence: The bit_sequence to iterate.
-            """
+            """See :meth:`BitSequence.SetBitsReverseIterator.__init__`."""
             self.number: int = bit_sequence.number
 
         def __next__(self) -> int:
+            """See :meth:`BitSequence.SetBitsReverseIterator.__next__`.
+
+            Yields set-bit positions high to low, taking the highest set bit
+            via ``bit_length()`` and clearing it on each step."""
             # No more bits to traverse
             if self.number == 0:
                 raise StopIteration
@@ -208,27 +279,46 @@ class BitListBitSequence(UncompressedBitSequence):
         super().__init__(bits_in_passed_list)
 
     def __eq__(self, other: BitListBitSequence) -> bool:
+        """See :meth:`BitSequence.__eq__`.
+
+        Equal iff ``other`` is a ``BitListBitSequence`` with an identical
+        boolean list.
+        """
         return isinstance(other, BitListBitSequence) and other.bit_list == self.bit_list
 
     def __getitem__(self, index: int) -> bool:
+        """See :meth:`BitSequence.__getitem__`."""
         return self.bit_list[index]
 
     def __setitem__(self, index: int, value: bool) -> None:
+        """See :meth:`BitSequence.__setitem__`."""
         self.bit_list[index] = value
 
     def intersects(self, other: BitListBitSequence) -> bool:
+        """See :meth:`BitSequence.intersects`.
+
+        Scans the overlapping prefix of both lists for a shared set bit.
+        """
         for idx in range(min(len(self), len(other))):
             if self[idx] and other[idx]:
                 return True
         return False
 
     def bit_count(self) -> int:
+        """See :meth:`BitSequence.bit_count`.
+
+        Counts the set bits by iterating over them.
+        """
         count: int = 0
         for _ in self:
             count += 1
         return count
 
     def get_least_significant_bit(self) -> BitListBitSequence:
+        """See :meth:`BitSequence.get_least_significant_bit`.
+
+        Returns the first set bit found iterating low to high.
+        """
         result_bit_list: BitListBitSequence = (
             BitListBitSequence.create_all_false_bit_sequence(len(self))
         )
@@ -238,6 +328,10 @@ class BitListBitSequence(UncompressedBitSequence):
             return result_bit_list
 
     def get_most_significant_bit(self) -> BitListBitSequence:
+        """See :meth:`BitSequence.get_most_significant_bit`.
+
+        Returns the first set bit found iterating high to low.
+        """
         result_bit_list: BitListBitSequence = (
             BitListBitSequence.create_all_false_bit_sequence(len(self))
         )
@@ -249,6 +343,11 @@ class BitListBitSequence(UncompressedBitSequence):
     def update_represented_number_of_bits(
         self, updated_represented_number_of_bits: int
     ) -> None:
+        """See :meth:`BitSequence.update_represented_number_of_bits`.
+
+        Truncates the boolean list when shrinking, or pads it with ``False``
+        entries when growing.
+        """
         if updated_represented_number_of_bits < len(self):
             # Remove all bits greater than the given the number of bits
             self.bit_list = self.bit_list[0:updated_represented_number_of_bits]
@@ -273,6 +372,11 @@ class BitListBitSequence(UncompressedBitSequence):
     def _perform_binary_operation(
         self, other: BitListBitSequence, operation: Callable
     ) -> BitListBitSequence:
+        """See :meth:`UncompressedBitSequence._perform_binary_operation`.
+
+        Applies ``operation`` index by index over the longer list, treating
+        missing entries of the shorter list as ``False``.
+        """
         # Get largest and smallest lists
         (
             smallest_bit_sequence,
@@ -300,9 +404,14 @@ class BitListBitSequence(UncompressedBitSequence):
         return result_bit_sequence
 
     def __contains__(self, index: int) -> bool:
+        """See :meth:`BitSequence.__contains__`."""
         return self[index]
 
     def contains_bit_sequence(self, other: BitListBitSequence) -> bool:
+        """See :meth:`BitSequence.contains_bit_sequence`.
+
+        Checks that every set bit of ``other`` is also set in self.
+        """
         for bit in other:
             if bit not in self:
                 return False
@@ -312,6 +421,7 @@ class BitListBitSequence(UncompressedBitSequence):
     def create_all_false_bit_sequence(
         represented_number_of_bits: int = 0,
     ) -> BitListBitSequence:
+        """See :meth:`BitSequence.create_all_false_bit_sequence`."""
         return BitListBitSequence(
             bit_list=BitListBitSequence._create_all_false_bit_list(),
             represented_number_of_bits=represented_number_of_bits,
@@ -332,6 +442,11 @@ class BitListBitSequence(UncompressedBitSequence):
         upper_idx: int,
         represented_number_of_bits: int | None = None,
     ) -> BitListBitSequence:
+        """See :meth:`BitSequence._get_bit_sequence_for_range`.
+
+        Copies the slice ``[lower_idx, upper_idx]`` into a fresh list, shifting
+        it so the range starts at index 0.
+        """
         bit_sequence: BitListBitSequence = self.create_all_false_bit_sequence(
             upper_idx - lower_idx + 1
             if not represented_number_of_bits
@@ -344,6 +459,11 @@ class BitListBitSequence(UncompressedBitSequence):
         return bit_sequence
 
     def increase_represented_integer(self, number: int) -> None:
+        """See :meth:`BitSequence.increase_represented_integer`.
+
+        Performs bit-by-bit binary addition of ``number`` into the boolean
+        list, propagating a carry.
+        """
         # Get bitlist for the number to be added
         number_bitlist: BitListBitSequence = self.create_all_false_bit_sequence(
             len(self)
@@ -367,10 +487,7 @@ class BitListBitSequence(UncompressedBitSequence):
         self.bit_list = result_bitlist
 
     def get_represented_integer(self) -> int:
-        """
-        Returns the integer represented by this bit sequence.
-        :return: The integer represented by this bit sequence.
-        """
+        """See :meth:`BitSequence.get_represented_integer`."""
         resulting_number: int = 0
         for bit in self:
             resulting_number += 1 << bit
@@ -378,10 +495,15 @@ class BitListBitSequence(UncompressedBitSequence):
 
     class SetBitsIterator(BitSequence.SetBitsIterator):
         def __init__(self, bit_sequence: BitListBitSequence):
+            """See :meth:`BitSequence.SetBitsIterator.__init__`."""
             self.bit_sequence: BitListBitSequence = bit_sequence
             self.curr_bit_idx: int = 0
 
         def __next__(self) -> int:
+            """See :meth:`BitSequence.SetBitsIterator.__next__`.
+
+            Yields set-bit positions low to high by scanning the list forward
+            past unset entries."""
             while (
                 self.curr_bit_idx < len(self.bit_sequence)
                 and not self.bit_sequence[self.curr_bit_idx]
@@ -395,10 +517,15 @@ class BitListBitSequence(UncompressedBitSequence):
 
     class SetBitsReverseIterator(BitSequence.SetBitsReverseIterator):
         def __init__(self, bit_sequence: BitListBitSequence):
+            """See :meth:`BitSequence.SetBitsReverseIterator.__init__`."""
             self.bit_sequence: BitListBitSequence = bit_sequence
             self.curr_bit_idx: int = len(bit_sequence) - 1
 
         def __next__(self) -> int:
+            """See :meth:`BitSequence.SetBitsReverseIterator.__next__`.
+
+            Yields set-bit positions high to low by scanning the list
+            backward past unset entries."""
             while self.curr_bit_idx >= 0 and not self.bit_sequence[self.curr_bit_idx]:
                 self.curr_bit_idx -= 1
             next_result: int = self.curr_bit_idx
@@ -408,14 +535,26 @@ class BitListBitSequence(UncompressedBitSequence):
             return next_result
 
     def __invert__(self) -> BitSequence:
+        """See :meth:`BitSequence.__invert__`.
+
+        Negates every entry of the boolean list.
+        """
         return self._create_bit_sequence_with_list(
             [not value for value in self.bit_list], len(self)
         )
 
     def all_bits_set_to_false(self) -> bool:
+        """See :meth:`BitSequence.all_bits_set_to_false`.
+
+        Checks that no entry of the boolean list is set.
+        """
         return all(not bit for bit in self.bit_list)
 
     def all_bits_set_to_true(self) -> bool:
+        """See :meth:`BitSequence.all_bits_set_to_true`.
+
+        Checks that every entry of the boolean list is set.
+        """
         return all(bit for bit in self.bit_list)
 
     @staticmethod
@@ -452,6 +591,11 @@ class WAHBitSequence(CompressedBitSequence):
         def __init__(
             self, bit_sequence_type: Type[UncompressedBitSequence] = IntegerBitSequence
         ):
+            """Create an empty word-list creator.
+
+            :param bit_sequence_type: The uncompressed bit-sequence type used to
+                represent the individual words.
+            """
             # The current word list, will later be used to create the compressed bit sequence
             self.words: list[UncompressedBitSequence] = []
 
@@ -670,6 +814,12 @@ class WAHBitSequence(CompressedBitSequence):
 
     @staticmethod
     def compress_bit_sequence(bit_sequence: UncompressedBitSequence) -> WAHBitSequence:
+        """See :meth:`CompressedBitSequence.compress_bit_sequence`.
+
+        Traverses the uncompressed sequence in chunks of ``WORD_LENGTH - 1``
+        bits, encoding each chunk as a fill or literal word via a
+        :class:`WordListCreator`.
+        """
         # The compression works as follows:
         # Traverse the bit sequence above in chunks of (WORD_LENGTH - 1) bits, and decide for each whether it is
         # possible to compress it into a fill, or whether a literal is required to present it.
@@ -732,19 +882,35 @@ class WAHBitSequence(CompressedBitSequence):
         )
 
     def __eq__(self, other: WAHBitSequence) -> bool:
+        """See :meth:`BitSequence.__eq__`.
+
+        Equal iff ``other`` is a ``WAHBitSequence`` with an identical word list.
+        """
         return isinstance(other, WAHBitSequence) and self.words == other.words
 
     def __and__(self, other: WAHBitSequence) -> WAHBitSequence:
+        """See :meth:`BitSequence.__and__`.
+
+        Operates directly on the compressed word lists.
+        """
         return self._perform_binary_operation(
             other, lambda x, y: x & y, WAHBitSequence.and_literal_fill
         )
 
     def __or__(self, other: WAHBitSequence) -> WAHBitSequence:
+        """See :meth:`BitSequence.__or__`.
+
+        Operates directly on the compressed word lists.
+        """
         return self._perform_binary_operation(
             other, lambda x, y: x | y, WAHBitSequence.or_literal_fill
         )
 
     def __xor__(self, other: WAHBitSequence) -> WAHBitSequence:
+        """See :meth:`BitSequence.__xor__`.
+
+        Operates directly on the compressed word lists.
+        """
         return self._perform_binary_operation(
             other, lambda x, y: x ^ y, WAHBitSequence.xor_literal_fill
         )
@@ -830,6 +996,19 @@ class WAHBitSequence(CompressedBitSequence):
         operation: Callable,
         literal_fill_operation: Callable,
     ) -> WAHBitSequence:
+        """Combine two WAH-compressed bit sequences with a bitwise operation.
+
+        Walks both compressed word lists in lockstep, tracking how many fills of
+        each fill word remain, and combines aligned words. Both sequences must
+        represent the same number of bits. Literal/fill pairs are handled by the
+        dedicated ``literal_fill_operation`` for efficiency.
+
+        :param other: The other WAH-compressed bit sequence.
+        :param operation: The bitwise operation applied to two literal words.
+        :param literal_fill_operation: The specialised handler for combining a
+            literal word with a fill word.
+        :return: The resulting WAH-compressed bit sequence.
+        """
         # The general idea of the algorithm is as follows:
         # Traverse both compressed bit sequences word by word (storing an index for both operands)
         # and apply the bitwise-operation on both of these words.
@@ -993,6 +1172,12 @@ class WAHBitSequence(CompressedBitSequence):
         )
 
     def __invert__(self) -> WAHBitSequence:
+        """See :meth:`BitSequence.__invert__`.
+
+        Inverts each word in place on a copy: literal words have every bit but
+        the signal bit flipped; fill words only have their represented-bit
+        flipped.
+        """
         # Go through each word invert it. We have two cases there:
         # 1. We have a literal word -> invert everything except the signal bit
         # 2. We have a fill word -> invert only the bit signaling whether we have a 0- or 1-fill
@@ -1032,6 +1217,12 @@ class WAHBitSequence(CompressedBitSequence):
         """
 
         def __init__(self, fill_word: UncompressedBitSequence, bit_index: int):
+            """Create an iterator over a single fill word.
+
+            :param fill_word: The fill word to traverse.
+            :param bit_index: The absolute bit position at which this fill word
+                starts.
+            """
             # How many fills are represented by this word?
             self.number_of_fills: int = (
                 WAHBitSequence.get_number_of_fills_represented_by_fill_word(fill_word)
@@ -1047,6 +1238,8 @@ class WAHBitSequence(CompressedBitSequence):
             self.idx_within_curr_fill: int = 0
 
         def __next__(self) -> int:
+            """Yields each represented bit position of the fill in turn, advancing
+            across the fills merged into this word."""
             if self.idx_within_curr_fill == WAHBitSequence.WORD_LENGTH - 1:
                 # We have processed all bits of a fill -> move to next fill
                 self.curr_fill_idx += 1
@@ -1063,7 +1256,17 @@ class WAHBitSequence(CompressedBitSequence):
             return result_bit
 
     class LiteralIterator(BitSequence.SetBitsIterator):
+        """
+        An iterator to traverse a literal word.
+        """
+
         def __init__(self, literal_word: UncompressedBitSequence, bit_index: int):
+            """Create an iterator over a single literal word.
+
+            :param literal_word: The literal word to traverse.
+            :param bit_index: The absolute bit position at which this literal
+                word starts.
+            """
             # Use regular iterator of an uncompressed bit sequence
             self.set_bit_iterator: Iterator[int] = iter(literal_word)
 
@@ -1071,6 +1274,8 @@ class WAHBitSequence(CompressedBitSequence):
             self.bit_idx: int = bit_index
 
         def __next__(self) -> int:
+            """Yields the literal's set-bit positions offset by the word's
+            starting bit index."""
             return self.bit_idx + next(self.set_bit_iterator)
 
     class SetBitsIterator(BitSequence.SetBitsIterator):
@@ -1078,6 +1283,11 @@ class WAHBitSequence(CompressedBitSequence):
             self,
             compressed_bit_sequence: WAHBitSequence,
         ):
+            """See :meth:`BitSequence.SetBitsIterator.__init__`.
+
+            Delegates to a per-word :class:`FillIterator` or
+            :class:`LiteralIterator`, skipping 0-fill words.
+            """
             self.compressed_bit_sequence: WAHBitSequence = compressed_bit_sequence
             self.curr_word_idx: int = -1
 
@@ -1150,6 +1360,11 @@ class WAHBitSequence(CompressedBitSequence):
                 )
 
         def __next__(self) -> int:
+            """See :meth:`BitSequence.SetBitsIterator.__next__`.
+
+            Yields set-bit positions across the whole compressed sequence,
+            advancing to the next word's iterator when the current one is
+            exhausted and stopping at the represented length."""
             while True:
                 # No next iterator was found -> we are done
                 if self.curr_word_iterator is None:
@@ -1167,38 +1382,82 @@ class WAHBitSequence(CompressedBitSequence):
                     self.curr_word_iterator = self.get_next_iterator()
 
     def __contains__(self, index: int) -> bool:
+        """See :meth:`BitSequence.__contains__`.
+
+        Not yet implemented for WAH-compressed sequences.
+        """
         raise NotImplementedError("Method not implemented yet.")
 
     def __getitem__(self, index: int) -> bool:
+        """See :meth:`BitSequence.__getitem__`.
+
+        Not yet implemented for WAH-compressed sequences.
+        """
         raise NotImplementedError("Method not implemented yet.")
 
     def __setitem__(self, index: int, value: bool) -> None:
+        """See :meth:`BitSequence.__setitem__`.
+
+        Not yet implemented for WAH-compressed sequences.
+        """
         raise NotImplementedError("Method not implemented yet.")
 
     def all_bits_set_to_false(self) -> bool:
+        """See :meth:`BitSequence.all_bits_set_to_false`.
+
+        Not yet implemented for WAH-compressed sequences.
+        """
         raise NotImplementedError("Method not implemented yet.")
 
     def all_bits_set_to_true(self) -> bool:
+        """See :meth:`BitSequence.all_bits_set_to_true`.
+
+        Not yet implemented for WAH-compressed sequences.
+        """
         raise NotImplementedError("Method not implemented yet.")
 
     def get_least_significant_bit(self) -> BitSequence:
+        """See :meth:`BitSequence.get_least_significant_bit`.
+
+        Not yet implemented for WAH-compressed sequences.
+        """
         raise NotImplementedError("Method not implemented yet.")
 
     def get_most_significant_bit(self) -> BitSequence:
+        """See :meth:`BitSequence.get_most_significant_bit`.
+
+        Not yet implemented for WAH-compressed sequences.
+        """
         raise NotImplementedError("Method not implemented yet.")
 
     def contains_bit_sequence(self, other: BitSequence) -> bool:
+        """See :meth:`BitSequence.contains_bit_sequence`.
+
+        Not yet implemented for WAH-compressed sequences.
+        """
         raise NotImplementedError("Method not implemented yet.")
 
     def bit_count(self) -> int:
+        """See :meth:`BitSequence.bit_count`.
+
+        Not yet implemented for WAH-compressed sequences.
+        """
         raise NotImplementedError("Method not implemented yet.")
 
     def update_represented_number_of_bits(
         self, updated_represented_number_of_bits: int
     ) -> None:
+        """See :meth:`BitSequence.update_represented_number_of_bits`.
+
+        Not yet implemented for WAH-compressed sequences.
+        """
         raise NotImplementedError("Method not implemented yet.")
 
     def intersects(self, other: BitSequence) -> bool:
+        """See :meth:`BitSequence.intersects`.
+
+        Not yet implemented for WAH-compressed sequences.
+        """
         raise NotImplementedError("Method not implemented yet.")
 
     def _get_bit_sequence_for_range(
@@ -1207,10 +1466,22 @@ class WAHBitSequence(CompressedBitSequence):
         upper_idx: int,
         represented_number_of_bits: int | None = None,
     ) -> BitSequence:
+        """See :meth:`BitSequence._get_bit_sequence_for_range`.
+
+        Not yet implemented for WAH-compressed sequences.
+        """
         raise NotImplementedError("Method not implemented yet.")
 
     def increase_represented_integer(self, number: int) -> None:
+        """See :meth:`BitSequence.increase_represented_integer`.
+
+        Not yet implemented for WAH-compressed sequences.
+        """
         raise NotImplementedError("Method not implemented yet.")
 
     def get_represented_integer(self) -> int:
+        """See :meth:`BitSequence.get_represented_integer`.
+
+        Not yet implemented for WAH-compressed sequences.
+        """
         raise NotImplementedError("Method not implemented yet.")
