@@ -12,16 +12,28 @@ class PythonDictionaryIndex[Key, Value](KeyValueStore[Key, Value]):
     """
 
     def __init__(self):
+        """Initializes an empty index backed by a Python dictionary that maps each key to a list of values,
+        so that multiple values can be associated with the same key.
+        """
         self.index: dict[Key, list[Value]] = dict[Key, list[Value]]()
 
     def size(self) -> int:
+        """See :meth:`Index.size`."""
         return len(self.index)
 
     def put(self, key: Key, value: Value) -> PutInfo | None:
-        """Inserts (puts) a new key->value mapping into the store overwriting any existing mapping."""
+        """See :meth:`Index.put`.
+
+        Appends the value to the list stored for the key, so duplicates are kept rather than overwritten.
+        """
         self.index.setdefault(key, []).append(value)
 
     def delete(self, key: Key, value: Value = None) -> None:
+        """See :meth:`Index.delete`.
+
+        Removes the given value from the list stored for the key and drops the key entirely once its last
+        value has been removed. Raises ``KeyError`` if the key or the value is not present.
+        """
         if key not in self.index:
             raise KeyError(f"Key {key} not found")
 
@@ -44,6 +56,11 @@ class PythonDictionaryIndex[Key, Value](KeyValueStore[Key, Value]):
             self.index[key] = list_of_values
 
     def flush(self, key: Key | None = None) -> None:
+        """See :meth:`Index.flush`.
+
+        No-op: a Python dictionary lives in volatile memory and is not backed by persistent storage. Raises
+        ``KeyError`` if the given key is not present.
+        """
         if key not in self.index:
             raise KeyError(f"Key {key} not found")
 
@@ -51,14 +68,16 @@ class PythonDictionaryIndex[Key, Value](KeyValueStore[Key, Value]):
         pass
 
     def show(self) -> None:
+        """See :meth:`Index.show`.
+
+        Prints the underlying dictionary.
+        """
         print(self.index)
 
     def get(self, key: Key) -> Iterator[Value]:
-        """Returns the values associated with the given key as in iterator. Note that the iterator is NOT STABLE, i.e.
-        it may change if the underlying data changes concurrently.
+        """See :meth:`PointQueryMixIn.get`.
 
-        @param key: the key
-        @return: an iterator of the values associated with the given key
+        Raises ``KeyError`` if the key is not present.
         """
         if key not in self.index:
             raise KeyError(f"Key {key} not found")

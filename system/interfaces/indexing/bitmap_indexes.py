@@ -269,7 +269,7 @@ class BitmapIndex[Key, Value](
 
     def get_greater(self, key: Key) -> BitSequence:
         """
-        Get a bit_sequence for all values that are smaller than or equal to the given key.
+        Get a bit_sequence for all values that are greater than the given key.
         """
         return ~self.get_smaller_or_equal(key)
 

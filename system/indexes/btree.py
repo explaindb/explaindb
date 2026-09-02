@@ -21,11 +21,20 @@ import graphviz
 
 @dataclass
 class NoSplit(PutInfo):
+    """Result of a put that did not cause a node to split."""
+
     pass
 
 
 @dataclass
 class SplitHappens[Key](PutInfo):
+    """Result of a put that caused a node to split into two.
+
+    Wraps the two nodes produced by the split and the pivot key that separates them: ``left_node`` holds the
+    keys below the pivot, ``right_node`` holds the keys at or above it, and ``pivot`` is the separating key
+    propagated up to the parent.
+    """
+
     left_node: BPlusTree.AbstractNode
     right_node: BPlusTree.AbstractNode
     pivot: Key
@@ -545,26 +554,45 @@ class BPlusTree[Key, Value](AbstractBTree[Key, Value]):
         """A leaf node that does not store values but counts the number of put-calls."""
 
         def __init__(self):
+            """Initializes a counting leaf with capacity 0 and a put-call counter set to zero."""
             super().__init__(0)
             self.put_calls: int = 0
 
         def put(self, key: Key, value: Value) -> PutInfo | None:
+            """See :meth:`Index.put`.
+
+            Does not store the value; only increments the counter of put calls.
+            """
             self.put_calls += 1
             return None
 
         def split(self) -> SplitHappens[Key]:
+            """Counting leaves are never split: always raises ``NotImplemented``."""
             raise NotImplemented
 
         def get(self, key: Key) -> Iterator[Value]:
+            """See :meth:`PointQueryMixIn.get`.
+
+            Not supported for counting leaves: always raises ``NotImplemented``.
+            """
             raise NotImplemented
 
         def get_all_in_range(self, min_key: Key, max_key: Key) -> Iterator[Value]:
+            """See :meth:`RangeQueryMixIn.get_all_in_range`.
+
+            Not supported for counting leaves: always raises ``NotImplemented``.
+            """
             raise NotImplemented
 
         def is_full(self) -> bool:
+            """Not supported for counting leaves: always raises ``NotImplemented``."""
             raise NotImplemented
 
         def size(self) -> int:
+            """See :meth:`Index.size`.
+
+            Returns the number of put calls counted so far.
+            """
             return self.put_calls
 
         def dot(self, s: str) -> str:
@@ -585,9 +613,14 @@ class BPlusTree[Key, Value](AbstractBTree[Key, Value]):
             return s
 
         def consistency_check(self) -> None:
+            """Not supported for counting leaves: always raises ``NotImplemented``."""
             raise NotImplemented
 
         def show(self) -> None:
+            """See :meth:`Index.show`.
+
+            Prints the number of put calls counted so far.
+            """
             print(self.put_calls)
 
     def __init__(self, inner_capacity: int = 3, leaf_capacity: int = 4):
@@ -666,6 +699,7 @@ class BPlusTree[Key, Value](AbstractBTree[Key, Value]):
         display(graphviz.Source(s))
 
     def __str__(self):
+        """Returns a short representation of the tree showing its inner and leaf node capacities."""
         s = f"BPlusTree(inner_capacity={self.inner_capacity}, leaf_capacity={self.leaf_capacity})"
         return s
 
