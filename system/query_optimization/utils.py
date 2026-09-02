@@ -66,6 +66,10 @@ def randomize_cardinalities_and_enumerate_join_graph(
 
 
 def print_results(results: tuple[int, tuple, int]):
+    """
+    Print a human-readable summary of an enumeration result.
+    :param results: A tuple of the best plan's costs, the best plan, and the number of enumerated csg-cmp pairs.
+    """
     print(
         f"The best join plan is {visualize_join_plan(results[1])} with costs {results[0]}!"
         f" Overall, we needed to enumerate {results[2]} pairs."
@@ -73,6 +77,11 @@ def print_results(results: tuple[int, tuple, int]):
 
 
 def visualize_join_plan(join_plan: tuple | int) -> str:
+    """
+    Render a join plan as a nested string using the join symbol.
+    :param join_plan: The join plan, either a relation id (int leaf) or a nested (left, right) tuple.
+    :return: The string representation of the join plan.
+    """
     if isinstance(join_plan, int):
         return str(join_plan)
     return f"({visualize_join_plan(join_plan[0])}⋈{visualize_join_plan(join_plan[1])})"

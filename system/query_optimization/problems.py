@@ -65,10 +65,9 @@ class Problem(IntegerBitSequence):
 
     @staticmethod
     def create_all_false_bit_sequence(represented_number_of_bits: int = 0) -> Problem:
-        """
-        Creates the empty problem (no relation selected) over the given number of bits.
-        :param represented_number_of_bits: The number of relations the problem ranges over.
-        :return: A problem with all bits set to False.
+        """See :meth:`BitSequence.create_all_false_bit_sequence`.
+
+        Returns the empty problem (no relation selected) as a :class:`Problem`.
         """
         return Problem(0, represented_number_of_bits)
 
@@ -90,17 +89,24 @@ class Problem(IntegerBitSequence):
             return self
 
         def __next__(self) -> Problem:
+            """Returns the next set bit of the problem as a singleton problem."""
             return Problem.get_problem_for_relation(
                 next(self.key_iterator), len(self.problem)
             )
 
     def __iter__(self) -> Iterator[Problem]:
+        """See :meth:`BitSequence.__iter__`.
+
+        Yields each set bit as a singleton :class:`Problem` instead of as an
+        integer position.
+        """
         return Problem.SingletonIterator(self)
 
     def as_set(self) -> set[int]:
-        """
-        Returns the relation ids selected by this problem as a set of integers.
-        :return: The set of relation ids whose bit is set to True.
+        """See :meth:`BitSequence.as_set`.
+
+        Bypasses the singleton-yielding :meth:`__iter__` and returns the raw
+        relation-id integers whose bit is set to True.
         """
         return set(bit for bit in Problem.SetBitsIterator(self))
 
@@ -124,11 +130,17 @@ class Problem(IntegerBitSequence):
             return self
 
         def __next__(self) -> Problem:
+            """Returns the next set bit (from most to least significant) as a singleton problem."""
             return Problem.get_problem_for_relation(
                 next(self.key_reverse_iterator), len(self.problem)
             )
 
     def __reversed__(self) -> Iterator[Problem]:
+        """See :meth:`BitSequence.__reversed__`.
+
+        Yields each set bit as a singleton :class:`Problem`, from the most to the
+        least significant bit, instead of as an integer position.
+        """
         return Problem.SingletonReverseIterator(self)
 
     @staticmethod
@@ -188,6 +200,7 @@ class Problem(IntegerBitSequence):
             return self
 
         def __next__(self) -> Problem:
+            """Returns the next subset of the superset problem, stopping once the stop problem is reached."""
             # If we have reached the stop problem, end the iteration
             if self.current_problem == self.stop_problem:
                 raise StopIteration

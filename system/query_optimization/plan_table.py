@@ -21,28 +21,25 @@ class StandardPlanTable(PlanTable):
         cost_function: CostFunction,
         cardinality_table: CardinalityTable,
     ):
+        """
+        Create a standard plan table and initialize it with the singleton base entries.
+        :param join_graph: The underlying join graph.
+        :param cost_function: The cost function used to estimate costs.
+        :param cardinality_table: The cardinality table used for estimations.
+        """
         # A mapping from each problem to a tuple storing the costs and plan for the problem
         self.entries: dict[Problem, tuple] = dict()
         self._create_base_entries(join_graph, cost_function, cardinality_table)
 
     def _create_base_entry(self, entry: Problem, cost: int):
-        """
-        Creates the base entry for given entry.
-        :param entry: The entry as a problem.
-        :param cost: The cost to be inserted.
-        """
+        """See :meth:`PlanTable._create_base_entry`."""
         self.entries[entry] = (
             cost,
             entry.get_relation_id(),
         )
 
     def _update_join_entry(self, left: Problem, right: Problem, costs: int):
-        """
-        Updates the entry corresponding to the problem obtained by combining the left and right problems.
-        :param left: The left problem.
-        :param right: The right problem.
-        :param costs: The new costs.
-        """
+        """See :meth:`PlanTable._update_join_entry`."""
         self.entries[left | right] = (
             costs,
             (
@@ -52,27 +49,15 @@ class StandardPlanTable(PlanTable):
         )
 
     def __contains__(self, problem: Problem) -> bool:
-        """
-        Check whether the problem is contained in the plantable
-        :param problem: The problem to check
-        :return: True, if the problem is contained, False if not
-        """
+        """See :meth:`PlanTable.__contains__`."""
         return problem in self.entries
 
     def get_costs_for_problem(self, problem: Problem):
-        """
-        Returns the current best costs for the problem.
-        :param problem: The problem.
-        :return: The costs for the problem.
-        """
+        """See :meth:`PlanTable.get_costs_for_problem`."""
         return self.entries[problem][0]
 
     def get_plan_for_problem(self, problem: Problem):
-        """
-        Returns the current best plan for the problem.
-        :param problem: The problem.
-        :return: The plan for the problem.
-        """
+        """See :meth:`PlanTable.get_plan_for_problem`."""
         return self.entries[problem][1]
 
 
@@ -88,6 +73,12 @@ class SizeBasedPlanTable(PlanTable):
         cost_function: CostFunction,
         cardinality_table: CardinalityTable,
     ):
+        """
+        Create a size-based plan table and initialize it with the singleton base entries.
+        :param join_graph: The underlying join graph.
+        :param cost_function: The cost function used to estimate costs.
+        :param cardinality_table: The cardinality table used for estimations.
+        """
         # Store problems ordered by their size
         # Sizes of k can then be accessed via the index k-1
         self.entries: list[dict[Problem, tuple]] = [
@@ -99,10 +90,9 @@ class SizeBasedPlanTable(PlanTable):
         self._create_base_entries(join_graph, cost_function, cardinality_table)
 
     def _create_base_entry(self, entry: Problem, cost: int):
-        """
-        Creates the base entry for given entry.
-        :param entry: The entry as a problem.
-        :param cost: The cost to be inserted.
+        """See :meth:`PlanTable._create_base_entry`.
+
+        Stores the entry in the size-1 bucket of the size-indexed table.
         """
         self.entries[0][entry] = (
             cost,
@@ -110,11 +100,10 @@ class SizeBasedPlanTable(PlanTable):
         )
 
     def _update_join_entry(self, left: Problem, right: Problem, costs: int):
-        """
-        Updates the entry corresponding to the problem obtained by combining left and right problems.
-        :param left: The left problem.
-        :param right: The right problem.
-        :param costs: The new costs.
+        """See :meth:`PlanTable._update_join_entry`.
+
+        Stores the combined entry in the bucket for its size (index is its number
+        of relations minus one).
         """
         combined: Problem = left | right
         self.entries[combined.bit_count() - 1][combined] = (
@@ -126,10 +115,10 @@ class SizeBasedPlanTable(PlanTable):
         )
 
     def __contains__(self, problem: Problem) -> bool:
-        """
-        Check whether the problem is contained in the plan table.
-        :param problem: The problem to check.
-        :return: True, if the problem is contained, False if not.
+        """See :meth:`PlanTable.__contains__`.
+
+        Looks the problem up in the bucket for its size (index is its number of
+        relations minus one).
         """
         return problem in self.entries[problem.bit_count() - 1]
 
@@ -145,17 +134,9 @@ class SizeBasedPlanTable(PlanTable):
         return itertools.islice(self.size_lists[k - 1], start_index, None)
 
     def get_costs_for_problem(self, problem: Problem):
-        """
-        Returns the current best costs for the problem.
-        :param problem: The problem.
-        :return: The costs for the problem.
-        """
+        """See :meth:`PlanTable.get_costs_for_problem`."""
         return self.entries[problem.bit_count() - 1][problem][0]
 
     def get_plan_for_problem(self, problem: Problem):
-        """
-        Returns the current best plan for the problem.
-        :param problem: The problem.
-        :return: The plan for the problem.
-        """
+        """See :meth:`PlanTable.get_plan_for_problem`."""
         return self.entries[problem.bit_count() - 1][problem][1]

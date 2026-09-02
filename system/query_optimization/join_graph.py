@@ -13,6 +13,10 @@ class JoinGraph:
     """
 
     def __init__(self, number_of_relations: int):
+        """
+        Create an empty join graph over the given number of relations.
+        :param number_of_relations: The number of relations (nodes) in the join graph.
+        """
         self.number_of_relations: int = number_of_relations
         self.adjacency_matrix: list[Problem] = [
             Problem.create_all_false_bit_sequence(self.number_of_relations)
@@ -20,9 +24,11 @@ class JoinGraph:
         ]
 
     def __len__(self) -> int:
+        """Returns the number of relations (nodes) in the join graph."""
         return len(self.adjacency_matrix)
 
     def __iter__(self):
+        """Iterates over the relation ids (0 to n-1) of the join graph."""
         return iter(range(len(self)))
 
     def add_join(self, left_relation: int, right_relation: int):
@@ -107,6 +113,11 @@ class JoinGraphFactory(ABC):
     @staticmethod
     @abstractmethod
     def construct_join_graph(num_nodes: int) -> JoinGraph:
+        """
+        Construct a join graph following this factory's scheme.
+        :param num_nodes: The number of relations in the join graph.
+        :return: The constructed join graph.
+        """
         pass
 
 
@@ -117,10 +128,9 @@ class ChainQueryFactory(JoinGraphFactory):
 
     @staticmethod
     def construct_join_graph(num_nodes: int) -> JoinGraph:
-        """
-        Create a join graph for a chain query.
-        :param num_nodes: The number of relations in the join graph.
-        :return: The chain join graph.
+        """See :meth:`JoinGraphFactory.construct_join_graph`.
+
+        Builds a chain query, joining each relation ``i`` with relation ``i + 1``.
         """
 
         chain_query = JoinGraph(num_nodes)
@@ -138,10 +148,10 @@ class StarQueryFactory(JoinGraphFactory):
 
     @staticmethod
     def construct_join_graph(num_nodes: int) -> JoinGraph:
-        """
-        Create a join graph for a star query.
-        :param num_nodes: The number of relations in the join graph.
-        :return: The star join graph.
+        """See :meth:`JoinGraphFactory.construct_join_graph`.
+
+        Builds a star query, joining the fact table (relation ``0``) with every
+        other relation.
         """
 
         star_query = JoinGraph(num_nodes)
@@ -159,10 +169,10 @@ class CycleQueryFactory(JoinGraphFactory):
 
     @staticmethod
     def construct_join_graph(num_nodes: int) -> JoinGraph:
-        """
-        Create a join graph for a cycle query.
-        :param num_nodes: The number of relations in the join graph.
-        :return: The cycle join graph.
+        """See :meth:`JoinGraphFactory.construct_join_graph`.
+
+        Builds a cycle query, i.e., a chain query with an additional edge closing
+        the last relation back to the first.
         """
         cycle_query = ChainQueryFactory.construct_join_graph(num_nodes)
 
@@ -178,10 +188,10 @@ class CliqueQueryFactory(JoinGraphFactory):
 
     @staticmethod
     def construct_join_graph(num_nodes: int) -> JoinGraph:
-        """
-        Create a join graph for a clique query.
-        :param num_nodes: The number of relations in the join graph.
-        :return: The clique join graph.
+        """See :meth:`JoinGraphFactory.construct_join_graph`.
+
+        Builds a clique query, joining every relation with every relation
+        (self-joins included).
         """
 
         clique_query = JoinGraph(num_nodes)

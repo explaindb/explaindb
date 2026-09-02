@@ -11,6 +11,7 @@ class CardinalityTable:
     """
 
     def __init__(self):
+        """Create an empty cardinality table."""
         # A mapping from a problem to its cardinality estimation
         self.entries: dict[Problem, int] = dict()
 
