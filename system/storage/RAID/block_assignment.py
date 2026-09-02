@@ -23,6 +23,13 @@ class PhysicalBlockPosition:
 
 
 class RAID_Level(ABC):
+    """Abstract base for RAID data/parity block-placement strategies.
+
+    Each subclass (RAID_0, RAID_1, RAID_4, RAID_5) implements
+    :meth:`logical_id_to_physical_positions`, mapping a logical block ID onto
+    the physical block position(s) it occupies for that RAID level.
+    """
+
     @abstractmethod
     def logical_id_to_physical_positions(
         self, logical_block_ID: int, number_of_disks: int

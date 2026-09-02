@@ -22,6 +22,7 @@ class RailElement(ABC):
     id_counter: int = 0
 
     def __init__(self):
+        """Assigns this element a process-wide unique id from the shared counter."""
         self.id = RailElement.id_counter
         RailElement.id_counter += 1
 
@@ -41,6 +42,11 @@ class Gate(RailElement):
     """A gate has a position ("left" or "right") and two children RailElements (left and right)."""
 
     def __init__(self, left: RailElement = None, right: RailElement = None):
+        """Creates a gate with a random initial position and two child elements.
+
+        :param left: the child reached when the position is ``"left"``.
+        :param right: the child reached when the position is ``"right"``.
+        """
         super().__init__()
         self.position = rnd.choice(["left", "right"])
         self.left = left
@@ -51,9 +57,15 @@ class Gate(RailElement):
         self.position = "left" if self.position == "right" else "right"
 
     def __repr__(self):
+        """Renders as ``Gate<id>(<position>)``, e.g. ``Gate3(left)``."""
         return f"Gate{self.id}({self.position})"
 
     def find_reachable_platform(self) -> Platform:
+        """Follows the current position into the corresponding child.
+
+        :return: the platform reached by recursing into the ``left`` or
+            ``right`` child according to this gate's current position.
+        """
         return (
             self.left.find_reachable_platform()
             if self.position == "left"
@@ -61,6 +73,10 @@ class Gate(RailElement):
         )
 
     def show(self, rec_depth: int = 0):
+        """Prints this gate, then recursively both children one level deeper.
+
+        :param rec_depth: indentation depth in tab stops for this gate.
+        """
         print("\t" * rec_depth, self)
         self.left.show(rec_depth + 1)
         self.right.show(rec_depth + 1)
@@ -70,10 +86,15 @@ class Platform(RailElement):
     """A platform has a counter that is increased every time a train visits it."""
 
     def __init__(self, visit_counter: int = 0):
+        """Creates a platform.
+
+        :param visit_counter: the initial visit count (default 0).
+        """
         super().__init__()
         self.visit_counter = visit_counter
 
     def __repr__(self):
+        """Renders as ``Platform<id>(<visit_counter>)``, e.g. ``Platform7(42)``."""
         return f"Platform{self.id}({self.visit_counter})"
 
     def find_reachable_platform(self) -> Platform:
@@ -85,11 +106,27 @@ class Platform(RailElement):
         self.visit_counter += 1
 
     def show(self, rec_depth: int = 0):
+        """Prints this platform.
+
+        :param rec_depth: indentation depth in tab stops for this platform.
+        """
         print("\t" * rec_depth, self)
 
 
 class GateTree:
+    """A complete binary tree of gates (inner nodes) and platforms (leaves).
+
+    The tree has ``number_of_gate_levels`` levels of gates and therefore
+    ``2 ** number_of_gate_levels`` platforms as leaves. Flat lists of all gates
+    and all platforms are kept alongside the root for random access.
+    """
+
     def __init__(self, number_of_gate_levels: int):
+        """Builds the tree and records its gates and platforms.
+
+        :param number_of_gate_levels: number of gate levels; the tree ends in
+            ``2 ** number_of_gate_levels`` platforms.
+        """
         # flat list of all gates in the tree:
         self.gates: list[Gate] = []
 
@@ -116,9 +153,14 @@ class GateTree:
             return _gate
 
     def show(self):
+        """Prints the whole tree starting at the root."""
         self.root.show()
 
     def find_reachable_platform(self) -> Platform:
+        """Follows the current gate positions from the root.
+
+        :return: the platform reached from the root given the gates' positions.
+        """
         return self.root.find_reachable_platform()
 
 
