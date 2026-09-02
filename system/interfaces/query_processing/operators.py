@@ -13,10 +13,19 @@ class Operator(ABC):
     """
 
     def __init__(self, parent: Self | None, children: list[Self] | None):
+        """Initialize the operator as a node in a QEP operator tree.
+
+        :param parent: Parent operator that consumes the tuples pushed by this operator, or ``None`` for the root.
+        :param children: Child operators that feed tuples into this operator, or ``None`` for a leaf.
+        """
         self.parent = parent
         self.children = children
 
     def set_parent(self, parent: Self) -> None:
+        """Set the parent operator that this operator pushes its output tuples to.
+
+        :param parent: The parent operator to attach.
+        """
         self.parent = parent
 
     @abstractmethod

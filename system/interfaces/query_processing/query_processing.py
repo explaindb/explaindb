@@ -14,6 +14,7 @@ class QEP(ABC):
 
     @abstractmethod
     def __init__(self):
+        """Initialize the query execution plan."""
         pass
 
 
