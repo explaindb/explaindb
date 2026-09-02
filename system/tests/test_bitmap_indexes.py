@@ -309,6 +309,37 @@ class BitmapIndexTests(unittest.TestCase):
                     len(self.all_addresses) * 12,
                 )
 
+    def test_get_all_in_range_returns_only_values_in_range(self):
+        """Regression: get_all_in_range must return only values within [min, max].
+
+        Symptom: get_all_in_range combined the two bound bit-sequences with
+        bitwise OR, so for min_key <= max_key it returned ALL values instead of
+        their intersection.
+        Repro: build a bitmap index on the house numbers and query a bounded
+        range that excludes some values.
+        Expected: only the ids whose house number lies in [min_key, max_key].
+        Observed before the fix: every id.
+        """
+        # id -> house_number:
+        # 0:-2, 1:1, 2:2, 3:3, 4:4, 5:5, 6:6, 7:7, 8:8, 9:9, 10:11, 11:13
+        index_type: Type[BitmapIndex]
+        for index_type in [
+            SortedEqualityEncodedBitmapIndex,
+            RangeEncodedBitmapIndex,
+        ]:
+            house_number_index: BitmapIndex = index_type(IntegerBitSequence)
+            house_number_index.bulkload(
+                (address.house_number, address.id) for address in self.all_addresses
+            )
+            self.assertEqual(
+                set(house_number_index.get_all_in_range(3, 7)),
+                {3, 4, 5, 6, 7},
+            )
+            self.assertEqual(
+                set(house_number_index.get_all_in_range(-2, 2)),
+                {0, 1, 2},
+            )
+
     def test_unsorted_bit_sequence_list(self):
         """
         Check the correctness of an unsorted bit-sequence list

@@ -208,11 +208,12 @@ class BitmapIndex[Key, Value](
     def get_all_in_range(self, min_key: Key, max_key: Key) -> Iterator[Value]:
         """See :meth:`RangeQueryMixIn.get_all_in_range`.
 
-        Yields the values of the union (bitwise OR) of the greater-or-equal
-        ``min_key`` and smaller-or-equal ``max_key`` bit sequences.
+        Yields the values of the intersection (bitwise AND) of the
+        greater-or-equal ``min_key`` and smaller-or-equal ``max_key`` bit
+        sequences, i.e. the values whose key lies in ``[min_key, max_key]``.
         """
         yield from self._get_values_for_bit_sequence(
-            self.get_greater_or_equal(min_key) | self.get_smaller_or_equal(max_key)
+            self.get_greater_or_equal(min_key) & self.get_smaller_or_equal(max_key)
         )
 
     @abstractmethod
