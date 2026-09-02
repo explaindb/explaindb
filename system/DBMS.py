@@ -46,13 +46,13 @@ class PyDBMS(DBMS):
     def execute_unprepared_query(
         self, query: str, TA_ID: int | None = None
     ) -> Iterator[object]:
-        """Execute a query."""
+        """See :meth:`QueryableComponent.execute_unprepared_query`."""
 
         qep = self.query_optimizer.create_QEP(query)
         return self.QEP_queryable_ACID_store.execute_query(qep, TA_ID)
 
     def prepare_query(self, query: str, parameters: list[str]) -> int:
-        """Prepare a query to be executed multiple times with different parameters."""
+        """See :meth:`QueryableComponent.prepare_query`."""
 
         prepared_query_id: int = self._get_next_prepared_query_id()
         self.prepared_queries[prepared_query_id] = self.query_optimizer.prepare_query(
@@ -63,7 +63,10 @@ class PyDBMS(DBMS):
     def execute_prepared_query(
         self, query_id: int, parameters: dict[str, object], TA_ID: int | None = None
     ) -> Iterator[object]:
-        """Execute a prepared query with parameters."""
+        """See :meth:`QueryableComponent.execute_prepared_query`.
+
+        Raises :class:`ValueError` if no prepared query is registered under ``query_id``.
+        """
 
         if query_id not in self.prepared_queries:
             raise ValueError(f"No prepared QEP found for query id {query_id}.")

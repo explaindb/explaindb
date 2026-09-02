@@ -10,6 +10,8 @@ from ipycanvas import Canvas
 
 
 class Drawable(ABC):
+    """An interface for objects that can render themselves onto an ipycanvas canvas."""
+
     @abstractmethod
     def draw(
         self,
@@ -48,6 +50,7 @@ class Vector(Drawable):
         return Vector(-self.x, -self.y)
 
     def __str__(self):
+        """Render the vector as an ``(x, y)`` coordinate pair."""
         return f"({self.x}, {self.y})"
 
     def my_hash(self) -> int:
@@ -196,4 +199,5 @@ class Triangle(Descriptor):
         )
 
     def __str__(self) -> str:
+        """Render the triangle as ``∆`` followed by its origin vertex and the two edge vectors."""
         return f"∆({self.A}, {self.AB}, {self.AC})"

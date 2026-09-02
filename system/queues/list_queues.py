@@ -23,6 +23,7 @@ class ListQueue[ObjectType](ReadWriteQueue[ObjectType], Iterator):
         return 0
 
     def insert(self, entry: ObjectType) -> None:
+        """See :meth:`WriteQueue.insert`."""
         self.buffer.append(entry)
 
     def __iter__(self):

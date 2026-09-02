@@ -41,6 +41,7 @@ class RunMetadata:
         return self.size < other.size
 
     def __str__(self):
+        """Human-readable summary showing the number of elements in the run."""
         return f"RunMetadata:  {self.size} elements"
 
 
@@ -56,6 +57,10 @@ class RunGenerationResult:
 
 
 class RunGenerator[ObjectType]:
+    """Phase 0 of external merge sort: reads the input in memory-sized chunks, sorts each chunk, and writes it out
+    as a sorted run via the queue factory.
+    """
+
     def __init__(
         self,
         input_data: Iterator[ObjectType],
@@ -197,6 +202,9 @@ class SingleStreamMerge[ObjectType](Iterator):
         heapq.heapify(self.heap)
 
     def __next__(self) -> object:
+        """Returns the next smallest element across all runs: takes the head of the heap, advances that run's
+        iterator and re-heapifies, or drops the run (closing its queue) once it is exhausted.
+        """
         # returns the next element in the sorted runs:
         if len(self.heap) == 0:
             raise StopIteration

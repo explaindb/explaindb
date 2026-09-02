@@ -356,21 +356,34 @@ class UncompressedBitSequence(BitSequence, ABC):
     def _perform_binary_operation(
         self, other: BitSequence, operation: Callable
     ) -> UncompressedBitSequence:
+        """
+        Applies a bitwise binary operation between this and the other bit-sequence, position by position.
+        :param other: The other bit-sequence.
+        :param operation: A callable taking two operands and returning the result of the bitwise operation.
+        :return: The result of the operation as an uncompressed bit-sequence.
+        """
         pass
 
     def __and__(self, other: UncompressedBitSequence) -> UncompressedBitSequence:
+        """See :meth:`BitSequence.__and__`."""
         return self._perform_binary_operation(other, lambda x, y: x & y)
 
     def __or__(self, other: UncompressedBitSequence) -> UncompressedBitSequence:
+        """See :meth:`BitSequence.__or__`."""
         return self._perform_binary_operation(other, lambda x, y: x | y)
 
     def __xor__(self, other: UncompressedBitSequence) -> UncompressedBitSequence:
+        """See :meth:`BitSequence.__xor__`."""
         return self._perform_binary_operation(other, lambda x, y: x ^ y)
 
     @staticmethod
     def create_all_false_bit_sequence(
         number_of_bits: int = 0,
     ) -> UncompressedBitSequence:
+        """See :meth:`BitSequence.create_all_false_bit_sequence`.
+
+        Uncompressed variant: the returned bit-sequence is an :class:`UncompressedBitSequence`.
+        """
         pass
 
 
@@ -395,4 +408,8 @@ class CompressedBitSequence(BitSequence, ABC):
     def create_all_false_bit_sequence(
         number_of_bits: int = 0,
     ) -> CompressedBitSequence:
+        """See :meth:`BitSequence.create_all_false_bit_sequence`.
+
+        Compressed variant: the returned bit-sequence is a :class:`CompressedBitSequence`.
+        """
         pass

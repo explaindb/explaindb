@@ -21,6 +21,12 @@ class IndexProperties:
 
 @dataclass
 class PutInfo:
+    """Optional information returned by :meth:`Index.put` describing the effect of an insertion.
+
+    Placeholder base class carrying no fields; implementations may subclass it to report details such as whether a
+    split occurred or which node was affected.
+    """
+
     pass
 
 
@@ -100,6 +106,8 @@ class PointQueryMixIn[Key, Value](ABC):
 
 
 class RangeQueryMixIn[Key, Value](ABC):
+    """An interface mixing in range queries."""
+
     @abstractmethod
     def get_all_in_range(self, min_key: Key, max_key: Key) -> Iterator[Value]:
         """Returns all values that satisfy the given where clause. Note that the iterator is NOT STABLE, i.e.
