@@ -18,6 +18,8 @@ class ResilienceScenario(Enum):
     ALL_BUT_ONE_SUBSYSTEM_MAY_FAIL = 42
 
     def __str__(self):
+        """Render as the bare member name (e.g. ``ANY_SINGLE_SUBSYSTEM_MAY_FAIL``)
+        rather than the default ``ResilienceScenario.<name>`` form."""
         return self.name
 
 
@@ -89,6 +91,7 @@ class SubSystem(ABC):
             yield rec_depth, self, *resilience_scenario
 
     def __str__(self):
+        """Render as the concrete subsystem's class name."""
         return f"{self.__class__.__name__}"
 
 
@@ -96,6 +99,10 @@ class SubSystemArray(SubSystem, ABC):
     """A cost model for an abstract subsystem keeping a list of references to nested subsystems."""
 
     def __init__(self, subsystems: list[SubSystem]):
+        """Create the array over the given nested subsystems.
+
+        @param subsystems: The subsystems aggregated by this array.
+        """
         super().__init__()
         self.subsystems: list[SubSystem] = subsystems
 
@@ -131,6 +138,15 @@ class Device(SubSystem):
         write_IO_performance: int,
         storage_blow_up: float = 1,
     ):
+        """Create a device from its measured performance characteristics.
+
+        @param sequential_read_performance: Sequential read throughput in MB/s.
+        @param sequential_write_performance: Sequential write throughput in MB/s.
+        @param read_IO_performance: Random read I/O operations per second (IOPs).
+        @param write_IO_performance: Random write I/O operations per second (IOPs).
+        @param storage_blow_up: Storage blow-up factor (1.0 = no overhead, 1.1 =
+            10% extra, < 1.0 = space saved, e.g. via compression).
+        """
         super().__init__()
         self.sequential_read_performance: int = sequential_read_performance
         self.sequential_write_performance: int = sequential_write_performance
@@ -263,6 +279,10 @@ class RAID_5(SubSystemArray):
     """RAID 5: Striping with distributed (round-robin) parity"""
 
     def __init__(self, subsystems: list[SubSystem]):
+        """See :meth:`SubSystemArray.__init__`.
+
+        RAID 5 additionally requires at least three subsystems and asserts this.
+        """
         super().__init__(subsystems)
         assert len(subsystems) >= 3, "RAID 5 needs at least 3 subsystems."
 

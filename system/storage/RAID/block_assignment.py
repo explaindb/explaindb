@@ -45,6 +45,11 @@ class RAID_0(RAID_Level):
     def logical_id_to_physical_positions(
         self, logical_block_ID: int, number_of_disks: int
     ) -> list[PhysicalBlockPosition]:
+        """See :meth:`RAID_Level.logical_id_to_physical_positions`.
+
+        Striping without parity: the logical block is placed round-robin on a
+        single disk. Returns exactly one data position and no parity block.
+        """
 
         disk_ID: int = logical_block_ID % number_of_disks
 
@@ -60,6 +65,11 @@ class RAID_1(RAID_Level):
     def logical_id_to_physical_positions(
         self, logical_block_ID: int, number_of_disks: int
     ) -> list[PhysicalBlockPosition]:
+        """See :meth:`RAID_Level.logical_id_to_physical_positions`.
+
+        Mirroring: the logical block is replicated on every disk at the same
+        internal position. Returns one data position per disk and no parity.
+        """
 
         # trivial: all blocks get replicated on all available disks:
         internal_block_ID: int = logical_block_ID
@@ -78,6 +88,13 @@ class RAID_4(RAID_Level):
     def logical_id_to_physical_positions(
         self, logical_block_ID: int, number_of_disks: int
     ) -> list[PhysicalBlockPosition]:
+        """See :meth:`RAID_Level.logical_id_to_physical_positions`.
+
+        Striping with a dedicated parity disk (always the last disk): the data
+        block is striped round-robin over the remaining disks. Returns one data
+        position plus one parity position (on the last disk) for its row.
+        Requires at least three disks.
+        """
 
         assert number_of_disks >= 3, "Not enough disks for this RAID-level"
 
@@ -101,6 +118,15 @@ class RAID_5(RAID_Level):
     def logical_id_to_physical_positions(
         self, logical_block_ID: int, number_of_disks: int
     ) -> list[PhysicalBlockPosition]:
+        """See :meth:`RAID_Level.logical_id_to_physical_positions`.
+
+        Striping with distributed (round-robin) parity: the parity disk rotates
+        per row (the diagonal pattern) instead of being fixed, and the data-disk
+        index is shifted right by one whenever it is greater than or equal to the
+        parity-disk index, so the round-robin skips over the parity disk.
+        Returns one data position plus one parity position for its row.
+        Requires at least three disks.
+        """
 
         assert number_of_disks >= 3, "Not enough disks for this RAID-level"
 

@@ -55,8 +55,14 @@ class StorageLayer[Address, StorageUnit](KeyValueStore[Address, StorageUnit]):
         self.fixed: set[Address] = set[Address]()
 
     def get(self, address: Address) -> StorageUnit:
-        """Get the value associated with the given key. If the key is not found in this storage layer, we will ask the
-        layer below if it has the key and put it in this layer if found."""
+        """See :meth:`PointQueryMixIn.get`.
+
+        Storage-hierarchy variant: returns the single stored unit for the
+        address rather than an iterator. On a miss in this layer, the address is
+        looked up in the layer below (after optional address conversion) and the
+        result is cached in this layer. Raises ``KeyError`` if there is no layer
+        below to satisfy the miss.
+        """
 
         # do we have this address in the storage of this storage layer?
         if address not in self.storage:
@@ -86,8 +92,11 @@ class StorageLayer[Address, StorageUnit](KeyValueStore[Address, StorageUnit]):
         return self.storage[address]
 
     def put(self, address: Address, storage_unit: StorageUnit):
-        """Store a new key-value pair in this storage layer.
-        This implementation will overwrite any previous mapping for the given key.
+        """See :meth:`Index.put`.
+
+        Overwrites any previous mapping for the given key. If this layer is at
+        capacity, it first evicts an entry to the layer below to make room; a
+        failed eviction raises ``ValueError``.
         """
 
         if self.size() >= self.max_capacity:
@@ -151,14 +160,33 @@ class StorageLayer[Address, StorageUnit](KeyValueStore[Address, StorageUnit]):
         return 0
 
     def size(self) -> int:
+        """See :meth:`Index.size`.
+
+        Counts only the entries held in this layer, not those in the layers
+        below.
+        """
         return len(self.storage)
 
     def delete(self, key: Address, value: StorageUnit | None = None) -> None:
+        """See :meth:`Index.delete`.
+
+        Removes the mapping from this layer's own storage only; the ``value``
+        argument is ignored. Raises ``KeyError`` if the key is not present here.
+        """
         del self.storage[key]
 
     def flush(self, key: Address | None = None) -> None:
+        """See :meth:`Index.flush`.
+
+        Not implemented for this storage layer: always raises
+        ``NotImplementedError``.
+        """
         raise NotImplementedError
 
     def show(self) -> None:
+        """See :meth:`Index.show`.
+
+        Prints this layer's name followed by its raw storage dictionary.
+        """
         print(f"Storage Layer: {self._name}")
         print(self.storage)
