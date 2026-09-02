@@ -1,0 +1,22 @@
+# Per-notebook run-time weights used by assign_notebooks.py to balance the
+# parallel notebook CI jobs (LPT bin-packing). Format: <seconds><TAB><notebook>.
+# Measured via `jupyter nbconvert --to script | ipython`, same as CI runs them.
+# These are rough proxies for balancing, not exact timings -- update them when a
+# notebook's run time changes noticeably. Notebooks missing here get a default
+# weight (see assign_notebooks.py) and still run.
+7.7	Christmas Tree.ipynb
+6.1	Recursive Model Index.ipynb
+5.0	Bitmaps and Bloom Filters.ipynb
+3.8	CodeGen.ipynb
+3.4	RAID Nesting Trade-offs.ipynb
+2.5	B-tree.ipynb
+2.4	Distributed Joins.ipynb
+2.1	Data Layout.ipynb
+2.0	PlanEnumeration.ipynb
+1.9	Top-k.ipynb
+1.8	Bit Sequences in Pandas.ipynb
+1.5	Result DB.ipynb
+1.5	Shared Scan.ipynb
+1.5	Z-Order Curve.ipynb
+1.4	External Merge Sort.ipynb
+1.4	Online Aggregation.ipynb

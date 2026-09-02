@@ -91,8 +91,8 @@ ipynb_test:
   tags:
     - test
   # Run the notebooks in parallel across several jobs to cut wall-clock time.
-  # Every notebook is still executed -- the set is split across the N instances,
-  # so coverage is unchanged, only faster.
+  # Every notebook is still executed -- .ci/assign_notebooks.py splits the set
+  # across the N instances, so coverage is unchanged, only faster.
   parallel: 3
   script:
     # Skip when the merge request only changes Markdown (see detect-docs-only).
@@ -100,23 +100,18 @@ ipynb_test:
     # Use most recent version from Pipfile
     - pipenv install
     # Execute this instance's slice of the notebooks. GitLab sets CI_NODE_INDEX
-    # (1..N) and CI_NODE_TOTAL (N). The notebooks are ordered largest-first (file
-    # size is a good proxy for run time) before the round-robin assignment, so the
-    # heavy notebooks are spread across the instances instead of piling on one.
+    # (1..N) and CI_NODE_TOTAL (N); .ci/assign_notebooks.py reads those and packs
+    # the notebooks onto the instances by measured run time (LPT bin-packing, see
+    # .ci/notebook_weights.tsv) so the instances finish at roughly the same time.
     # `set -e` makes the job fail as soon as any notebook raises.
     - |
       set -e
-      : "${CI_NODE_TOTAL:=1}" "${CI_NODE_INDEX:=1}"
-      i=0
-      ls -S *.ipynb > /tmp/nb_order
+      python3 .ci/assign_notebooks.py > /tmp/nb_slice
       while IFS= read -r nb; do
-        if [ "$(( i % CI_NODE_TOTAL ))" -eq "$(( CI_NODE_INDEX - 1 ))" ]; then
-          echo "== [node $CI_NODE_INDEX/$CI_NODE_TOTAL] running $nb =="
-          pipenv run jupyter nbconvert --to script "$nb" --stdout > /tmp/nb.py
-          pipenv run ipython /tmp/nb.py
-        fi
-        i=$(( i + 1 ))
-      done < /tmp/nb_order
+        echo "== [node ${CI_NODE_INDEX:-1}/${CI_NODE_TOTAL:-1}] running $nb =="
+        pipenv run jupyter nbconvert --to script "$nb" --stdout > /tmp/nb.py
+        pipenv run ipython /tmp/nb.py
+      done < /tmp/nb_slice
   interruptible: true
 
 
