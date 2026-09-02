@@ -1,3 +1,5 @@
+"""Abstract interfaces for bit sequences (uncompressed and compressed variants)."""
+
 from __future__ import annotations
 from abc import ABC, abstractmethod
 from typing import Callable, Iterator

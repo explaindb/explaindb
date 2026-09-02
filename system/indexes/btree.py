@@ -1,3 +1,5 @@
+"""B+-tree index implementation with node splitting."""
+
 from __future__ import (
     annotations,
 )  # postponed evaluation of annotations https://peps.python.org/pep-0563/

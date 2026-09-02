@@ -1,3 +1,5 @@
+"""Tests for WHERE-clause predicates and query processing."""
+
 import unittest
 from dataclasses import dataclass
 

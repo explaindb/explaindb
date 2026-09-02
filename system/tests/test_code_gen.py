@@ -1,3 +1,5 @@
+"""Tests for query-plan code generation and operator execution."""
+
 import pickle
 
 from system.data_classes import *

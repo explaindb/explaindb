@@ -1,3 +1,5 @@
+"""Abstract query-processing interfaces: QEP, queryable components, and query optimizer."""
+
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from typing import Iterator

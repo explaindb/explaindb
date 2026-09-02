@@ -1,3 +1,5 @@
+"""Abstract interface for a DBMS."""
+
 from abc import ABC
 from typing import Iterator
 

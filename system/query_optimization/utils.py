@@ -1,3 +1,5 @@
+"""Utilities to randomize cardinalities and run and visualize join-plan enumeration."""
+
 from __future__ import annotations
 from system.query_optimization.problems import Problem
 from system.query_optimization.join_graph import JoinGraph

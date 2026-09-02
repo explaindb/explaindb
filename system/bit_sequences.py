@@ -1,3 +1,5 @@
+"""Concrete bit-sequence implementations: integer-backed, bit-list, and Word-Aligned Hybrid (WAH) compressed."""
+
 from __future__ import annotations
 
 import copy

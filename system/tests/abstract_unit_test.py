@@ -1,3 +1,5 @@
+"""Abstract base class for unit tests."""
+
 import unittest
 from dataclasses import dataclass
 

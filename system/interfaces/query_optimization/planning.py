@@ -1,3 +1,5 @@
+"""Abstract plan-table interface for join-order enumeration."""
+
 from __future__ import annotations
 
 from abc import ABC, abstractmethod

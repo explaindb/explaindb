@@ -1,3 +1,5 @@
+"""Cardinality table storing and estimating relation and join cardinalities."""
+
 from __future__ import annotations
 from system.query_optimization.problems import Problem
 

@@ -1,3 +1,5 @@
+"""Abstract interface for query-processing operators."""
+
 from abc import ABC, abstractmethod
 from typing import Self
 

@@ -1,3 +1,5 @@
+"""Tests for the index implementations (B+-tree, radix trie, Christmas tree)."""
+
 import unittest
 
 from system.indexes.btree import BPlusTree

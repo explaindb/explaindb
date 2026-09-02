@@ -1,3 +1,5 @@
+"""Tests for join-plan enumeration and problem (relation-subset) operations."""
+
 import unittest
 from system.query_optimization.problems import Problem
 from system.query_optimization.cost_function import C_Out

@@ -1,3 +1,5 @@
+"""Versioned (copy-on-write) key-value store."""
+
 from __future__ import annotations
 
 import copy

@@ -1,3 +1,5 @@
+"""Simple index implementation backed by a Python dictionary."""
+
 from typing import Iterator
 
 from system.interfaces.indexing.Index import KeyValueStore, PutInfo

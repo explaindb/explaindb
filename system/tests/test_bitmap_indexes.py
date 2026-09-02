@@ -1,3 +1,5 @@
+"""Tests for the bitmap index implementations."""
+
 from __future__ import annotations
 import unittest
 from typing import Type, Generator

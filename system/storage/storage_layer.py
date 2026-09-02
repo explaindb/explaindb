@@ -1,3 +1,5 @@
+"""Storage-hierarchy layer abstraction (DRAM, caches, SSD, disk, ...) with address conversion."""
+
 from __future__ import annotations
 
 import copy

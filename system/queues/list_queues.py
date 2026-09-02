@@ -1,3 +1,5 @@
+"""In-memory list-backed queue implementation."""
+
 from typing import Iterator
 
 import numpy as np

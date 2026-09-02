@@ -1,3 +1,5 @@
+"""RAID block-assignment strategies (RAID 0/1/4/5) mapping logical to physical block positions."""
+
 from abc import abstractmethod, ABC
 from collections import defaultdict
 

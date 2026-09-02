@@ -1,3 +1,5 @@
+"""Join graph model and factories for chain, star, cycle, and clique queries."""
+
 import itertools
 from abc import ABC, abstractmethod
 from collections import deque

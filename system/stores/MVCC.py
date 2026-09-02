@@ -1,3 +1,5 @@
+"""Multi-version concurrency control transactional key-value store with journaling."""
+
 from __future__ import annotations
 
 import copy

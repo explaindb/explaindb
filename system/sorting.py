@@ -1,3 +1,5 @@
+"""External merge sort with run generation and multi-way stream merging."""
+
 import heapq
 import logging
 from typing import Iterable, Iterator

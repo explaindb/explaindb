@@ -1,3 +1,5 @@
+"""Drawable geometry utilities (vectors, triangles, descriptors) for canvas visualization."""
+
 from __future__ import annotations
 
 from abc import ABC, abstractmethod

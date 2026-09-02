@@ -1,3 +1,5 @@
+"""Tests for the bit-sequence implementations."""
+
 import sys
 import unittest
 from typing import Type

@@ -1,3 +1,5 @@
+"""Abstract ACID store interfaces: ACID, indexed, and QEP-queryable stores."""
+
 from abc import ABC
 from typing import Iterator
 

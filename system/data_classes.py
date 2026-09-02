@@ -1,3 +1,5 @@
+"""Sample data classes (Person, Book, Order, Address) used as example relations."""
+
 from dataclasses import dataclass
 from functools import total_ordering
 

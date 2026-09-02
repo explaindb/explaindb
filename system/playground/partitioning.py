@@ -1,3 +1,5 @@
+"""Toy train-network simulation exploring uniform load partitioning in a DBMS."""
+
 from __future__ import annotations
 from abc import ABC, abstractmethod
 import random as rnd

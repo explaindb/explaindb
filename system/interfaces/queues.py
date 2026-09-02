@@ -1,3 +1,5 @@
+"""Abstract queue interfaces (read, write, read-write) and the queue factory."""
+
 from abc import ABC, abstractmethod
 from typing import Iterator
 

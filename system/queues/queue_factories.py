@@ -1,3 +1,5 @@
+"""Factories for creating in-memory list queues and external queues."""
+
 from system.interfaces.queues import QueueFactory, ReadWriteQueue
 from system.queues.external_queues import ExternalQueue
 from system.queues.list_queues import ListQueue

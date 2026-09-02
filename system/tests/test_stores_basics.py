@@ -1,3 +1,5 @@
+"""Tests for basic key-value store operations."""
+
 import unittest
 
 from system.stores.IndexedMVCC import IndexedTransactionalKeyValueStore

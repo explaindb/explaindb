@@ -1,3 +1,5 @@
+"""Plan table implementations for dynamic-programming join-order enumeration."""
+
 from __future__ import annotations
 
 from system.interfaces.query_optimization.planning import PlanTable

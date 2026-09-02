@@ -1,3 +1,5 @@
+"""Tests for transactional store isolation and anomalies (snapshot isolation, write skew)."""
+
 import unittest
 
 from system.query_processing.predicates import WHERE_Clause, TrueClause

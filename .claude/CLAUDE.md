@@ -12,3 +12,9 @@ Follow the docstring conventions in [`CONTRIBUTING.md`](../CONTRIBUTING.md):
   or changed.
 - Document only non-trivial dunder methods; skip trivial delegating ones.
 - Every module gets a one-line module docstring.
+
+## Formatting
+
+All Python code is formatted with [black](https://black.readthedocs.io) (default
+settings). CI runs `black --check .` and rejects unformatted code, so run
+`black .` before every push.

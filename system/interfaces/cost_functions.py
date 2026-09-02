@@ -1,3 +1,5 @@
+"""Abstract cost-function interface for join-order query optimization."""
+
 from __future__ import annotations
 
 from abc import ABC, abstractmethod

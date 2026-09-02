@@ -1,3 +1,5 @@
+"""WHERE-clause predicates and clause combinators for query processing."""
+
 from abc import abstractmethod, ABC
 
 

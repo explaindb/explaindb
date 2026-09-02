@@ -1,3 +1,5 @@
+"""Tests for the external merge sort."""
+
 import copy
 import logging
 import math

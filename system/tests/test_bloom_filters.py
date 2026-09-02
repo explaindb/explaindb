@@ -1,3 +1,5 @@
+"""Tests for the Bloom filter implementation."""
+
 import unittest
 from system.indexes.bloom_filters import BloomFilter
 from system.bit_sequences import (

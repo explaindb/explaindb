@@ -1,5 +1,11 @@
 # Contributing to ExplainDB
 
+## Code formatting
+
+All Python code is formatted with [black](https://black.readthedocs.io) using its
+default settings. The CI pipeline runs `black --check .` and rejects unformatted
+code, so run `black .` before every push.
+
 ## Docstring conventions
 
 We document code so that the *contract* lives in one place and implementations

@@ -1,3 +1,5 @@
+"""Concrete bitmap index implementations: sorted/unsorted, equality-encoded, and range-encoded."""
+
 from __future__ import annotations
 from abc import ABC
 from system.interfaces.indexing.bitmap_indexes import (

@@ -1,3 +1,5 @@
+"""The classic C_out join cost function implementation."""
+
 from __future__ import annotations
 
 from system.interfaces.cost_functions import CostFunction

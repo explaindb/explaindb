@@ -1,3 +1,5 @@
+"""Indexed transactional key-value store built on MVCC."""
+
 from __future__ import annotations
 
 from dataclasses import dataclass

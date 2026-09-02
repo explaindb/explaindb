@@ -1,3 +1,5 @@
+"""Abstract indexing interfaces: Index, key-value store, B-tree, and point/range/predicate query mix-ins."""
+
 from abc import abstractmethod, ABC
 from dataclasses import dataclass
 from typing import Iterator

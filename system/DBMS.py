@@ -1,3 +1,5 @@
+"""Python DBMS implementation managing prepared queries, stores, and query optimization."""
+
 from typing import Iterator
 
 import deprecation

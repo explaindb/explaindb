@@ -1,3 +1,5 @@
+"""Tests for RAID block assignment, RAID performance, and the storage layer."""
+
 from typing import Iterator
 
 from system.storage.RAID.block_assignment import compute_assignment

@@ -1,3 +1,5 @@
+"""Christmas tree index: a radix trie augmented with buffer-tree-style node buffers."""
+
 from __future__ import annotations
 
 from itertools import chain

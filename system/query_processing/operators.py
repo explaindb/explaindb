@@ -1,3 +1,5 @@
+"""Concrete query-processing operators: scan, filter, symmetric hash join, semi-join, print, collect, count."""
+
 import math
 import pickle
 import re
