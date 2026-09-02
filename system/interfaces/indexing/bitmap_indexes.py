@@ -55,31 +55,58 @@ class BitmapIndex[Key, Value](
             yield self.position_to_value[pos]
 
     def size(self) -> int:
+        """See :meth:`Index.size`.
+
+        Not supported by bitmap indexes; raises :class:`NotImplementedError`.
+        """
         raise NotImplementedError(
             "Size Operation is not supported by this bitmap index."
         )
 
     def put(self, key: Key, value: Value) -> None:
+        """See :meth:`Index.put`.
+
+        Not supported by bitmap indexes; raises :class:`NotImplementedError`.
+        """
         raise NotImplementedError(
             "Put Operation is not supported by this bitmap index."
         )
 
     def delete(self, key: Key, value: Value | None = None) -> None:
+        """See :meth:`Index.delete`.
+
+        Not supported by bitmap indexes; raises :class:`NotImplementedError`.
+        """
         raise NotImplementedError(
             "Delete Operation is not supported by this bitmap index."
         )
 
     def flush(self, key: Key | None = None) -> None:
+        """See :meth:`Index.flush`.
+
+        Not supported by bitmap indexes; raises :class:`NotImplementedError`.
+        """
         raise NotImplementedError(
             "Flush Operation is not supported by this bitmap index."
         )
 
     def show(self) -> None:
+        """See :meth:`Index.show`.
+
+        Not supported by bitmap indexes; raises :class:`NotImplementedError`.
+        """
         raise NotImplementedError(
             "Show Operation is not supported by this bitmap index."
         )
 
     def bulkload(self, data: Iterator[tuple[Key, Value]], key_prefix: str = "") -> None:
+        """See :meth:`Index.bulkload`.
+
+        Builds the value-to-position and position-to-value maps from the data and
+        fills a per-key bit sequence for every distinct key, then adjusts the
+        number of bits represented by each bit sequence to the number of distinct
+        values seen.
+        """
         # Contains all possible values for efficient duplicate checking in the value list
         contained_values: set[Value] = set()
 
@@ -171,9 +198,19 @@ class BitmapIndex[Key, Value](
         self[key].set_bit(self.value_to_position[value])
 
     def get(self, key: Key) -> Iterator[Value]:
+        """See :meth:`PointQueryMixIn.get`.
+
+        Yields the values represented by the set bits of the equal bit sequence
+        for the given key.
+        """
         yield from self._get_values_for_bit_sequence(self.get_equal(key))
 
     def get_all_in_range(self, min_key: Key, max_key: Key) -> Iterator[Value]:
+        """See :meth:`RangeQueryMixIn.get_all_in_range`.
+
+        Yields the values of the union (bitwise OR) of the greater-or-equal
+        ``min_key`` and smaller-or-equal ``max_key`` bit sequences.
+        """
         yield from self._get_values_for_bit_sequence(
             self.get_greater_or_equal(min_key) | self.get_smaller_or_equal(max_key)
         )
