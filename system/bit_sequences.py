@@ -710,7 +710,7 @@ class WAHBitSequence(CompressedBitSequence):
             self, bit_sequence: UncompressedBitSequence
         ) -> None:
             """
-            Obtains a bit sequence of length (WORD_LENGTH - 1) and either compresses it into a literal of fill word.
+            Obtains a bit sequence of length (WORD_LENGTH - 1) and either compresses it into a literal or fill word.
             :param bit_sequence: The uncompressed bit sequence to add.
             """
             if bit_sequence.all_bits_set_to_false():
@@ -732,7 +732,7 @@ class WAHBitSequence(CompressedBitSequence):
         """
         :param words: The words represented by bit sequences.
         :param represented_number_of_bits: The number of bits represented by this bit sequence.
-        :param bit_sequence_type: The bit sequence to represent the underlying bit sequence. Only used if no word are passed.
+        :param bit_sequence_type: The bit sequence to represent the underlying bit sequence. Only used if no words are passed.
         """
         super().__init__(represented_number_of_bits)
 
@@ -1205,9 +1205,10 @@ class WAHBitSequence(CompressedBitSequence):
         )
 
     def get_number_of_bits(self) -> int:
-        """
-        Returns the number of bits stored in this bit-sequence.
-        :return: The number of bits stored.
+        """See :meth:`BitSequence.get_number_of_bits`.
+
+        Returns the number of bits physically stored, i.e. WORD_LENGTH times the number of words, including any
+        padding bits; this can be larger than the represented length returned by ``len(self)``.
         """
         return WAHBitSequence.WORD_LENGTH * len(self.words)
 

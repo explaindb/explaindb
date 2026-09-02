@@ -110,8 +110,8 @@ class RangeQueryMixIn[Key, Value](ABC):
 
     @abstractmethod
     def get_all_in_range(self, min_key: Key, max_key: Key) -> Iterator[Value]:
-        """Returns all values that satisfy the given where clause. Note that the iterator is NOT STABLE, i.e.
-        it may change if the underlying data changes concurrently.
+        """Returns all values whose key lies in the range [min_key, max_key] (both bounds inclusive). Note that
+        the iterator is NOT STABLE, i.e. it may change if the underlying data changes concurrently.
 
         @param min_key: the minimum key including
         @param max_key: the maximum key including
@@ -122,7 +122,7 @@ class RangeQueryMixIn[Key, Value](ABC):
 
 
 class PredicateQueryMixIn[Key, Value](ABC):
-    """An interface mixing in range queries."""
+    """An interface mixing in predicate queries."""
 
     @abstractmethod
     def get_all(self, where: Clause) -> Iterator[Value]:

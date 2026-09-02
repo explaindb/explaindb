@@ -106,6 +106,9 @@ class BitmapIndex[Key, Value](
         fills a per-key bit sequence for every distinct key, then adjusts the
         number of bits represented by each bit sequence to the number of distinct
         values seen.
+
+        :param key_prefix: Reserved for subclasses that key their bit sequences by a prefix; this base
+            implementation does not use it.
         """
         # Contains all possible values for efficient duplicate checking in the value list
         contained_values: set[Value] = set()

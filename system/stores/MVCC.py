@@ -489,12 +489,13 @@ class TransactionalKeyValueStore(VersionedKeyValueStore, ACIDStore):
     ) -> bool:
         """Validates TA <TA_id> against all TAs that committed after TA <TA_id> started.
 
+        Uses the efficient method 2, which only checks the write sets of TAs that committed after TA <TA_id>
+        started.
+
         @param TA_id: the transaction id to be validated
-        efficient method 2 which only checks write sets of TAs that committed after TA <TA_id> started
         @param commit_timestamp_for_this_TA: the commit timestamp for this transaction
 
-        @return True, None if the validation was successful, i.e. there was no conflict
-        @return False, conflict_set|None if the validation failed, i.e. there was a conflict
+        @return True if the validation was successful, i.e. there was no conflict; False otherwise.
         """
 
         # "Our variation of precision locking tests discrete writes (updates, deletions, and insertions of

@@ -45,28 +45,24 @@ class DBMS(IndexedACIDStore, QueryableComponent, ABC):
         self.query_optimizer: QueryOptimizer = query_optimizer
 
     def create_index(self, index_name: str, attribute: str, operator: str) -> None:
-        """Creates an index on the store with the given name. Adds the metadata to the catalog and bulkloads the index
+        """See :meth:`IndexedACIDStore.create_index`.
 
-        @param index_name: the name of the index
-        @param attribute: the attribute to create the index on
-        @param operator: the operator to use for the index
+        Delegates to the wrapped QEP-queryable indexed ACID store.
         """
         self.QEP_queryable_ACID_store.create_index(index_name, attribute, operator)
 
     def drop_index(self, index_name: str) -> None:
-        """Drops the index with the given name.
+        """See :meth:`IndexedACIDStore.drop_index`.
 
-        @param index_name: the name of the index to drop
+        Delegates to the wrapped QEP-queryable indexed ACID store.
         """
         self.QEP_queryable_ACID_store.drop_index(index_name)
 
     def get_suitable_indexes(
         self, attribute: str, operator: str
     ) -> Iterator[IndexProperties]:
-        """Returns a list of suitable indexes for the given clause.
+        """See :meth:`IndexedACIDStore.get_suitable_indexes`.
 
-        @param attribute: the attribute of the clause
-        @param operator: the operator of the clause
-        @return: a list of suitable indexes
+        Delegates to the wrapped QEP-queryable indexed ACID store.
         """
         return self.QEP_queryable_ACID_store.get_suitable_indexes(attribute, operator)

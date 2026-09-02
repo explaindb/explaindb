@@ -52,6 +52,12 @@ class BloomFilter:
             self.evaluated_hash_functions: int = 0
 
         def __next__(self):
+            """Returns the next pseudo hash value in ``[0, number_of_available_bits)``.
+
+            Raises :class:`StopIteration` once one value has been produced per hash function. Consecutive
+            values come from the RNG seeded with the key, so the same key always yields the same sequence of
+            positions.
+            """
             # If all hash functions have been evaluated, stop the iteration
             if self.evaluated_hash_functions == self.number_of_hash_functions:
                 raise StopIteration

@@ -54,7 +54,12 @@ class ChristmasTree[Key, Value](RadixTrie[Key, Value]):
                     c.flush_all_buffers()
 
         def put(self, key: Key, value: Value, level: int = 0) -> None | PutInfo:
-            """Put the given key-value pair into this node."""
+            """See :meth:`Index.put`.
+
+            Buffer-tree variant: appends the pair to this node's in-memory buffer instead of pushing it down
+            immediately; when the buffer is full it is first flushed to the children. The extra ``level``
+            parameter is the current depth of this node in the trie.
+            """
             if len(self.buffer) >= self.max_buffer_size:
                 # buffer is full, then flush it:
                 self._flush_buffer(level)
@@ -65,9 +70,11 @@ class ChristmasTree[Key, Value](RadixTrie[Key, Value]):
             return None
 
         def get(self, key: Key, level: int = 0) -> Iterator[Value]:
-            """Get the value for the given key.
-            As this is a buffered inner node, we need to check the buffer first and in addition return the result of get
-            from the children.
+            """See :meth:`PointQueryMixIn.get`.
+
+            Buffer-tree variant: yields matching values from this node's buffer first and then chains in the
+            values returned by the children, so pairs still sitting in the buffer are not missed. The extra
+            ``level`` parameter is the current depth of this node in the trie.
             """
             # filter the buffer for the given search key:
             buffer_it: Iterator[Value] = filter(lambda t: t[0] == key, self.buffer)
@@ -89,6 +96,11 @@ class ChristmasTree[Key, Value](RadixTrie[Key, Value]):
             x_offset: int = 0,
             y_offset: int = 0,
         ):
+            """See :meth:`Drawable.draw`.
+
+            In addition to the inner node drawn by the superclass, draws a red candle whose height is
+            proportional to the current fill level of this node's buffer.
+            """
             super().draw(canvas, canvas_height, x_offset, y_offset)
             # draw the buffer:
             canvas.fill_style = "#ff0000"
@@ -106,6 +118,11 @@ class ChristmasTree[Key, Value](RadixTrie[Key, Value]):
             )
 
         def show(self, indent: str = "") -> None:
+            """See :meth:`Index.show`.
+
+            In addition to the inner node printed by the superclass, prints the key-value pairs currently held
+            in this node's buffer. The ``indent`` parameter is a prefix prepended to every printed line.
+            """
             super().show(indent)
             print(indent + "Buffer:")
             for k, v in self.buffer:
@@ -120,6 +137,11 @@ class ChristmasTree[Key, Value](RadixTrie[Key, Value]):
             parent_descriptor: Descriptor = None,
             max_buffer_size: int = 30,
         ):
+            """See :meth:`ChristmasTree.BufferedInnerNode.__init__`.
+
+            Additionally allocates a small fixed-size "poor man's" bloom filter used to skip lookups for keys
+            that were provably never inserted into this node.
+            """
             super().__init__(key_mapping, parent_descriptor, max_buffer_size)
             # poor man's bloom- filter:
             # TODO: replace with full-blown implementation
@@ -129,6 +151,11 @@ class ChristmasTree[Key, Value](RadixTrie[Key, Value]):
             ]
 
         def get(self, key: Key, level: int = 0) -> Iterator[Value]:
+            """See :meth:`ChristmasTree.BufferedInnerNode.get`.
+
+            Consults the bloom filter first: if the key's bit is not set the key cannot be present, so an empty
+            iterator is returned without descending; otherwise the buffered-node lookup is delegated to.
+            """
             if self.poor_mans_bloom_filter[
                 key.my_hash() % self.poor_mans_bloom_filter_size
             ]:
@@ -137,12 +164,21 @@ class ChristmasTree[Key, Value](RadixTrie[Key, Value]):
                 return iter([])
 
         def put(self, key: Key, value: Value, level: int = 0) -> None | PutInfo:
+            """See :meth:`ChristmasTree.BufferedInnerNode.put`.
+
+            Additionally records the key in the bloom filter before delegating the insertion to the buffered
+            node.
+            """
             self.poor_mans_bloom_filter[
                 key.my_hash() % self.poor_mans_bloom_filter_size
             ] = True
             return super().put(key, value, level)
 
         def show(self, indent: str = "") -> None:
+            """See :meth:`ChristmasTree.BufferedInnerNode.show`.
+
+            Additionally prints the contents of this node's bloom filter.
+            """
             super().show(indent)
             print(indent + "Poor man's bloom filter:")
             print(indent + "  " + str(self.poor_mans_bloom_filter))
@@ -154,6 +190,12 @@ class ChristmasTree[Key, Value](RadixTrie[Key, Value]):
             x_offset: int = 0,
             y_offset: int = 0,
         ):
+            """See :meth:`ChristmasTree.BufferedInnerNode.draw`.
+
+            In addition to the buffered node drawn by the superclass, draws a "crystal ball" (a gradient-filled
+            circle) whose opacity reflects how empty the bloom filter still is: the fuller the filter, the less
+            useful it is and the fainter the ball.
+            """
             super().draw(
                 canvas,
                 canvas_height,

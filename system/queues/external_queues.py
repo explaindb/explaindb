@@ -10,7 +10,8 @@ from system.interfaces.queues import (
 
 
 class ExternalQueue[ObjectType](ReadWriteQueue):
-    """ExternalWriteQueue is a queue that writes to disk using a buffer."""
+    """ExternalQueue is a disk-backed read-write queue that buffers elements in memory and spills to a
+    temporary file once the buffer is full."""
 
     def __init__(
         self,
@@ -18,7 +19,8 @@ class ExternalQueue[ObjectType](ReadWriteQueue):
     ):
         """Initializes the ExternalQueue.
 
-        @param number_of_objects_in_buffer: The number of tuples that can be stored in memory.
+        @param memory_limit: The number of objects that can be buffered in memory before the buffer is spilled
+        to the backing file.
         """
         super().__init__(memory_limit)
 
@@ -76,10 +78,7 @@ class ExternalQueue[ObjectType](ReadWriteQueue):
         return element
 
     def pop(self) -> ObjectType:
-        """Pops the first element from the queue.
-
-        @return The first element from the queue.
-        """
+        """Not supported by this disk-backed queue: always raises :class:`NotImplementedError`."""
         raise NotImplementedError
 
     def insert(self, entry: ObjectType) -> None:

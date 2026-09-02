@@ -72,7 +72,8 @@ class BPlusTree[Key, Value](AbstractBTree[Key, Value]):
 
             :param key: The key to insert.
             :param value: The value to insert.
-            :return: A SplitInfo instance.
+            :return: A PutInfo instance: NoSplit if the pair fit without splitting, or SplitHappens (wrapping
+            the two new nodes and the pivot) if this insertion caused a split.
             """
 
             pass
@@ -89,17 +90,12 @@ class BPlusTree[Key, Value](AbstractBTree[Key, Value]):
 
         @abstractmethod
         def get(self, key: Key) -> Iterator[Value]:
-            """Returns the value for the given key if it exists.
-            :param key: The key to search for.
-            """
+            """See :meth:`PointQueryMixIn.get`."""
             pass
 
         @abstractmethod
         def get_all_in_range(self, min_key: Key, max_key: Key) -> Iterator[Value]:
-            """Returns a list of values for all keys in the given range.
-            :param min_key: The minimum key to search for.
-            :param max_key: The maximum key to search for.
-            """
+            """See :meth:`RangeQueryMixIn.get_all_in_range`."""
             pass
 
         @abstractmethod
@@ -123,21 +119,18 @@ class BPlusTree[Key, Value](AbstractBTree[Key, Value]):
             pass
 
         def delete(self, key: Key, value: Value = None) -> None:
-            """Deletes the key->value mapping from the index.
+            """See :meth:`Index.delete`.
 
-            @param key: the key
-            @param value: the value to delete
-
+            Not supported for b+-tree nodes.
             """
-            raise NotImplemented
+            raise NotImplementedError
 
         def flush(self, key: Key | None = None) -> None:
-            """Persists all changes, i.e. any changes done so far in volatile memory only are now made durable.
+            """See :meth:`Index.flush`.
 
-            @param key: if given, only the key/value pair is flushed, otherwise all key/value-mappings are
-            flushed.
+            Not supported for b+-tree nodes.
             """
-            raise NotImplemented
+            raise NotImplementedError
 
         @abstractmethod
         def show(self) -> None:
@@ -205,7 +198,8 @@ class BPlusTree[Key, Value](AbstractBTree[Key, Value]):
 
             :param key: The key to insert.
             :param value: The value to insert.
-            :return: A SplitInfo instance.
+            :return: A PutInfo instance: NoSplit if the pair fit without splitting, or SplitHappens (wrapping
+            the two new nodes and the pivot) if this insertion caused a split.
             """
 
             # perform binary search to find the position to insert the key:
@@ -381,12 +375,13 @@ class BPlusTree[Key, Value](AbstractBTree[Key, Value]):
                 pivot=self.keys[mid],
             )
 
-        def put(self, key: Key, value: int) -> PutInfo:
+        def put(self, key: Key, value: Value) -> PutInfo:
             """Insert the given `key` and `value` into the leaf.
 
             :param key: The key to insert.
             :param value: The value to insert.
-            :return: A SplitInfo instance.
+            :return: A PutInfo instance: NoSplit if the pair fit without splitting, or SplitHappens (wrapping
+            the two new nodes and the pivot) if this insertion caused a split.
             """
             # find the position to insert the key:
             pos: int = bisect.bisect_left(self.keys, key)
@@ -567,26 +562,26 @@ class BPlusTree[Key, Value](AbstractBTree[Key, Value]):
             return None
 
         def split(self) -> SplitHappens[Key]:
-            """Counting leaves are never split: always raises ``NotImplemented``."""
-            raise NotImplemented
+            """Counting leaves are never split: always raises ``NotImplementedError``."""
+            raise NotImplementedError
 
         def get(self, key: Key) -> Iterator[Value]:
             """See :meth:`PointQueryMixIn.get`.
 
-            Not supported for counting leaves: always raises ``NotImplemented``.
+            Not supported for counting leaves: always raises ``NotImplementedError``.
             """
-            raise NotImplemented
+            raise NotImplementedError
 
         def get_all_in_range(self, min_key: Key, max_key: Key) -> Iterator[Value]:
             """See :meth:`RangeQueryMixIn.get_all_in_range`.
 
-            Not supported for counting leaves: always raises ``NotImplemented``.
+            Not supported for counting leaves: always raises ``NotImplementedError``.
             """
-            raise NotImplemented
+            raise NotImplementedError
 
         def is_full(self) -> bool:
-            """Not supported for counting leaves: always raises ``NotImplemented``."""
-            raise NotImplemented
+            """Not supported for counting leaves: always raises ``NotImplementedError``."""
+            raise NotImplementedError
 
         def size(self) -> int:
             """See :meth:`Index.size`.
@@ -613,8 +608,8 @@ class BPlusTree[Key, Value](AbstractBTree[Key, Value]):
             return s
 
         def consistency_check(self) -> None:
-            """Not supported for counting leaves: always raises ``NotImplemented``."""
-            raise NotImplemented
+            """Not supported for counting leaves: always raises ``NotImplementedError``."""
+            raise NotImplementedError
 
         def show(self) -> None:
             """See :meth:`Index.show`.
@@ -635,9 +630,10 @@ class BPlusTree[Key, Value](AbstractBTree[Key, Value]):
         self.root: BPlusTree.AbstractNode = BPlusTree.Leaf(leaf_capacity)
 
     def put(self, key: Key, value: Value) -> None | PutInfo:
-        """Adds (puts) a new key->value mapping into the store.
-        :param key: the key
-        :param value: the value to associate with the key
+        """See :meth:`Index.put`.
+
+        Copies the value before storing it and, if the root node split, replaces the root with a new inner node
+        holding the two halves and the separating pivot.
         """
 
         # copy to avoid outside modifications:
@@ -652,36 +648,39 @@ class BPlusTree[Key, Value](AbstractBTree[Key, Value]):
         return None
 
     def get(self, key: Key) -> Iterator[Value]:
-        """Returns the value for the given key if it exists.
-        :param key: the key
+        """See :meth:`PointQueryMixIn.get`.
+
+        Note: this simple B+tree does not support multiple values for the same key.
         """
         # TODO: our b-tree currently does not support multiple values for the same key
         return self.root.get(key)
 
     def get_all_in_range(self, min_key: Key, max_key: Key) -> Iterator[Value]:
-        """Returns a list of values for all keys in the given range.
-        :param min_key: the minimum key to search for
-        :param max_key: the maximum key to search for
-        """
+        """See :meth:`RangeQueryMixIn.get_all_in_range`."""
 
         for value in self.root.get_all_in_range(min_key, max_key):
             yield value
 
     def delete(self, key: Key, value: Value = None):
-        """Deletes the key->value mapping from the index. Not implemented in this simple B+tree."""
-        raise NotImplemented
+        """See :meth:`Index.delete`.
+
+        Not implemented in this simple B+tree.
+        """
+        raise NotImplementedError
 
     def flush(self, key: Key | None = None) -> None:
-        """Persists all changes, i.e. any changes done so far in volatile memory only are now made durable. Not
-        implemented in this simple B+tree."""
-        raise NotImplemented
+        """See :meth:`Index.flush`.
+
+        Not implemented in this simple B+tree.
+        """
+        raise NotImplementedError
 
     def bulkload(self, input_data: Iterator[tuple[Key, Value]]):
         """Bulkloads the given list of key->value mappings into the index. Not overridden in this simple B+tree."""
         super().bulkload(input_data)
 
     def size(self) -> int:
-        """Returns the number of keys mapped by this index."""
+        """See :meth:`Index.size`."""
         return self.root.size()
 
     def consistency_check(self) -> None:

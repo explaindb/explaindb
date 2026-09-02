@@ -10,7 +10,7 @@ from system.interfaces.indexing.Index import KeyValueStore, PutInfo
 from system.utils import Descriptor, Drawable
 
 
-class KeyMapping[Key, int](ABC):
+class KeyMapping[Key, Value](ABC):
     """Maps a key to a value"""
 
     @abstractmethod
@@ -30,6 +30,9 @@ class RadixTrie[Key, Value](KeyValueStore[Key, Value], Drawable):
     """A simple implementation of a radix trie data structure."""
 
     class AbstractNode(KeyValueStore[Key, Value], Drawable, ABC):
+        """Abstract node of a radix trie. A node is itself a valid key-value store: it is either an inner node
+        that routes keys to children by radix, or a leaf node that stores the key-value pairs.
+        """
 
         def __init__(self):
             """Create a new abstract node. Sets a node counter to 0"""
@@ -88,6 +91,10 @@ class RadixTrie[Key, Value](KeyValueStore[Key, Value], Drawable):
             pass
 
     class InnerNode[Key, Value](AbstractNode[Key, Value]):
+        """Inner node of a radix trie. Holds a list of children and routes each key to the matching child by
+        computing its radix (either via the key mapping or via the child descriptors).
+        """
+
         def __init__(
             self,
             key_mapping: KeyMapping[Key, Value] = None,
@@ -191,6 +198,9 @@ class RadixTrie[Key, Value](KeyValueStore[Key, Value], Drawable):
             return self.children[radix].put(key, value, level + 1)
 
     class LeafNode[Key, Value](AbstractNode[Key, Value]):
+        """Leaf node of a radix trie. Stores the key-value pairs and is chained to its left sibling so that all
+        leaves form a sequence for ISAM-style scanning.
+        """
 
         def __init__(
             self,

@@ -20,13 +20,10 @@ class C_Out(CostFunction):
         cardinality_table: CardinalityTable,
         plan_table: PlanTable,
     ) -> int:
-        """
-        Computes the costs for the left and right input.
-        :param left: The left problem.
-        :param right: The right problem.
-        :param cardinality_table: The cardinality table to be used.
-        :param plan_table: The plan table for the enumeration.
-        :return: The costs of joining the left and right problems.
+        """See :meth:`CostFunction.estimate_join_costs`.
+
+        C_out variant: the join cost is the estimated output cardinality of the join plus the costs already
+        accumulated for the left and right sub-problems.
         """
         return (
             cardinality_table.estimate_join_cardinality(left, right)
@@ -39,10 +36,8 @@ class C_Out(CostFunction):
         problem: Problem,
         cardinality_table: CardinalityTable,
     ) -> int:
-        """
-        Computes the costs to filter the problem.
-        :param problem: The problem .
-        :param cardinality_table: The cardinality table to be used.
-        :return: The costs of filtering the problem.
+        """See :meth:`CostFunction.estimate_filter_costs`.
+
+        C_out variant: the filter cost is the estimated cardinality of the (singleton) problem.
         """
         return cardinality_table.get_cardinality_estimation(problem)

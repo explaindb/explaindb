@@ -1,4 +1,4 @@
-"""Concrete query-processing operators: scan, filter, symmetric hash join, semi-join, print, collect, count."""
+"""Concrete query-processing operators: scan, filter, simple hash join, semi-join, print, collect, count."""
 
 import math
 import pickle
@@ -202,7 +202,7 @@ class SHJ(Operator):
         left_attr: str,
         right_attr: str,
     ):
-        """Create a symmetric-hash join over a left (build) and right (probe) child.
+        """Create a simple-hash join over a left (build) and right (probe) child.
 
         :param left_child: Build-side child operator.
         :param right_child: Probe-side child operator.

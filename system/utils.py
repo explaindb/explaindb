@@ -65,7 +65,10 @@ class Vector(Drawable):
         x_offset: int = 0,
         y_offset: int = 0,
     ):
-        """Draw this vector on the given canvas."""
+        """See :meth:`Drawable.draw`.
+
+        Draws the vector as a small white dot at its (x, y) position.
+        """
         canvas.fill_style = "#FFFFFF"
         canvas.fill_arc(
             x_offset + self.x,
@@ -115,13 +118,20 @@ class Triangle(Descriptor):
         self.AC: Vector = AC
 
     def center(self) -> Vector:
-        """Return the center of this triangle."""
+        """See :meth:`Descriptor.center`.
+
+        Returns the centroid of the triangle.
+        """
         B: Vector = self.A + self.AB
         C: Vector = self.A + self.AC
         return (self.A + B + C) * (1 / 3)  # centroid
 
     def split_into_sub_descriptors(self) -> Iterator[Triangle]:
-        """Split this triangle into four sub-triangles of equal size."""
+        """See :meth:`Descriptor.split_into_sub_descriptors`.
+
+        Splits this triangle into four sub-triangles of equal size (lower-left, top, lower-right, and a
+        central inverted triangle).
+        """
         # linear algebra to the rescue:
         # Note: all four sub-triangles have the same length of AB and AC, i.e. AB_half and AC_half:
         AB_half: Vector = self.AB * 0.5
@@ -151,7 +161,10 @@ class Triangle(Descriptor):
         x_offset: int = 0,
         y_offset: int = 0,
     ):
-        """Draw this triangle on the given canvas."""
+        """See :meth:`Drawable.draw`.
+
+        Draws the triangle as a semi-transparent green filled polygon with a black outline.
+        """
         canvas.fill_style = "#63934e"
         canvas.stroke_style = "#000000"
         canvas.global_alpha = 0.3
@@ -173,7 +186,11 @@ class Triangle(Descriptor):
         canvas.global_alpha = 1.0
 
     def contains[Vector](self, point: Vector) -> bool:
-        """Return whether the given point is inside this triangle."""
+        """See :meth:`Descriptor.contains`.
+
+        Point-in-triangle test: the point is contained iff it lies on the same side of all three edges, which
+        is checked via the sign of the cross products.
+        """
 
         # linear algebra to the rescue:
         def sign(A: Vector, B: Vector, C: Vector) -> int:

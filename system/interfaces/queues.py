@@ -89,10 +89,7 @@ class ReadWriteQueue[ObjectType](ReadQueue[ObjectType], WriteQueue[ObjectType], 
         pass
 
     def set_memory_limit(self, memory_limit: int) -> None:
-        """Sets the memory limit for the queue. This is useful for queues that are disk-based and can use a buffer in
-        memory to speed up access. If the memory limit is set to 0, the queue should not use any memory buffer.
-
-        @param memory_limit The memory limit in bytes to use for the queue."""
+        """See :meth:`WriteQueue.set_memory_limit`."""
         self.memory_limit: int = memory_limit
 
 

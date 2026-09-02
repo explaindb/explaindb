@@ -188,13 +188,15 @@ class RAID_0(SubSystemArray):
     """RAID 0: Striping without parity"""
 
     def get_sequential_read_performance(self) -> int:
-        """Read performance is the sum of all read performances of the subsystems."""
+        """Read performance is the read performance of the slowest subsystem (the minimum) times the number of
+        subsystems, since striping reads from all subsystems in parallel."""
         return min(
             subsystem.get_sequential_read_performance() for subsystem in self.subsystems
         ) * len(self.subsystems)
 
     def get_sequential_write_performance(self) -> int:
-        """Write performance is the sum of all write performances of the subsystems."""
+        """Write performance is the write performance of the slowest subsystem (the minimum) times the number
+        of subsystems, since striping writes to all subsystems in parallel."""
         return min(
             subsystem.get_sequential_write_performance()
             for subsystem in self.subsystems
@@ -232,10 +234,8 @@ class RAID_1(SubSystemArray):
     """RAID 1: Mirroring"""
 
     def get_sequential_read_performance(self) -> int:
-        """Read performance is the minimum of all read performances of the subsystems.
-        We can read from all disks in parallel, but we have to wait for the slowest disk.
-        We compute an average read performance of all disks and then read in parallel from all disks, i.e. we multiply
-        by the number of disks.
+        """Read performance is the sum of the read performances of all subsystems: RAID 1 mirrors the data, so
+        every subsystem holds a full copy and can serve reads in parallel.
         """
 
         return sum(
@@ -287,16 +287,17 @@ class RAID_5(SubSystemArray):
         assert len(subsystems) >= 3, "RAID 5 needs at least 3 subsystems."
 
     def get_sequential_read_performance(self) -> int:
-        """Read performance is the average of all read performances of the subsystems times (the number of subsystems
-        minus 1)."""
+        """Read performance is the read performance of the slowest subsystem (the minimum) times the number of
+        subsystems minus 1 (one subsystem's worth of throughput is spent on parity)."""
         min_read_performance: int = min(
             subsystem.get_sequential_read_performance() for subsystem in self.subsystems
         )
         return min_read_performance * (len(self.subsystems) - 1)
 
     def get_sequential_write_performance(self) -> int:
-        """Write performance is the average of all write performances of the subsystems times (the number of subsystems
-        minus 1)."""
+        """Write performance is the write performance of the slowest subsystem (the minimum) times the number
+        of subsystems minus 1 (one subsystem's worth of throughput is spent on parity).
+        """
         min_write_performance: int = min(
             subsystem.get_sequential_write_performance()
             for subsystem in self.subsystems

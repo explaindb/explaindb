@@ -230,7 +230,7 @@ class SingleStreamMerge[ObjectType](Iterator):
         return value
 
     def __iter__(self) -> Iterator:
-        """Returns the iterator object. Required to be able to loop over the contents of the queue."""
+        """Returns the iterator object. Required to be able to loop over the merged, sorted output."""
 
         return self
 
@@ -400,6 +400,6 @@ class ExternalMergeSort[ObjectType](Iterator):
         return self.final_merge.__next__()
 
     def __iter__(self) -> Iterator:
-        """Returns the iterator object. Required to be able to loop over the contents of the queue."""
+        """Returns the iterator object. Required to be able to loop over the merged, sorted output."""
 
         return self

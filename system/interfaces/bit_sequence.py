@@ -50,7 +50,7 @@ class BitSequence(ABC):
     def __len__(self) -> int:
         """
         Returns the number of bits represented by this bit-sequence.
-        :return: The number of set bits.
+        :return: The number of bits represented by this bit-sequence.
         """
         return self.represented_number_of_bits
 
@@ -183,6 +183,7 @@ class BitSequence(ABC):
         self[index] = False
 
     @staticmethod
+    @abstractmethod
     def create_all_false_bit_sequence(
         number_of_bits: int = 0,
     ) -> BitSequence:

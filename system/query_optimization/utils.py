@@ -33,6 +33,9 @@ def randomize_cardinalities(
 
 def randomize_cardinalities_and_enumerate_join_graph(
     join_graph: JoinGraph,
+    # NOTE: PlanEnumerator is defined in the PlanEnumeration notebook and is not importable here, so this
+    # forward reference does not resolve to any class in the package; the parameter just needs an object
+    # providing an enumerate(join_graph, cardinality_table, cost_function, print_info) method.
     plan_enumerator: "PlanEnumerator",
     print_info: bool = False,
 ) -> tuple[int, tuple, int]:

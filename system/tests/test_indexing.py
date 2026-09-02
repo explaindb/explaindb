@@ -283,6 +283,26 @@ class BPlusTreeTest(unittest.TestCase):
                     btree.show()
                 self.assertListEqual(values_expected, values_got)
 
+    def test_counting_leaf_raises_not_implemented_error(self):
+        """Regression test: the unsupported CountingLeaf operations must raise NotImplementedError.
+
+        Previously they used ``raise NotImplemented`` which raises a TypeError instead, so we explicitly
+        assert the correct exception type here.
+        """
+        leaf: BPlusTree.CountingLeaf = BPlusTree.CountingLeaf()
+
+        # supported operations keep working:
+        leaf.put(1, 1)
+        leaf.put(2, 2)
+        self.assertEqual(leaf.size(), 2)
+
+        # unsupported operations raise NotImplementedError (and NOT TypeError):
+        self.assertRaises(NotImplementedError, leaf.split)
+        self.assertRaises(NotImplementedError, leaf.get, 1)
+        self.assertRaises(NotImplementedError, leaf.get_all_in_range, 0, 10)
+        self.assertRaises(NotImplementedError, leaf.is_full)
+        self.assertRaises(NotImplementedError, leaf.consistency_check)
+
 
 class PrefixDigitMapping(KeyMapping[str, int]):
     """A simple implementation of a key mapping that maps a key to a bucket based on a prefix.

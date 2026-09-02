@@ -8,7 +8,7 @@ from system.interfaces.queues import ReadWriteQueue
 
 
 class ListQueue[ObjectType](ReadWriteQueue[ObjectType], Iterator):
-    """ListReadQueue is a read queue that uses a list as buffer and backing storage."""
+    """ListQueue is an in-memory read-write queue that uses a list as both buffer and backing storage."""
 
     def __init__(self):
         """Initializes the ListQueue."""
@@ -16,9 +16,10 @@ class ListQueue[ObjectType](ReadWriteQueue[ObjectType], Iterator):
         self.buffer: list[ObjectType] = list[ObjectType]()
 
     def flush(self) -> int:
-        """Flushes the contents of the queue, i.e. writes the contents of the buffer to the file.
+        """See :meth:`WriteQueue.flush`.
 
-        @return The number of objects written to the file for this call to flush()
+        No-op for this in-memory queue: there is no backing file to write to, so nothing is written and 0 is
+        always returned.
         """
         return 0
 
