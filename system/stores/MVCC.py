@@ -32,14 +32,21 @@ class JournalEntry(ABC, BaseModel):
 
 
 class Begin(JournalEntry):
+    """A journal entry marking the start of a transaction."""
+
     pass
 
 
 class Commit(JournalEntry):
+    """A journal entry marking the commit of a transaction, recording its commit timestamp."""
+
+    # the timestamp at which the transaction committed
     commit_timestamp: int
 
 
 class Abort(JournalEntry):
+    """A journal entry marking the abort of a transaction."""
+
     pass
 
 
@@ -330,12 +337,13 @@ class TransactionalKeyValueStore(VersionedKeyValueStore, ACIDStore):
         return ret
 
     def update_object(self, object_id: str, updated_object: object, TA_id: int) -> None:
-        """Updates the object with the given <object_id>. If run in a concurrent environment, this method must be
-        executed atomically. This method also supports inserts.
+        """See :meth:`ACIDStore.update_object`.
 
-        @param object_id: the object id of the object to be updated
-        @param updated_object: the updated object, i.e. the new value to be associated with the object_id
-        @param TA_id: the transaction id of the transaction that is updating (or trying to update) the object
+        Also supports inserts (a missing object_id creates a new entry) and must be executed atomically in a
+        concurrent environment. Aborts the transaction and raises :class:`TransactionAbortedException` if another
+        transaction currently holds a work-in-progress version of the object. Writes an :class:`Update` journal
+        entry, stores a deep copy of the value as an append-only work-in-progress version, and records the
+        object_id in the transaction's write set.
         """
 
         if self.TD[TA_id].committed_timestamp is not None:
@@ -395,11 +403,11 @@ class TransactionalKeyValueStore(VersionedKeyValueStore, ACIDStore):
         self.TD[TA_id].write_set.add(object_id)
 
     def delete_object(self, object_id: str, TA_id: int) -> None:
-        """Deletes the object with the given <object_id>. If run in a concurrent environment, this method must be
-        executed atomically.
+        """See :meth:`ACIDStore.delete_object`.
 
-        @param object_id: the object id of the object to be deleted
-        @param TA_id: the transaction id of the transaction that is deleting (or trying to delete) the object
+        Must be executed atomically in a concurrent environment. Raises if another transaction currently holds a
+        work-in-progress version of the object. Writes a :class:`Delete` journal entry, adds a delete-marker
+        work-in-progress version, and records the object_id in the transaction's write set.
         """
 
         assert TA_id in self.TD, f"transaction {TA_id} not found in the system"
@@ -453,8 +461,9 @@ class TransactionalKeyValueStore(VersionedKeyValueStore, ACIDStore):
         return next_TA_id
 
     def begin_transaction(self) -> int:
-        """Starts a new transaction and returns its transaction id.
-        Also adds a new entry with metadata for this transaction in the transaction dictionary.
+        """See :meth:`ACIDStore.begin_transaction`.
+
+        Additionally appends a :class:`Begin` entry to the journal.
         """
         # obtain the next transaction id:
         next_TA_id: int = self._get_next_TA_id()
@@ -645,10 +654,12 @@ class TransactionalKeyValueStore(VersionedKeyValueStore, ACIDStore):
         return True
 
     def commit_transaction(self, TA_id: int) -> None:
-        """Commits the given transaction.
-        This includes the validation phase and the actual commit phase where the updated objects become visible
-        to other TAs, i.e. they are moved from <wip> to the <committed> list.
-        @param TA_id: the transaction id of the transaction to be committed
+        """See :meth:`ACIDStore.commit_transaction`.
+
+        Runs the validation phase first: on a conflict the transaction is aborted and
+        :class:`TransactionAbortedException` is raised. On success, a :class:`Commit` journal entry is written and
+        flushed, and the transaction's work-in-progress versions become visible by moving them from ``wip`` to the
+        ``committed`` list under the commit timestamp.
         """
 
         assert TA_id in self.TD, f"transaction {TA_id} not found in the system"
@@ -726,9 +737,10 @@ class TransactionalKeyValueStore(VersionedKeyValueStore, ACIDStore):
         self.committed_transactions_trace.append(TA_id)
 
     def abort_transaction(self, TA_id: int) -> None:
-        """Aborts the given transaction and removes all changes made by this transaction from the system.
+        """See :meth:`ACIDStore.abort_transaction`.
 
-        @param TA_id: the transaction id of the transaction to be aborted
+        Writes an :class:`Abort` journal entry, removes every work-in-progress version created by the transaction,
+        and deletes the transaction from the transaction dictionary.
         """
 
         assert TA_id in self.TD, f"transaction {TA_id} not found in the system"

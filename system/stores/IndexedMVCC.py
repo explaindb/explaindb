@@ -26,6 +26,11 @@ class IndexedTransactionalKeyValueStore(TransactionalKeyValueStore, IndexedACIDS
         index: KeyValueStore[object, str]
 
     def __init__(self, use_brute_force_validation: bool = False):
+        """Initialize the store and its (initially empty) index catalogues.
+
+        :param use_brute_force_validation: if True, the underlying store uses the brute-force validation
+            algorithm in the validation phase (see :class:`~system.stores.MVCC.TransactionalKeyValueStore`).
+        """
         # a dictionary of indexes:
         super().__init__(use_brute_force_validation=use_brute_force_validation)
 
@@ -81,11 +86,12 @@ class IndexedTransactionalKeyValueStore(TransactionalKeyValueStore, IndexedACIDS
             index.put(attribute_value, object_id)
 
     def create_index(self, index_name: str, attribute: str, operator: str) -> None:
-        """Creates an index on the store with the given name. Adds the metadata to the catalog and bulkloads the index
+        """See :meth:`IndexedACIDStore.create_index`.
 
-        @param index_name: the name of the index
-        @param attribute: the attribute to create the index on
-        @param operator: the operator to use for the index
+        Only equality indexes (operator ``"="``) are supported; any other operator raises. Raises as well if an
+        index with the given name already exists. The index is backed by a
+        :class:`~system.indexes.indexes.PythonDictionaryIndex` and acts as a filter index, i.e. lookups return a
+        superset of matches that still has to be post-filtered.
         """
         if index_name in self.indexes_by_name:
             raise Exception(f"index {index_name} already exists")
@@ -137,9 +143,10 @@ class IndexedTransactionalKeyValueStore(TransactionalKeyValueStore, IndexedACIDS
                 )
 
     def drop_index(self, index_name: str) -> None:
-        """Drops the index with the given name.
+        """See :meth:`IndexedACIDStore.drop_index`.
 
-        @param index_name: the name of the index to drop
+        Removes the index from both catalogues (by name and by properties). Raises if no index with the given
+        name exists.
         """
         if index_name not in self.indexes_by_name:
             raise Exception(f"index {index_name} does not exist")
@@ -151,9 +158,10 @@ class IndexedTransactionalKeyValueStore(TransactionalKeyValueStore, IndexedACIDS
         del self.indexes_by_properties[entry.index_properties]
 
     def abort_transaction(self, TA_id: int) -> None:
-        """Aborts the given transaction and removes all changes made by this transaction from the system.
+        """See :meth:`TransactionalKeyValueStore.abort_transaction`.
 
-        @param TA_id: the transaction id of the transaction to be aborted
+        Before delegating to the base implementation, de-indexes every work-in-progress version created by the
+        transaction from all indexes, so the indexes stay consistent with the reverted store.
         """
 
         # iterate over all wip entries of this TA, i.e. all objects that were updated by this TA but not yet committed:
@@ -184,16 +192,12 @@ class IndexedTransactionalKeyValueStore(TransactionalKeyValueStore, IndexedACIDS
     def get_suitable_indexes(
         self, attribute: str, operator: str
     ) -> Iterator[IndexProperties]:
-        """Returns a list of suitable indexes for the given clause.
-
-        @param attribute: the attribute of the clause
-        @param operator: the operator of the clause
-        @return: a list of suitable indexes
-        """
+        """See :meth:`IndexedACIDStore.get_suitable_indexes`."""
 
         # predicate to check for suitability of an index:
         # TODO: well,yes, we could directly use the index here:
         def is_suitable(index_properties: IndexProperties) -> bool:
+            """True iff the index matches both the requested attribute and operator."""
             return (
                 index_properties.attribute == attribute
                 and index_properties.operator == operator
@@ -237,11 +241,10 @@ class IndexedTransactionalKeyValueStore(TransactionalKeyValueStore, IndexedACIDS
                 )
 
     def update_object(self, object_id: str, updated_object: object, TA_id: int) -> None:
-        """Updates the entry and maintains all indexes.
+        """See :meth:`TransactionalKeyValueStore.update_object`.
 
-        @param object_id: the object id of the object to be updated
-        @param updated_object: the updated object, i.e. the new value to be associated with the object_id
-        @param TA_id: the transaction id of the transaction that is updating (or trying to update) the object
+        After delegating to the base implementation, maintains all indexes for the change: the new object version
+        is indexed and any superseded work-in-progress version of the same transaction is de-indexed.
         """
 
         # pre-condition: this is not a delete operation: the object must exist in the store either in the commited list
@@ -276,11 +279,10 @@ class IndexedTransactionalKeyValueStore(TransactionalKeyValueStore, IndexedACIDS
         )
 
     def delete_object(self, object_id: str, TA_id: int) -> None:
-        """Deletes the entry for <object_id> and maintains all indexes.
+        """See :meth:`TransactionalKeyValueStore.delete_object`.
 
-        @param object_id: the object id of the object to be deleted
-        @param TA_id: the transaction id of the transaction that is deleting (or trying to delete) the object
-        @return: True if this object overwrote an already existing wip entry, False otherwise
+        After delegating to the base implementation, de-indexes a superseded work-in-progress version of the same
+        transaction (if any) from all indexes.
         """
 
         # 1. get the existing wip entry if it exists:

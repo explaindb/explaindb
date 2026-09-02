@@ -19,6 +19,9 @@ class HashableDict(dict):
     these dictionaries."""
 
     def __hash__(self):
+        """Hashes the dictionary by its sorted ``(key, value)`` items, so that two dictionaries
+        with equal contents hash equally and instances can be used as set members or dictionary keys.
+        """
         return hash(tuple(sorted(self.items())))
 
 
@@ -69,8 +72,9 @@ class VersionedKeyValueStore(KeyValueStore[str, object]):
             )
 
     def __init__(self, persistence_layer: KeyValueStore = None):
-        """
-        :param persistence_layer: Constructor for the VersionedKeyValueStore class.
+        """Initialize the versioned store.
+
+        :param persistence_layer: the underlying persistence layer used to make the data durable.
         """
 
         # the actual data kept by this store:
@@ -85,21 +89,15 @@ class VersionedKeyValueStore(KeyValueStore[str, object]):
         self.key_value_store: Dict[str, VersionedKeyValueStore.KVStoreEntry] = {}
 
     def size(self) -> int:
-        """Returns the number of objects_ids mapped by the store."""
+        """See :meth:`Index.size`."""
         return len(self.key_value_store)
 
     def put(self, object_id: str, _object: object) -> None | PutInfo:
-        """Inserts (puts) a new object_id->_object mapping into the store overwriting any existing mapping.
+        """See :meth:`Index.put`.
 
-        Note that the object is copied before it is stored in the store to avoid accidental modifications of the object
-        outside the store.
-
-        The data is recorded as a committed version with a start timestamp of 0.
-        So this put is NOT transactional, it is just a simple insert bypassing any transactional semantics of the store.
-        You get transactional semantics by using the TransactionalKeyValueStore.
-
-        @param object_id: the object id
-        @param _object: the object to use as the value
+        Non-transactional insert: the object is deep-copied and recorded as a single committed version with
+        start timestamp 0, bypassing the store's transactional semantics (use
+        :class:`~system.stores.MVCC.TransactionalKeyValueStore` for those). Raises if the object_id already exists.
         """
         if object_id in self.key_value_store:
             raise Exception(f"object {object_id} already exists in the store")
@@ -114,11 +112,10 @@ class VersionedKeyValueStore(KeyValueStore[str, object]):
         )
 
     def get(self, object_id: str) -> Iterator[object]:
-        """Returns the values associated with the given key as in iterator. Note that the iterator is NOT STABLE, i.e.
-        it may change if the underlying data changes concurrently.
+        """See :meth:`PointQueryMixIn.get`.
 
-        @param object_id: the key used in this store
-        @return: an iterator of the values associated with the given key
+        Yields only the value of the most recent committed version; delete markers are not taken into account.
+        Raises if the object_id is not present.
         """
 
         if object_id not in self.key_value_store:
@@ -129,10 +126,10 @@ class VersionedKeyValueStore(KeyValueStore[str, object]):
         yield self.key_value_store[object_id].committed[-1].value
 
     def delete(self, object_id: str, _object: object = None) -> None:
-        """Deletes the object with the given object_id.
+        """See :meth:`Index.delete`.
 
-        @param object_id: the object id
-        @param _object: the object to use as the value
+        Non-transactional delete: requires ``_object`` to be None and appends a delete marker as a committed
+        version with start timestamp 0. Raises if the object_id is not present.
         """
         assert _object is None
 
@@ -148,14 +145,16 @@ class VersionedKeyValueStore(KeyValueStore[str, object]):
         self.key_value_store[object_id].committed.append(new_entry)
 
     def flush(self, object_id: int | None = None) -> None:
-        """Persists all changes, i.e. any changes done so far in volatile memory only are now made durable.
+        """See :meth:`Index.flush`.
 
-        @param object_id: if given, only the object with the given object_id is flushed, otherwise all objects are
-        flushed.
+        No-op: this store keeps its data in volatile memory only and is not backed by persistent storage.
         """
         pass
 
     def show(self) -> None:
-        """Shows the content of the store."""
+        """See :meth:`Index.show`.
+
+        Pretty-prints the underlying key-value store.
+        """
         pp = pprint.PrettyPrinter(depth=3)
         pp.pprint(self.key_value_store)
