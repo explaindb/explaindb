@@ -1,4 +1,4 @@
-# Database Systems Materials
+# ExplainDB — Database Systems Materials
 
 ## Setting Up the Environment with Pipenv
 
@@ -7,7 +7,7 @@
 Open a terminal (macOS/Linux) or Command Prompt/PowerShell (Windows) and run the following command:
 - **macOS/Linux/Windows**:
     ```sh
-    git clone https://gitlab.cs.uni-saarland.de:bigdata/dbsys/materials.git
+    git clone https://gitlab.cs.uni-saarland.de:bigdata/dbsys/explaindb.git
     ```
 
 ### 1. Install Python 3.12
