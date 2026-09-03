@@ -1,10 +1,26 @@
 # Pylint configuration, kept in sync with black (the formatter of record).
-#
-# black governs line length for code and deliberately does not wrap docstrings,
-# comments, or string literals. Enforcing pylint's own line-length check on top
-# of black therefore only flags lines black already considers correctly
-# formatted, so line-too-long (C0301) is disabled here. This is the alignment
-# recommended by the black documentation. Run `black .` to manage formatting.
+
+[MAIN]
+# The `system` package is imported by path, not installed. Put the repo root
+# (the CI job's working directory) on sys.path so pylint can resolve those
+# imports instead of reporting import-error for every internal module.
+init-hook = 'import sys; sys.path.insert(0, ".")'
+
+[VARIABLES]
+# IPython injects these into the notebook namespace at runtime; pylint (via nbqa)
+# cannot see that, so declare them to avoid undefined-variable false positives.
+additional-builtins = display,
+                      get_ipython
 
 [MESSAGES CONTROL]
-disable=line-too-long
+# black governs line length for code and deliberately does not wrap docstrings,
+# comments, or string literals, so pylint's own line-length check would only
+# flag lines black already considers correct. This is the alignment recommended
+# by the black documentation. Run `black .` to manage formatting.
+#
+# too-few-public-methods and fixme are disabled as noise: the codebase has many
+# small interface/dataclass types by design, and fixme flags intentional TODOs.
+disable =
+    line-too-long,
+    too-few-public-methods,
+    fixme,
