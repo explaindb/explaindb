@@ -67,14 +67,14 @@ class Relation(Operator):
         """
         # leaf/source operator: no child operator to close
 
-    def compile(self, emit):
+    def compile(self, emit: str = None) -> str:
         """See :meth:`Operator.compile`.
 
         Not supported for in-memory relations.
         """
         raise NotImplementedError
 
-    def dump(self, indent):
+    def dump(self, indent: int = 0) -> None:
         """See :meth:`Operator.dump`."""
         print(self.indent_(indent) + f"Relation({self.name})")
 
@@ -130,7 +130,7 @@ class Scan(Operator):
         """
         # leaf/source operator: no child operator to close
 
-    def compile(self, emit):
+    def compile(self, emit: str = None) -> str:
         """See :meth:`Operator.compile`.
 
         Emits a loop over the pickled file, optionally bounded by ``num_tuples``.
@@ -142,7 +142,7 @@ class Scan(Operator):
             f"if i < {self.num_tuples}:\n            {self.indent_emit_(emit, 3)}\n            i += 1\n        else:\n            break"
         )
 
-    def dump(self, indent):
+    def dump(self, indent: int = 0) -> None:
         """See :meth:`Operator.dump`."""
         if self.num_tuples == math.inf:
             print(self.indent_(indent) + f"Scan({self.file})")
@@ -191,7 +191,7 @@ class Filter(Operator):
         # close child operator
         self.children[0].interpret_close()
 
-    def compile(self, emit):
+    def compile(self, emit: str = None) -> str:
         """See :meth:`Operator.compile`.
 
         Wraps the child's compiled code in an ``if`` guarding on the predicate.
@@ -201,7 +201,7 @@ class Filter(Operator):
             f"if {compiled_pred}:\n    {self.indent_emit_(emit)}"
         )
 
-    def dump(self, indent):
+    def dump(self, indent: int = 0) -> None:
         """See :meth:`Operator.dump`."""
         print(self.indent_(indent) + f"Filter on `{self.pred}`")
         self.children[0].dump(indent + 2)
@@ -273,7 +273,7 @@ class SHJ(Operator):
         self.children[0].interpret_close()
         self.children[1].interpret_close()
 
-    def compile(self, emit):
+    def compile(self, emit: str = None) -> str:
         """See :meth:`Operator.compile`.
 
         Emits the build loop over the left child followed by the probe loop over
@@ -290,7 +290,7 @@ class SHJ(Operator):
             )
         )
 
-    def dump(self, indent):
+    def dump(self, indent: int = 0) -> None:
         """See :meth:`Operator.dump`."""
         print(self.indent_(indent) + f"SHJ on `{self.left_attr}={self.right_attr}`")
         self.children[0].dump(indent + 2)
@@ -363,14 +363,14 @@ class SemiJ(Operator):
         self.children[0].interpret_close()
         self.children[1].interpret_close()
 
-    def compile(self, emit):
+    def compile(self, emit: str = None) -> str:
         """See :meth:`Operator.compile`.
 
         Not supported for the semi-join operator.
         """
         raise NotImplementedError
 
-    def dump(self, indent):
+    def dump(self, indent: int = 0) -> None:
         """See :meth:`Operator.dump`."""
         print(self.indent_(indent) + f"SemiJ on `{self.left_attr}={self.right_attr}`")
         self.children[0].dump(indent + 2)
@@ -381,6 +381,10 @@ class Print(Operator):
     """
     Print operator to print tuples to the console.
     """
+
+    # Sink operator: it is a query-plan root, invoked with no argument, so
+    # compile() and dump() intentionally drop the base emit/indent parameter.
+    # pylint: disable=arguments-differ
 
     def __init__(self, child: Operator):
         """Create a print operator over a single child.
@@ -438,6 +442,10 @@ class Collect(Operator):
     """
     Collect operator to collect all resulting tuples.
     """
+
+    # Sink operator: it is a query-plan root, invoked with no argument, so
+    # compile() and dump() intentionally drop the base emit/indent parameter.
+    # pylint: disable=arguments-differ
 
     def __init__(self, child: Operator):
         """Create a collect operator over a single child.
@@ -497,6 +505,10 @@ class Count(Operator):
     """
     Count operator to count all resulting tuples.
     """
+
+    # Sink operator: it is a query-plan root, invoked with no argument, so
+    # compile() and dump() intentionally drop the base emit/indent parameter.
+    # pylint: disable=arguments-differ
 
     def __init__(self, child: Operator):
         """Create a count operator over a single child.
