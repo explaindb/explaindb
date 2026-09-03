@@ -66,7 +66,8 @@ To start a Jupyter server and run Notebooks, execute the following command
     ```sh
     pipenv run jupyter notebook
     ```
-This should open a browser window listing the files in the current directory.
+This should open a browser window listing the files in the current directory. The notebooks live in the
+`notebooks/` directory; open them from there.
 
 Alternatively, you may also run Jupyter
 notebooks in an IDE like [PyCharm](https://www.jetbrains.com/pycharm/). See [here](https://www.jetbrains.com/help/pycharm/pipenv.html) for instructions on configuring a pipenv environment in PyCharm and [here](https://www.jetbrains.com/help/pycharm/jupyter-notebook-support.html) for information on Jupyter notebook support in PyCharm.

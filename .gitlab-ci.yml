@@ -103,10 +103,17 @@ ipynb_test:
     # (1..N) and CI_NODE_TOTAL (N); .ci/assign_notebooks.py reads those and packs
     # the notebooks onto the instances by measured run time (LPT bin-packing, see
     # .ci/notebook_weights.tsv) so the instances finish at roughly the same time.
-    # `set -e` makes the job fail as soon as any notebook raises.
+    # We run from the notebooks/ directory so the working directory matches an
+    # interactive Jupyter session (kernel cwd = the notebook's folder): notebooks
+    # reach the `system` package via their sys.path bootstrap cell and read their
+    # data files relative to notebooks/. `set -e` makes the job fail as soon as
+    # any notebook raises.
     - |
       set -e
-      python3 .ci/assign_notebooks.py > /tmp/nb_slice
+      # pipenv is invoked from notebooks/ below; point it at the repo-root Pipfile.
+      export PIPENV_PIPFILE="$CI_PROJECT_DIR/Pipfile"
+      cd notebooks
+      python3 "$CI_PROJECT_DIR/.ci/assign_notebooks.py" > /tmp/nb_slice
       while IFS= read -r nb; do
         echo "== [node ${CI_NODE_INDEX:-1}/${CI_NODE_TOTAL:-1}] running $nb =="
         pipenv run jupyter nbconvert --to script "$nb" --stdout > /tmp/nb.py

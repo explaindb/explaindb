@@ -27,10 +27,12 @@ instances finish at roughly the same time -- instead of the round-robin-by-file-
 size heuristic it replaces, which ignored actual run time.
 
 It reads per-notebook run-time weights from ``notebook_weights.tsv`` (next to
-this file), discovers the notebooks actually present, and greedily assigns them
--- heaviest first -- to the least-loaded bin (Longest Processing Time first).
-It prints the notebooks assigned to this instance (``CI_NODE_INDEX``, 1-based),
-one per line.
+this file), discovers the notebooks in the current working directory, and
+greedily assigns them -- heaviest first -- to the least-loaded bin (Longest
+Processing Time first). It prints the notebooks assigned to this instance
+(``CI_NODE_INDEX``, 1-based), one per line, by bare file name. The CI job runs
+this from the ``notebooks/`` directory (see ``.gitlab-ci.yml``, ``ipynb_test``)
+so the printed names resolve directly.
 
 Notebooks without a recorded weight get a default weight so newly added
 notebooks still run and are spread sensibly rather than piling onto one bin.
@@ -45,8 +47,9 @@ import os
 import sys
 from pathlib import Path
 
-# Weights file lives next to this script; notebooks are globbed from the repo
-# root, which is the CI job's working directory.
+# Weights file lives next to this script (found via its own path, so it resolves
+# regardless of the working directory); notebooks are globbed from the current
+# working directory, which the CI job sets to ``notebooks/``.
 WEIGHTS_FILE: Path = Path(__file__).with_name("notebook_weights.tsv")
 
 # Seconds assumed for a notebook missing from the weights file. Chosen around
@@ -95,12 +98,21 @@ def assign(
     return bins
 
 
+def discover_notebooks() -> list[str]:
+    """Return the sorted notebook file names in the current working directory.
+
+    The names line up with the keys in ``notebook_weights.tsv``. A single-star
+    glob is used on purpose so a stray ``.ipynb_checkpoints/`` is never picked up.
+    """
+    return sorted(glob.glob("*.ipynb"))
+
+
 def main() -> None:
-    """Print this CI instance's slice of the notebooks (one per line)."""
+    """Print this CI instance's slice of the notebooks, one bare name per line."""
     num_bins: int = int(os.environ.get("CI_NODE_TOTAL", "1"))
     index: int = int(os.environ.get("CI_NODE_INDEX", "1"))  # 1-based
     weights: dict[str, float] = load_weights(WEIGHTS_FILE)
-    notebooks: list[str] = sorted(glob.glob("*.ipynb"))
+    notebooks: list[str] = discover_notebooks()
     bins: list[list[str]] = assign(notebooks, weights, num_bins)
 
     # Log the full packing to stderr so the CI log shows how balanced it is.
