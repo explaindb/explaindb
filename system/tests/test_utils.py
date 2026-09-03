@@ -18,6 +18,9 @@
 #
 #
 
+# Test modules use self-documenting method/class names and module-level
+# fixtures, so pylint's naming and docstring checks are relaxed here.
+# pylint: disable=invalid-name,missing-class-docstring,missing-function-docstring
 """Tests for the utility classes."""
 
 import unittest

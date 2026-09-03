@@ -6,6 +6,30 @@
 # imports instead of reporting import-error for every internal module.
 init-hook = 'import sys; sys.path.insert(0, ".")'
 
+[BASIC]
+# Short mathematical names used deliberately (loop indices, vector/triangle
+# vertices and edges A/B/C/AB/AC, matrix labels) and two domain class names
+# (C_Out cost, WHERE_Clause) that keep their non-PascalCase spelling.
+good-names = _, i, j, k, m, n, x, y, z, A, B, C, D, AB, AC, C_Out, WHERE_Clause
+
+# Type variables are descriptive PascalCase in this codebase (e.g. ObjectType,
+# Key, Value) rather than the conventional single letter.
+typevar-rgx = ^[A-Z][a-zA-Z0-9]*$
+
+# Several modules are named after the single class they define (Index, DBMS,
+# API, MVCC, VersionedKeyValueStore), so allow PascalCase module names too.
+module-rgx = ^[a-zA-Z_][a-zA-Z0-9_]*$
+
+# Domain names carry uppercase acronyms and labels: TA (transaction), object /
+# disk / block IDs, IO/IOPs, QEP (query execution plan), TD, RAID levels, DBMS,
+# DRAM, MVCC, WAH, WHERE, and single-letter table labels (A..D). Accept these
+# inside otherwise snake_case names instead of renaming away the domain
+# vocabulary.
+good-names-rgxs =
+    ^[A-Za-z0-9_]*(TA|ID|IO|IOP|QEP|TD|RAID|DBMS|DRAM|MVCC|WAH|WHERE)[A-Za-z0-9_]*$,
+    ^[a-z0-9_]*_[A-D]$,
+    ^(A|B|C|D|AB|AC)_[a-z0-9_]+$
+
 [VARIABLES]
 # IPython injects these into the notebook namespace at runtime; pylint (via nbqa)
 # cannot see that, so declare them to avoid undefined-variable false positives.

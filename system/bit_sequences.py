@@ -229,6 +229,8 @@ class IntegerBitSequence(UncompressedBitSequence):
         return self.number
 
     class SetBitsIterator(BitSequence.SetBitsIterator):
+        """See :class:`BitSequence.SetBitsIterator`."""
+
         def __init__(self, bit_sequence: IntegerBitSequence):
             """See :meth:`BitSequence.SetBitsIterator.__init__`."""
             self.number: int = bit_sequence.number
@@ -250,6 +252,7 @@ class IntegerBitSequence(UncompressedBitSequence):
             return bit
 
     class SetBitsReverseIterator(BitSequence.SetBitsReverseIterator):
+        """See :class:`BitSequence.SetBitsReverseIterator`."""
 
         def __init__(self, bit_sequence: IntegerBitSequence):
             """See :meth:`BitSequence.SetBitsReverseIterator.__init__`."""
@@ -514,6 +517,8 @@ class BitListBitSequence(UncompressedBitSequence):
         return resulting_number
 
     class SetBitsIterator(BitSequence.SetBitsIterator):
+        """See :class:`BitSequence.SetBitsIterator`."""
+
         def __init__(self, bit_sequence: BitListBitSequence):
             """See :meth:`BitSequence.SetBitsIterator.__init__`."""
             self.bit_sequence: BitListBitSequence = bit_sequence
@@ -536,6 +541,8 @@ class BitListBitSequence(UncompressedBitSequence):
             return next_result
 
     class SetBitsReverseIterator(BitSequence.SetBitsReverseIterator):
+        """See :class:`BitSequence.SetBitsReverseIterator`."""
+
         def __init__(self, bit_sequence: BitListBitSequence):
             """See :meth:`BitSequence.SetBitsReverseIterator.__init__`."""
             self.bit_sequence: BitListBitSequence = bit_sequence
@@ -1300,6 +1307,8 @@ class WAHBitSequence(CompressedBitSequence):
             return self.bit_idx + next(self.set_bit_iterator)
 
     class SetBitsIterator(BitSequence.SetBitsIterator):
+        """See :class:`BitSequence.SetBitsIterator`."""
+
         def __init__(
             self,
             compressed_bit_sequence: WAHBitSequence,
