@@ -137,11 +137,10 @@ class Scan(Operator):
         """
         if self.num_tuples == math.inf:
             return f"with open('{self.file}', 'rb') as f:\n    for tup in pickle.load(f):\n        {self.indent_emit_(emit, 2)}"
-        else:
-            return (
-                f"with open('{self.file}', 'rb') as f:\n    i = 0\n    for tup in pickle.load(f):\n        "
-                f"if i < {self.num_tuples}:\n            {self.indent_emit_(emit, 3)}\n            i += 1\n        else:\n            break"
-            )
+        return (
+            f"with open('{self.file}', 'rb') as f:\n    i = 0\n    for tup in pickle.load(f):\n        "
+            f"if i < {self.num_tuples}:\n            {self.indent_emit_(emit, 3)}\n            i += 1\n        else:\n            break"
+        )
 
     def dump(self, indent):
         """See :meth:`Operator.dump`."""

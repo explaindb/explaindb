@@ -63,11 +63,10 @@ class CardinalityTable:
         join_problem: Problem = left | right
         if join_problem in self.entries:
             return self.entries[join_problem]
-        else:
-            # Use Cartesian Product for estimation
-            self.update_cardinality_estimation(
-                join_problem,
-                self.get_cardinality_estimation(left)
-                * self.get_cardinality_estimation(right),
-            )
-            return self.entries[join_problem]
+        # Use Cartesian Product for estimation
+        self.update_cardinality_estimation(
+            join_problem,
+            self.get_cardinality_estimation(left)
+            * self.get_cardinality_estimation(right),
+        )
+        return self.entries[join_problem]

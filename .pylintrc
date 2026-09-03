@@ -48,3 +48,4 @@ disable =
     line-too-long,
     too-few-public-methods,
     fixme,
+    arguments-renamed,

@@ -58,12 +58,11 @@ class BloomFilterTests(unittest.TestCase):
             def __next__(self):
                 if self.evaluated_hash_function == self.number_of_hash_functions:
                     raise StopIteration
-                else:
-                    result: int = (
-                        self.key + self.evaluated_hash_function
-                    ) % self.number_of_available_bits
-                    self.evaluated_hash_function += 1
-                    return result
+                result: int = (
+                    self.key + self.evaluated_hash_function
+                ) % self.number_of_available_bits
+                self.evaluated_hash_function += 1
+                return result
 
         # Create data objects to be used.
         all_addresses: list[Address] = [

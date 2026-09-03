@@ -178,8 +178,7 @@ class ChristmasTree[Key, Value](RadixTrie[Key, Value]):
                 key.my_hash() % self.poor_mans_bloom_filter_size
             ]:
                 return super().get(key, level)
-            else:
-                return iter([])
+            return iter([])
 
         def put(self, key: Key, value: Value, level: int = 0) -> None | PutInfo:
             """See :meth:`ChristmasTree.BufferedInnerNode.put`.
@@ -268,16 +267,15 @@ class ChristmasTree[Key, Value](RadixTrie[Key, Value]):
                 return ChristmasTree.InnerNode[Key, Value](
                     parent_descriptor=new_descriptor
                 )
-            elif self.config == "buffered":
+            if self.config == "buffered":
                 return ChristmasTree.BufferedInnerNode[Key, Value](
                     key_mapping=key_mapping, parent_descriptor=new_descriptor
                 )
-            elif self.config == "crystalball":
+            if self.config == "crystalball":
                 return ChristmasTree.CrystalBallBufferedInnerNode(
                     key_mapping=key_mapping, parent_descriptor=new_descriptor
                 )
-            else:
-                raise ValueError("Invalid configuration")
+            raise ValueError("Invalid configuration")
 
     class LeafFactory[Key, Value](RadixTrie.LeafFactory[Key, Value]):
         """A factory for creating leaf nodes in a Christmas tree."""

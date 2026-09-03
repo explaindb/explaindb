@@ -176,9 +176,8 @@ class TransactionalKeyValueStore(VersionedKeyValueStore, ACIDStore):
                 # wip-entry marks a deleted object, return None
                 if type(wip_entry) is VersionedKeyValueStore.DeleteEntry:
                     return None
-                else:
-                    # i.e. we return the version of the object that is currently being modified by this TA_id:
-                    return cast(VersionedKeyValueStore.UpdateEntry, wip_entry).value
+                # i.e. we return the version of the object that is currently being modified by this TA_id:
+                return cast(VersionedKeyValueStore.UpdateEntry, wip_entry).value
 
             # else:
             # wip entry belongs to another transaction, nothing to do here
@@ -227,13 +226,12 @@ class TransactionalKeyValueStore(VersionedKeyValueStore, ACIDStore):
             last_committed_version_visible_to_TA_id, VersionedKeyValueStore.DeleteEntry
         ):
             return None
-        else:
-            # some asserts to (again) check the correctness of the implementation:
-            assert last_committed_version_visible_to_TA_id.value is not None
-            assert last_committed_version_visible_to_TA_id.start_validity is not None
-            assert last_committed_version_visible_to_TA_id.start_validity < timestamp
+        # some asserts to (again) check the correctness of the implementation:
+        assert last_committed_version_visible_to_TA_id.value is not None
+        assert last_committed_version_visible_to_TA_id.start_validity is not None
+        assert last_committed_version_visible_to_TA_id.start_validity < timestamp
 
-            return last_committed_version_visible_to_TA_id.value
+        return last_committed_version_visible_to_TA_id.value
 
     def _read_more_recent_committed_versions_iterable(
         self, where: Clause = None

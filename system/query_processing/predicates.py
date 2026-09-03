@@ -81,18 +81,17 @@ class WHERE_Clause(Clause):
         value = getattr(_object, self.attribute)
         if self.operator == "==":
             return value == self.constant
-        elif self.operator == "!=":
+        if self.operator == "!=":
             return value != self.constant
-        elif self.operator == "<":
+        if self.operator == "<":
             return value < self.constant
-        elif self.operator == "<=":
+        if self.operator == "<=":
             return value <= self.constant
-        elif self.operator == ">":
+        if self.operator == ">":
             return value > self.constant
-        elif self.operator == ">=":
+        if self.operator == ">=":
             return value >= self.constant
-        else:
-            raise ValueError("Invalid operator")
+        raise ValueError("Invalid operator")
 
 
 class Disjunction(Clause):

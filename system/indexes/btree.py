@@ -406,37 +406,36 @@ class BPlusTree[Key, Value](AbstractBTree[Key, Value]):
                 self.values.insert(pos, value)
 
                 return NoSplit()
-            else:
-                # maximum capacity reached (before inserting!): split the leaf
-                # variant implemented: first insert allowing for overflow, then split
-                # (1.) insert key-value pair at correct position:
-                self.keys.insert(pos, key)
-                self.values.insert(pos, value)
+            # maximum capacity reached (before inserting!): split the leaf
+            # variant implemented: first insert allowing for overflow, then split
+            # (1.) insert key-value pair at correct position:
+            self.keys.insert(pos, key)
+            self.values.insert(pos, value)
 
-                # (2.) split the leaf:
-                # call split to create two new leaf nodes:
-                sr: SplitHappens[Key] = self.split()
+            # (2.) split the leaf:
+            # call split to create two new leaf nodes:
+            sr: SplitHappens[Key] = self.split()
 
-                # (3.) redirect leaf pointers for sequential scanning
-                # is there a leaf to the left of self?: update its next pointer
-                if self.previous:
-                    self.previous.next = sr.left_node
+            # (3.) redirect leaf pointers for sequential scanning
+            # is there a leaf to the left of self?: update its next pointer
+            if self.previous:
+                self.previous.next = sr.left_node
 
-                # new left node points to the previous leaf:
-                sr.left_node.previous = self.previous
-                # new left node points to the right node (just created by the split):
-                sr.left_node.next = sr.right_node
+            # new left node points to the previous leaf:
+            sr.left_node.previous = self.previous
+            # new left node points to the right node (just created by the split):
+            sr.left_node.next = sr.right_node
 
-                # new right node points to the new left node (just created by the split):
-                sr.right_node.previous = sr.left_node
-                # new right node points to the next leaf:
-                sr.right_node.next = self.next
+            # new right node points to the new left node (just created by the split):
+            sr.right_node.previous = sr.left_node
+            # new right node points to the next leaf:
+            sr.right_node.next = self.next
 
-                if self.next:
-                    self.next.previous = sr.right_node
+            if self.next:
+                self.next.previous = sr.right_node
 
-                # return the split information up the call stack:
-                return sr
+            # return the split information up the call stack:
+            return sr
 
         def get(self, key: Key) -> Iterator[Value]:
             """Returns the value for the given key if it exists.
@@ -714,13 +713,12 @@ class BPlusTree[Key, Value](AbstractBTree[Key, Value]):
         # last inner before leaf level?:
         if type(node.children[0]) == BPlusTree.Leaf:
             return {node}
-        else:
-            # more inner nodes:
-            inner_nodes: set[BPlusTree.Inner] = set()
-            child: BPlusTree.Inner
-            for child in node.children:
-                inner_nodes.update(self._get_lastlevel_inner_nodes(child))
-            return inner_nodes
+        # more inner nodes:
+        inner_nodes: set[BPlusTree.Inner] = set()
+        child: BPlusTree.Inner
+        for child in node.children:
+            inner_nodes.update(self._get_lastlevel_inner_nodes(child))
+        return inner_nodes
 
     def convert_to_counting_leaf_tree(self) -> None:
         """Keeps all inner nodes but replaces all leaves with CountingLeafs."""

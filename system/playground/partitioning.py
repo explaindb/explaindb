@@ -163,12 +163,11 @@ class GateTree:
             _platform: Platform = Platform()
             self.platforms.append(_platform)
             return _platform
-        else:
-            left: RailElement = self._build_tree(tree_depth + 1)
-            right: RailElement = self._build_tree(tree_depth + 1)
-            _gate: Gate = Gate(left=left, right=right)
-            self.gates.append(_gate)
-            return _gate
+        left: RailElement = self._build_tree(tree_depth + 1)
+        right: RailElement = self._build_tree(tree_depth + 1)
+        _gate: Gate = Gate(left=left, right=right)
+        self.gates.append(_gate)
+        return _gate
 
     def show(self):
         """Prints the whole tree starting at the root."""

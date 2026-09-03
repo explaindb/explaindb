@@ -80,10 +80,9 @@ class BloomFilter:
             # If all hash functions have been evaluated, stop the iteration
             if self.evaluated_hash_functions == self.number_of_hash_functions:
                 raise StopIteration
-            else:
-                # Use RNG to evaluate next "hash" value
-                self.evaluated_hash_functions += 1
-                return self.rng.randint(0, self.number_of_available_bits - 1)
+            # Use RNG to evaluate next "hash" value
+            self.evaluated_hash_functions += 1
+            return self.rng.randint(0, self.number_of_available_bits - 1)
 
     def __init__(
         self,

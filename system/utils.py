@@ -218,10 +218,9 @@ class Triangle(Descriptor):
 
             if c > 0:
                 return 1
-            elif c < 0:
+            if c < 0:
                 return -1
-            else:
-                return 0
+            return 0
 
         # check if the point is on the same side of the lines AB, BC, and CA
         # as the triangle's vertices A, B, and C
