@@ -43,7 +43,6 @@ class KeyMapping[Key, Value](ABC):
 
         @return: The bucket index from 0 to max_buckets of an inner_node - 1.
         """
-        pass
 
 
 class RadixTrie[Key, Value](KeyValueStore[Key, Value], Drawable):
@@ -64,7 +63,6 @@ class RadixTrie[Key, Value](KeyValueStore[Key, Value], Drawable):
             The extra ``level`` parameter is the current depth of this node in the trie. Overridden by
             concrete node types.
             """
-            pass
 
         def put(self, key: Key, value: Value, level: int = 0) -> None | PutInfo:
             """See :meth:`Index.put`.
@@ -72,7 +70,6 @@ class RadixTrie[Key, Value](KeyValueStore[Key, Value], Drawable):
             The extra ``level`` parameter is the current depth of this node in the trie. Overridden by
             concrete node types.
             """
-            pass
 
         def size(self) -> int:
             """See :meth:`Index.size`."""
@@ -98,7 +95,6 @@ class RadixTrie[Key, Value](KeyValueStore[Key, Value], Drawable):
             The ``indent`` parameter is a prefix prepended to every printed line for nesting. Overridden by
             concrete node types.
             """
-            pass
 
         def draw(
             self,
@@ -108,7 +104,6 @@ class RadixTrie[Key, Value](KeyValueStore[Key, Value], Drawable):
             y_offset: int = 0,
         ):
             """Draw this instance on the given canvas."""
-            pass
 
     class InnerNode[Key, Value](AbstractNode[Key, Value]):
         """Inner node of a radix trie. Holds a list of children and routes each key to the matching child by
@@ -257,9 +252,8 @@ class RadixTrie[Key, Value](KeyValueStore[Key, Value], Drawable):
         ):
             """Draw this instance on the given canvas. This only works if the key is of type Drawable."""
             key: Drawable
-            val: Value
 
-            for key, val in self.values:
+            for key, _ in self.values:
                 key.draw(canvas, canvas_height, x_offset, y_offset)
 
             if self.left_sibling is not None:
@@ -287,7 +281,6 @@ class RadixTrie[Key, Value](KeyValueStore[Key, Value], Drawable):
             """
             self.count += 1
             self.values.append((key, value))
-            return None
 
         def get(self, key: Key, level: int = 0) -> Iterator[Value]:
             """See :meth:`PointQueryMixIn.get`.
@@ -468,7 +461,6 @@ class RadixTrie[Key, Value](KeyValueStore[Key, Value], Drawable):
         """See :meth:`Index.put`."""
         self.count += 1
         self.root.put(key, value, 0)
-        return None
 
     def size(self) -> int:
         """See :meth:`Index.size`."""

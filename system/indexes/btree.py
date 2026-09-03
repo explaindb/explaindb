@@ -43,8 +43,6 @@ import graphviz
 class NoSplit(PutInfo):
     """Result of a put that did not cause a node to split."""
 
-    pass
-
 
 @dataclass
 class SplitHappens[Key](PutInfo):
@@ -96,8 +94,6 @@ class BPlusTree[Key, Value](AbstractBTree[Key, Value]):
             the two new nodes and the pivot) if this insertion caused a split.
             """
 
-            pass
-
         @abstractmethod
         def split(
             self,
@@ -106,37 +102,30 @@ class BPlusTree[Key, Value](AbstractBTree[Key, Value]):
 
             :return: A SplitHappens instance wrapping the left node, the right node, and the new pivot if a split occurred
             """
-            pass
 
         @abstractmethod
         def get(self, key: Key) -> Iterator[Value]:
             """See :meth:`PointQueryMixIn.get`."""
-            pass
 
         @abstractmethod
         def get_all_in_range(self, min_key: Key, max_key: Key) -> Iterator[Value]:
             """See :meth:`RangeQueryMixIn.get_all_in_range`."""
-            pass
 
         @abstractmethod
         def is_full(self) -> bool:
             """Returns true if the node is full, otherwise false."""
-            pass
 
         @abstractmethod
         def size(self) -> int:
             """Returns the number of keys in the subtree."""
-            pass
 
         @abstractmethod
         def dot(self, s: str) -> str:
             """Returns a string representation of the node in dot format."""
-            pass
 
         @abstractmethod
         def consistency_check(self) -> None:
             """Check if the node is consistent, i.e., all keys are sorted and the number of children is correct."""
-            pass
 
         def delete(self, key: Key, value: Value = None) -> None:
             """See :meth:`Index.delete`.
@@ -155,8 +144,6 @@ class BPlusTree[Key, Value](AbstractBTree[Key, Value]):
         @abstractmethod
         def show(self) -> None:
             """Shows the content of the index."""
-
-            pass
 
     class Inner(AbstractNode):
         """Inner node of a b+-tree. Inner nodes have keys and references to children subtrees, i.e. Nodes or Leaves.
@@ -292,22 +279,22 @@ class BPlusTree[Key, Value](AbstractBTree[Key, Value]):
             :return: The sum of the number of keys of this subtree.
             """
 
-            return sum([child.size() for child in self.children])
+            return sum(child.size() for child in self.children)
 
         def dot(self, s: str) -> str:
             """Returns a string representation of the inner node in dot format."""
 
             s += f"\t{self.id} [label=<\n"
-            s += f'\t\t<TABLE BORDER="0" CELLBORDER="1" CELLSPACING="0" CELLPADDING="4">\n'
-            s += f"\t\t\t<TR>"
+            s += '\t\t<TABLE BORDER="0" CELLBORDER="1" CELLSPACING="0" CELLPADDING="4">\n'
+            s += "\t\t\t<TR>"
             for i in range(self.capacity):
                 s += f'<TD BGCOLOR="royalblue" PORT="p{i}"></TD>'
                 s += f'<TD BGCOLOR="khaki1" WIDTH="20">{self.keys[i] if i < len(self.keys) else ""}</TD>'
 
             s += f'<TD BGCOLOR="royalblue" PORT="p{len(self.keys)}"></TD>'
-            s += f"</TR>\n"
-            s += f"\t\t</TABLE>\n"
-            s += f"\t>, shape=plaintext];\n"
+            s += "</TR>\n"
+            s += "\t\t</TABLE>\n"
+            s += "\t>, shape=plaintext];\n"
             # draw edges
             for i, child in enumerate(self.children):
                 s += f"\t{self.id}:p{i} -> {child.id};\n"
@@ -325,7 +312,7 @@ class BPlusTree[Key, Value](AbstractBTree[Key, Value]):
 
             assert sorted(self.keys) == self.keys, "keys need to be sorted"
 
-            assert len({child for child in self.children}) == len(
+            assert len(set(self.children)) == len(
                 self.children
             ), "no duplicate children"
 
@@ -504,8 +491,7 @@ class BPlusTree[Key, Value](AbstractBTree[Key, Value]):
                 # update next leaf:
                 next_leaf = next_leaf.next
 
-            for res in result:
-                yield res
+            yield from result
 
         def is_full(self):
             """Returns true if the node is full, otherwise false."""
@@ -519,7 +505,7 @@ class BPlusTree[Key, Value](AbstractBTree[Key, Value]):
             """Returns a string representation of the leaf node in dot format."""
 
             s += f"\t{self.id} [label=<\n"
-            s += f'\t\t<TABLE BORDER="0" CELLBORDER="1" CELLSPACING="0" CELLPADDING="4">\n'
+            s += '\t\t<TABLE BORDER="0" CELLBORDER="1" CELLSPACING="0" CELLPADDING="4">\n'
             dot_keys = ""
             dot_values = ""
             for i in range(self.capacity):
@@ -527,8 +513,8 @@ class BPlusTree[Key, Value](AbstractBTree[Key, Value]):
                 dot_values += f'<TD BGCOLOR="silver" WIDTH="20">{self.values[i] if i < len(self.values) else ""}</TD>'
             s += f'\t\t\t<TR>"{dot_keys}</TR>\n'
             s += f'\t\t\t<TR>"{dot_values}</TR>\n'
-            s += f"\t\t</TABLE>\n"
-            s += f"\t>, shape=plaintext, margin=0];\n"
+            s += "\t\t</TABLE>\n"
+            s += "\t>, shape=plaintext, margin=0];\n"
             # draw links between leaves
             if self.next:
                 s += f"\t{self.id} -> {self.next.id} [dir=both, arrowsize=0.5, constraint=false];\n"
@@ -544,7 +530,7 @@ class BPlusTree[Key, Value](AbstractBTree[Key, Value]):
                 len(self.keys) <= self.capacity
             ), "number of leaf entries exceeds max capacity"
             assert sorted(self.keys) == self.keys, "keys need to be sorted"
-            assert len({k for k in self.keys}) == len(self.keys), "no duplicate keys"
+            assert len(set(self.keys)) == len(self.keys), "no duplicate keys"
 
             # check ISAM links:
             # check pointer to left sibling:
@@ -579,7 +565,6 @@ class BPlusTree[Key, Value](AbstractBTree[Key, Value]):
             Does not store the value; only increments the counter of put calls.
             """
             self.put_calls += 1
-            return None
 
         def split(self) -> SplitHappens[Key]:
             """Counting leaves are never split: always raises ``NotImplementedError``."""
@@ -614,17 +599,17 @@ class BPlusTree[Key, Value](AbstractBTree[Key, Value]):
             """Returns a string representation of the leaf node in dot format."""
 
             s += f"\t{self.id} [label=<\n"
-            s += f'\t\t<TABLE BORDER="0" CELLBORDER="1" CELLSPACING="0" CELLPADDING="4">\n'
+            s += '\t\t<TABLE BORDER="0" CELLBORDER="1" CELLSPACING="0" CELLPADDING="4">\n'
             dot_keys = ""
             dot_values = ""
-            dot_keys += f'<TD BGCOLOR="lightgreen" WIDTH="20">count</TD>'
+            dot_keys += '<TD BGCOLOR="lightgreen" WIDTH="20">count</TD>'
             # TODO: overfitting the data, need max over all leaves here
             height: int = min(max(15, self.put_calls // 100), 200)
             dot_values += f'<TD BGCOLOR="silver" WIDTH="20" HEIGHT="{str(height)}">{self.put_calls}</TD>'
             s += f'\t\t\t<TR>"{dot_keys}</TR>\n'
             s += f'\t\t\t<TR>"{dot_values}</TR>\n'
-            s += f"\t\t</TABLE>\n"
-            s += f"\t>, shape=plaintext, margin=0];\n"
+            s += "\t\t</TABLE>\n"
+            s += "\t>, shape=plaintext, margin=0];\n"
             return s
 
         def consistency_check(self) -> None:
@@ -665,7 +650,6 @@ class BPlusTree[Key, Value](AbstractBTree[Key, Value]):
             self.root = BPlusTree.Inner(
                 self.inner_capacity, [sr.pivot], [sr.left_node, sr.right_node]
             )
-        return None
 
     def get(self, key: Key) -> Iterator[Value]:
         """See :meth:`PointQueryMixIn.get`.
@@ -678,8 +662,7 @@ class BPlusTree[Key, Value](AbstractBTree[Key, Value]):
     def get_all_in_range(self, min_key: Key, max_key: Key) -> Iterator[Value]:
         """See :meth:`RangeQueryMixIn.get_all_in_range`."""
 
-        for value in self.root.get_all_in_range(min_key, max_key):
-            yield value
+        yield from self.root.get_all_in_range(min_key, max_key)
 
     def delete(self, key: Key, value: Value = None):
         """See :meth:`Index.delete`.
@@ -753,5 +736,5 @@ class BPlusTree[Key, Value](AbstractBTree[Key, Value]):
             raise ValueError("root is not an inner node")
         for inner_node in inner_nodes:
             # convert children to CountingLeafs:
-            for i, child in enumerate(inner_node.children):
+            for i, _ in enumerate(inner_node.children):
                 inner_node.children[i] = BPlusTree.CountingLeaf()

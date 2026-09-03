@@ -49,7 +49,6 @@ class CostFunction(ABC):
         :param plan_table: The plan table for the enumeration.
         :return: The costs of joining the left and right problems.
         """
-        pass
 
     @abstractmethod
     def estimate_filter_costs(
@@ -63,4 +62,3 @@ class CostFunction(ABC):
         :param cardinality_table: The cardinality table to be used.
         :return: The costs of filtering the problem.
         """
-        pass

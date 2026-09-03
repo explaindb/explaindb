@@ -81,7 +81,6 @@ class BitSequence(ABC):
         :param index: The index whose bit is to be checked.
         :return: True if the bit is set.
         """
-        pass
 
     @abstractmethod
     def __getitem__(self, index: int) -> bool:
@@ -90,7 +89,6 @@ class BitSequence(ABC):
         :param index: The index to be checked.
         :return: True, if the bit is set, False otherwise.
         """
-        pass
 
     @abstractmethod
     def __setitem__(self, index: int, value: bool) -> None:
@@ -99,7 +97,6 @@ class BitSequence(ABC):
         :param index: The index to be set.
         :param value: The value to be set.
         """
-        pass
 
     @abstractmethod
     def __eq__(self, other: BitSequence) -> bool:
@@ -108,7 +105,6 @@ class BitSequence(ABC):
         :param other: The other bit-sequence.
         :return: True, if both bit-sequences are equal, False if not.
         """
-        pass
 
     @abstractmethod
     def __and__(self, other: BitSequence) -> BitSequence:
@@ -116,7 +112,6 @@ class BitSequence(ABC):
         Returns the bitwise & between this and the other bit-sequence
         :return: The bitwise & as a bit-sequence.
         """
-        pass
 
     @abstractmethod
     def __or__(self, other: BitSequence) -> BitSequence:
@@ -124,7 +119,6 @@ class BitSequence(ABC):
         Returns the bitwise | between this and the other bit-sequence
         :return: The bitwise | as a bit-sequence.
         """
-        pass
 
     @abstractmethod
     def __xor__(self, other: BitSequence) -> BitSequence:
@@ -132,7 +126,6 @@ class BitSequence(ABC):
         Returns the bitwise ^ between this and the other bit-sequence
         :return: The bitwise ^ as a bit-sequence.
         """
-        pass
 
     @abstractmethod
     def __invert__(self) -> BitSequence:
@@ -140,7 +133,6 @@ class BitSequence(ABC):
         Returns the bitwise inversion/negation of this bit-sequence
         :return: The bitwise ~ as a bit-sequence.
         """
-        pass
 
     def get_number_of_bits(self) -> int:
         """
@@ -212,7 +204,6 @@ class BitSequence(ABC):
         :param number_of_bits: The number of bits in the bit-sequence.
         :return: A bit-sequence of length number_of_bits and all bits set to False.
         """
-        pass
 
     @abstractmethod
     def update_represented_number_of_bits(
@@ -222,7 +213,6 @@ class BitSequence(ABC):
         Updates the number of bits to be represented by this bit-sequence.
         :param updated_represented_number_of_bits: The number of bits to represent.
         """
-        pass
 
     @abstractmethod
     def intersects(self, other: BitSequence) -> bool:
@@ -232,7 +222,6 @@ class BitSequence(ABC):
         :param other: The other bit sequence.
         :return: True, if the bit sequences intersect, False if not.
         """
-        pass
 
     @abstractmethod
     def _get_bit_sequence_for_range(
@@ -249,7 +238,6 @@ class BitSequence(ABC):
         indices is used
         :return: The bit sequence for the range.
         """
-        pass
 
     @abstractmethod
     def all_bits_set_to_false(self) -> bool:
@@ -257,7 +245,6 @@ class BitSequence(ABC):
         A predicate checking if all bits in the bit-sequence are set to False.
         :return: True, if all bits in the bit-sequence are set to False, False if not.
         """
-        pass
 
     @abstractmethod
     def all_bits_set_to_true(self) -> bool:
@@ -265,7 +252,6 @@ class BitSequence(ABC):
         A predicate checking if all bits in the bit-sequence are set to True.
         :return: True, if all bits in the bit-sequence are set to True, False if not.
         """
-        pass
 
     @abstractmethod
     def get_least_significant_bit(self) -> BitSequence:
@@ -273,7 +259,6 @@ class BitSequence(ABC):
         Returns a bit sequence only containing the least significant bit of this bit sequence.
         :return: The bit sequence only containing the least significant bit of this bit sequence.
         """
-        pass
 
     @abstractmethod
     def get_most_significant_bit(self) -> BitSequence:
@@ -281,7 +266,6 @@ class BitSequence(ABC):
         Returns a bit sequence only containing the most significant bit of this bit sequence.
         :return: The bit sequence only containing the most significant bit of this bit sequence.
         """
-        pass
 
     @abstractmethod
     def contains_bit_sequence(self, other: BitSequence) -> bool:
@@ -290,19 +274,16 @@ class BitSequence(ABC):
         :param other: The other bit sequence.
         :return: True, if other is contained in self, False if not.
         """
-        pass
 
     @abstractmethod
     def bit_count(self) -> int:
         """Returns the number of set bits in the bit sequence."""
-        pass
 
     @abstractmethod
     def increase_represented_integer(self, number: int) -> None:
         """
         Increase the integer represented by the bit sequence by the given number.
         """
-        pass
 
     @abstractmethod
     def get_represented_integer(self) -> int:
@@ -310,7 +291,6 @@ class BitSequence(ABC):
         Returns the integer represented by this bit sequence.
         :return: The integer represented by this bit sequence.
         """
-        pass
 
     class SetBitsIterator(ABC, Iterator[int]):
         """
@@ -323,7 +303,6 @@ class BitSequence(ABC):
             """
             :param bit_sequence: The bit sequence to iterate.
             """
-            pass
 
         def __iter__(self):
             return self
@@ -350,7 +329,6 @@ class BitSequence(ABC):
             """
             :param bit_sequence: The bit_sequence to iterate.
             """
-            pass
 
         def __iter__(self):
             return self
@@ -383,7 +361,6 @@ class UncompressedBitSequence(BitSequence, ABC):
         :param operation: A callable taking two operands and returning the result of the bitwise operation.
         :return: The result of the operation as an uncompressed bit-sequence.
         """
-        pass
 
     def __and__(self, other: UncompressedBitSequence) -> UncompressedBitSequence:
         """See :meth:`BitSequence.__and__`."""
@@ -405,7 +382,6 @@ class UncompressedBitSequence(BitSequence, ABC):
 
         Uncompressed variant: the returned bit-sequence is an :class:`UncompressedBitSequence`.
         """
-        pass
 
 
 class CompressedBitSequence(BitSequence, ABC):
@@ -423,7 +399,6 @@ class CompressedBitSequence(BitSequence, ABC):
         :param bit_sequence: The bit sequence to compress.
         :return: The compressed bit sequence.
         """
-        pass
 
     @staticmethod
     def create_all_false_bit_sequence(
@@ -433,4 +408,3 @@ class CompressedBitSequence(BitSequence, ABC):
 
         Compressed variant: the returned bit-sequence is a :class:`CompressedBitSequence`.
         """
-        pass

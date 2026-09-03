@@ -187,7 +187,6 @@ class IndexedTransactionalKeyValueStore(TransactionalKeyValueStore, IndexedACIDS
         # iterate over all wip entries of this TA, i.e. all objects that were updated by this TA but not yet committed:
         # -> for each object_id in the write set of this TA:
         object_id: str
-        kv_entry: VersionedKeyValueStore.KVStoreEntry
         for object_id in self.TD[TA_id].write_set:
             # get the wip entry of this object_id:
             wip_entry: VersionedKeyValueStore.UpdateEntry = self.key_value_store[

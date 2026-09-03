@@ -50,12 +50,10 @@ class RailElement(ABC):
     def find_reachable_platform(self) -> Platform:
         """Finds a reachable platform, i.e. this is the platform we end up at if we follow the current positions of
         the gates recursively."""
-        pass
 
     @abstractmethod
     def show(self, rec_depth: int = 0):
         """Shows the content of this element."""
-        pass
 
 
 class Gate(RailElement):

@@ -66,7 +66,6 @@ class Relation(Operator):
         Leaf/source operator: no child to close.
         """
         # leaf/source operator: no child operator to close
-        pass
 
     def compile(self, emit):
         """See :meth:`Operator.compile`.
@@ -130,7 +129,6 @@ class Scan(Operator):
         Leaf/source operator: no child to close.
         """
         # leaf/source operator: no child operator to close
-        pass
 
     def compile(self, emit):
         """See :meth:`Operator.compile`.
@@ -182,7 +180,7 @@ class Filter(Operator):
         Pushes the tuple to the parent only if the predicate evaluates to true.
         """
         # check predicate for given tuple
-        if eval(self.pred, dict(), tup):
+        if eval(self.pred, {}, tup):
             # push current tuple to parent operator
             self.parent.interpret_next(tup)
 
@@ -241,7 +239,7 @@ class SHJ(Operator):
         Builds the hash table from the left child, then probes it with the right child.
         """
         # create fresh hash table
-        self.ht = dict()
+        self.ht = {}
         # set to build phase
         self.is_build_phase = True
         # open build child operator
@@ -331,7 +329,7 @@ class SemiJ(Operator):
         Builds the hash table from the RIGHT child, then probes it with the LEFT child.
         """
         # create fresh hash table
-        self.ht = dict()
+        self.ht = {}
         # set to build phase
         self.is_build_phase = True
         # open RIGHT child as build operator
@@ -456,7 +454,7 @@ class Collect(Operator):
         Resets the result list and opens the single child operator.
         """
         # create fresh result list
-        self.result = list()
+        self.result = []
         # open child operator
         self.children[0].interpret_open()
 

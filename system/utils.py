@@ -47,7 +47,6 @@ class Drawable(ABC):
         @param x_offset: The x-offset to apply to the drawing.
         @param y_offset: The y-offset to apply to the drawing.
         """
-        pass
 
 
 @dataclass
@@ -109,17 +108,14 @@ class Descriptor(Drawable):
     def split_into_sub_descriptors(self) -> Iterator[Descriptor]:
         """Split this Descriptor into four sub-descriptors. Each must be contained in self, i.e. if you call
         self.contains() with any child descriptor, it must return True."""
-        pass
 
     @abstractmethod
     def contains[Key](self, key: Key) -> bool:
         """Return whether the given key is contained in this Descriptor."""
-        pass
 
     @abstractmethod
     def center[T](self) -> T:
         """Return the center of this Descriptor."""
-        pass
 
 
 class Triangle(Descriptor):

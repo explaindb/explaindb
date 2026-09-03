@@ -33,7 +33,6 @@ class Clause(ABC):
         :param _object: The object (row) whose attributes the predicate is tested against.
         :return: ``True`` if the object satisfies the clause, ``False`` otherwise.
         """
-        pass
 
 
 class WHERE_Clause(Clause):

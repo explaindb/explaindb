@@ -100,7 +100,6 @@ class PlanTable(ABC):
         :param entry: The entry as a problem.
         :param cost: The cost to be inserted.
         """
-        pass
 
     @abstractmethod
     def _update_join_entry(self, left: Problem, right: Problem, costs: int):
@@ -110,7 +109,6 @@ class PlanTable(ABC):
         :param right: The right problem.
         :param costs: The new costs.
         """
-        pass
 
     @abstractmethod
     def __contains__(self, problem: Problem) -> bool:
@@ -119,7 +117,6 @@ class PlanTable(ABC):
         :param problem: The problem to check
         :return: True, if the problem is contained, False if not
         """
-        pass
 
     @abstractmethod
     def get_costs_for_problem(self, problem: Problem):
@@ -128,7 +125,6 @@ class PlanTable(ABC):
         :param problem: The problem.
         :return: The costs for the problem.
         """
-        pass
 
     @abstractmethod
     def get_plan_for_problem(self, problem: Problem):
@@ -137,4 +133,3 @@ class PlanTable(ABC):
         :param problem: The problem.
         :return: The plan for the problem.
         """
-        pass

@@ -76,7 +76,7 @@ class MyTest(unittest.TestCase):
         return Collect(join)
 
     def test_codegen_results_end_to_end(self):
-        for i in range(num_runs):
+        for _ in range(num_runs):
             self.create_data()
             query_plan = self.create_qep()
 
@@ -85,7 +85,7 @@ class MyTest(unittest.TestCase):
 
             code = query_plan.compile()
             loc = {"result": None}
-            exec(code, dict(), loc)
+            exec(code, {}, loc)
             res2 = loc["result"]
 
             self.assertListEqual(res1, res2)

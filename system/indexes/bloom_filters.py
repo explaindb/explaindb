@@ -47,7 +47,6 @@ class BloomFilter:
             :param number_of_hash_functions: The number of hash functions to be evaluated.
             :param number_of_available_bits: The number of bits in the bloom filter.
             """
-            pass
 
         def __iter__(self):
             return self

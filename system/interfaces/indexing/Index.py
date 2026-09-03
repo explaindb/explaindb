@@ -47,8 +47,6 @@ class PutInfo:
     split occurred or which node was affected.
     """
 
-    pass
-
 
 class Index[Key, Value](ABC):
     """An API representing an index."""
@@ -56,7 +54,6 @@ class Index[Key, Value](ABC):
     @abstractmethod
     def size(self) -> int:
         """Returns the number of keys mapped by this index."""
-        pass
 
     @abstractmethod
     def put(self, key: Key, value: Value) -> None | PutInfo:
@@ -70,8 +67,6 @@ class Index[Key, Value](ABC):
         @return: None or a PutInfo object
         """
 
-        pass
-
     @abstractmethod
     def delete(self, key: Key, value: Value = None) -> None:
         """Deletes the key->value mapping from the index.
@@ -81,8 +76,6 @@ class Index[Key, Value](ABC):
 
         """
 
-        pass
-
     @abstractmethod
     def flush(self, key: Key | None = None) -> None:
         """Persists all changes, i.e. any changes done so far in volatile memory only are now made durable.
@@ -90,7 +83,6 @@ class Index[Key, Value](ABC):
         @param key: if given, only the key/value pair is flushed, otherwise all key/value-mappings are
         flushed.
         """
-        pass
 
     def bulkload(self, input_data: Iterator[tuple[Key, Value]]) -> None:
         """Bulkloads the given list of key->value mappings into the index.
@@ -108,8 +100,6 @@ class Index[Key, Value](ABC):
     def show(self) -> None:
         """Shows the content of the index."""
 
-        pass
-
 
 class PointQueryMixIn[Key, Value](ABC):
     """An interface mixing in point queries."""
@@ -122,7 +112,6 @@ class PointQueryMixIn[Key, Value](ABC):
         @param key: the key
         @return: an iterator of the values associated with the given key
         """
-        pass
 
 
 class RangeQueryMixIn[Key, Value](ABC):
@@ -138,7 +127,6 @@ class RangeQueryMixIn[Key, Value](ABC):
 
         @return: an iterator of values
         """
-        pass
 
 
 class PredicateQueryMixIn[Key, Value](ABC):
@@ -153,13 +141,9 @@ class PredicateQueryMixIn[Key, Value](ABC):
         @return: an iterator of values
         """
 
-        pass
-
 
 class KeyValueStore[Key, Value](Index[Key, Value], PointQueryMixIn[Key, Value], ABC):
     """An interface for an index additionally supporting point queries."""
-
-    pass
 
 
 class AbstractBTree[Key, Value](
@@ -168,5 +152,3 @@ class AbstractBTree[Key, Value](
     ABC,
 ):
     """An abstract class representing a B-Tree, i.e. an index supporting both point and range queries."""
-
-    pass

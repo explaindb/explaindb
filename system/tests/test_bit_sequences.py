@@ -295,7 +295,7 @@ class BitSequenceTests(unittest.TestCase):
                 test_bits_overflow_merged_fills.append(bit)
 
             (
-                bit_sequence_overflow_merged_fills,
+                _,
                 compressed_bit_sequence,
             ) = self._create_bit_sequence_and_compressed_bit_sequence(
                 bit_sequence_type, test_bits_overflow_merged_fills, 101

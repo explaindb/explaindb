@@ -48,7 +48,7 @@ class StandardPlanTable(PlanTable):
         :param cardinality_table: The cardinality table used for estimations.
         """
         # A mapping from each problem to a tuple storing the costs and plan for the problem
-        self.entries: dict[Problem, tuple] = dict()
+        self.entries: dict[Problem, tuple] = {}
         self._create_base_entries(join_graph, cost_function, cardinality_table)
 
     def _create_base_entry(self, entry: Problem, cost: int):
@@ -102,7 +102,7 @@ class SizeBasedPlanTable(PlanTable):
         # Store problems ordered by their size
         # Sizes of k can then be accessed via the index k-1
         self.entries: list[dict[Problem, tuple]] = [
-            dict() for _ in join_graph.adjacency_matrix
+            {} for _ in join_graph.adjacency_matrix
         ]
         self.size_lists = [
             [] for _ in join_graph.adjacency_matrix

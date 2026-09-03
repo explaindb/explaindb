@@ -22,7 +22,6 @@
 
 from typing import Iterator
 
-import numpy as np
 
 from system.interfaces.queues import ReadWriteQueue
 
@@ -75,4 +74,3 @@ class ListQueue[ObjectType](ReadWriteQueue[ObjectType], Iterator):
 
     def close(self) -> None:
         """Closes the queue. Does not do anything for this implementation."""
-        pass

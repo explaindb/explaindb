@@ -87,8 +87,6 @@ class ChristmasTree[Key, Value](RadixTrie[Key, Value]):
             # append to internal buffer:
             self.buffer.append((key, value))
 
-            return None
-
         def get(self, key: Key, level: int = 0) -> Iterator[Value]:
             """See :meth:`PointQueryMixIn.get`.
 

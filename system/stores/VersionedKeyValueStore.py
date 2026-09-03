@@ -66,8 +66,6 @@ class VersionedKeyValueStore(KeyValueStore[str, object]):
         """A class representing a delete version entry in the store, i.e. just the start_validity information,
         i.e. since when the object is considered deleted."""
 
-        pass
-
     # TODO:: could refactor KVStoreEntry.wip with a type like this:
     # class WIPEntry:
 
@@ -169,7 +167,6 @@ class VersionedKeyValueStore(KeyValueStore[str, object]):
 
         No-op: this store keeps its data in volatile memory only and is not backed by persistent storage.
         """
-        pass
 
     def show(self) -> None:
         """See :meth:`Index.show`.

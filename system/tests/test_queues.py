@@ -21,7 +21,6 @@
 """Tests for the queue implementations."""
 
 import copy
-import os
 
 from faker import Faker
 

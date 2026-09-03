@@ -138,7 +138,6 @@ class JoinGraphFactory(ABC):
         :param num_nodes: The number of relations in the join graph.
         :return: The constructed join graph.
         """
-        pass
 
 
 class ChainQueryFactory(JoinGraphFactory):

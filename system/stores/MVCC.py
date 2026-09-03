@@ -40,8 +40,6 @@ from system.stores.VersionedKeyValueStore import HashableDict, VersionedKeyValue
 class TransactionAbortedException(Exception):
     """An exception that is raised when a transaction is aborted by the store."""
 
-    pass
-
 
 class JournalEntry(ABC, BaseModel):
     """An abstract class for journal entries."""
@@ -54,8 +52,6 @@ class JournalEntry(ABC, BaseModel):
 class Begin(JournalEntry):
     """A journal entry marking the start of a transaction."""
 
-    pass
-
 
 class Commit(JournalEntry):
     """A journal entry marking the commit of a transaction, recording its commit timestamp."""
@@ -66,8 +62,6 @@ class Commit(JournalEntry):
 
 class Abort(JournalEntry):
     """A journal entry marking the abort of a transaction."""
-
-    pass
 
 
 class Update[Key, Value](JournalEntry):
@@ -255,9 +249,8 @@ class TransactionalKeyValueStore(VersionedKeyValueStore, ACIDStore):
         # the following can be quite expensive to execute without indexes:
         # a better method would be to delegate to the query optimizer and make use of indexes
         # loop over all entries from tuples touched in the kv-store:
-        object_id: str
         entry: VersionedKeyValueStore.KVStoreEntry
-        for object_id, entry in self.key_value_store.items():
+        for _, entry in self.key_value_store.items():
             # get the most recent committed version of the object available (rather than the version seen under
             # snapshot isolation), i.e. the last element in the committed list:
             most_recent_entry: VersionedKeyValueStore.UpdateEntry = entry.committed[-1]
@@ -468,7 +461,7 @@ class TransactionalKeyValueStore(VersionedKeyValueStore, ACIDStore):
     def show_transaction_dictionary(self) -> None:
         """Shows the transaction dictionary (self.TD)."""
 
-        print(f"Transaction dictionary:")
+        print("Transaction dictionary:")
 
         pp = pprint.PrettyPrinter(depth=3)
         pp.pprint(self.TD)
@@ -599,7 +592,7 @@ class TransactionalKeyValueStore(VersionedKeyValueStore, ACIDStore):
                 where: Clause = rc["where_clause"]
                 checksum: int = rc["checksum"]
 
-                ret_list, new_checksum = self._read_snapshot(
+                _, new_checksum = self._read_snapshot(
                     commit_timestamp_for_this_TA, where=where
                 )
 

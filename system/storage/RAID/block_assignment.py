@@ -63,7 +63,6 @@ class RAID_Level(ABC):
         @return: A list of BlockPositionInformation instances containing the disk ID where to find this logical block,
         the internal block ID on that disk, as well as a flag indicating if the block is a parity block.
         """
-        pass
 
 
 class RAID_0(RAID_Level):
@@ -218,7 +217,7 @@ def compute_assignment(
     # matrix init:
     for disk in range(0, number_of_disks):
         for row in range(0, rows):
-            physical_disk_blocks[disk][row] = list()
+            physical_disk_blocks[disk][row] = []
 
     # maximum logical block ID:
     logical_block_ID_max: int = rows * number_of_disks

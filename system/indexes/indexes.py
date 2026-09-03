@@ -85,7 +85,6 @@ class PythonDictionaryIndex[Key, Value](KeyValueStore[Key, Value]):
             raise KeyError(f"Key {key} not found")
 
         # no action needed, as we are using a Python dictionary which is not backed by persistent storage
-        pass
 
     def show(self) -> None:
         """See :meth:`Index.show`.
@@ -102,5 +101,4 @@ class PythonDictionaryIndex[Key, Value](KeyValueStore[Key, Value]):
         if key not in self.index:
             raise KeyError(f"Key {key} not found")
 
-        for el in self.index[key]:
-            yield el
+        yield from self.index[key]

@@ -38,21 +38,18 @@ class ACIDStore(ABC):
         """Starts a new transaction and returns its transaction id.
         Also adds a new entry with metadata for this transaction in the transaction dictionary.
         """
-        pass
 
     def commit_transaction(self, TA_id: int) -> None:
         """Commit a transaction.
 
         @param TA_id: The id of the transaction to commit
         """
-        pass
 
     def abort_transaction(self, TA_id: int) -> None:
         """Abort a transaction.
 
         @param TA_id: The id of the transaction to abort
         """
-        pass
 
     def update_object(self, object_id: str, updated_object: object, TA_id: int) -> None:
         """Update an object.
@@ -61,7 +58,6 @@ class ACIDStore(ABC):
         @param updated_object: The updated object
         @param TA_id: The id of the transaction to update the object in
         """
-        pass
 
     def delete_object(self, object_id: str, TA_id: int) -> None:
         """Delete an object.
@@ -69,7 +65,6 @@ class ACIDStore(ABC):
         @param object_id: The id of the object to delete
         @param TA_id: The id of the transaction to delete the object in
         """
-        pass
 
 
 class IndexedACIDStore(ACIDStore, ABC):
@@ -88,7 +83,6 @@ class IndexedACIDStore(ACIDStore, ABC):
 
         @param index_name: the name of the index to drop
         """
-        pass
 
     def get_suitable_indexes(
         self, attribute: str, operator: str
@@ -103,5 +97,3 @@ class IndexedACIDStore(ACIDStore, ABC):
 
 class QEPQueryableIndexedACIDStore(QEPQueryable, IndexedACIDStore, ABC):
     """Interface for a QEP-queryable indexed ACID store"""
-
-    pass

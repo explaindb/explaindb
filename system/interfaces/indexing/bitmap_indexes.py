@@ -54,7 +54,7 @@ class BitmapIndex[Key, Value](
         self.position_to_value: list[Value] = []
 
         # Maps each value to its position in the bit sequences
-        self.value_to_position: dict[Value, int] = dict()
+        self.value_to_position: dict[Value, int] = {}
 
         # The compression type to use during bulkloading, if desired
         if compression_type:
@@ -156,14 +156,12 @@ class BitmapIndex[Key, Value](
         bit sequence.
         :param number_of_bits: The new number of bits to represent.
         """
-        pass
 
     @abstractmethod
     def _compress_bit_sequences(self) -> None:
         """
         Compresses all bit sequences stored in the bitmap index.
         """
-        pass
 
     @abstractmethod
     def __getitem__(self, key: Key) -> BitSequence:
@@ -172,7 +170,6 @@ class BitmapIndex[Key, Value](
         :param key: The key to retrieve the bit_sequence from.
         :return: The bit_sequence stored at the given key.
         """
-        pass
 
     @abstractmethod
     def __contains__(self, key: Key) -> bool:
@@ -181,14 +178,12 @@ class BitmapIndex[Key, Value](
         :param key: The key to check.
         :return: True, if it is contained, False otherwise.
         """
-        pass
 
     def _create_empty_bit_sequence_for_key(self, key: Key) -> None:
         """
         Creates an empty bit_sequence for the given key.
         :param key: The key.
         """
-        pass
 
     def _create_empty_bit_sequence(
         self, use_compression_if_possible: bool = False
@@ -245,7 +240,6 @@ class BitmapIndex[Key, Value](
         Return the number of stored bits in this bitmap index.
         :return: The number of stored bits.
         """
-        pass
 
     @abstractmethod
     def get_equal(self, key: Key) -> BitSequence:
@@ -253,7 +247,6 @@ class BitmapIndex[Key, Value](
         Get a bit_sequence for all values that are equal the given key.
         :param key: The key
         """
-        pass
 
     def get_smaller(self, key: Key) -> BitSequence:
         """
@@ -271,7 +264,6 @@ class BitmapIndex[Key, Value](
         :param key: The key to be sorted.
         :return:
         """
-        pass
 
     def get_smaller_or_equal(self, key: Key) -> BitSequence:
         """
@@ -288,7 +280,6 @@ class BitmapIndex[Key, Value](
         :param key: The key to be sorted.
         :return:
         """
-        pass
 
     def get_greater(self, key: Key) -> BitSequence:
         """
@@ -310,7 +301,7 @@ class BitmapIndex[Key, Value](
         :return: True, if the key can be sorted, False if not.
         """
         try:
-            test = key < key
+            _ = key < key
             return True
         except TypeError:
             return False

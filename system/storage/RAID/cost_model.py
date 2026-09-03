@@ -55,24 +55,20 @@ class SubSystem(ABC):
     @abstractmethod
     def get_sequential_read_performance(self) -> int:
         """Returns the sequential read performance of the subsystem in MB/s."""
-        pass
 
     @abstractmethod
     def get_sequential_write_performance(self) -> int:
         """Returns the sequential write performance of the subsystem in MB/s."""
-        pass
 
     @abstractmethod
     def get_read_IO_performance(self) -> int:
         """Returns the read-IOPs (random read I/O operations per second) of the subsystem. Assumes uniform distribution
         of read requests to the different subsystems."""
-        pass
 
     @abstractmethod
     def get_write_IO_performance(self) -> int:
         """Returns the write-IOPs (random write I/O operations per second) of the subsystem. Assumes uniform
         distribution of write requests to the different subsystems."""
-        pass
 
     @abstractmethod
     def get_storage_blow_up(self) -> float:
@@ -80,7 +76,6 @@ class SubSystem(ABC):
         if we return 1.1 this means we add 10% more storage space to the original storage space, 1.0 means no extra
         storage space is added.
         """
-        pass
 
     @abstractmethod
     def get_resilience_scenario(
@@ -88,7 +83,6 @@ class SubSystem(ABC):
     ) -> tuple[ResilienceScenario, Iterator[SubSystem] | None] | None:
         """Returns the scenario this SubSystem is resilient against, i.e. this scenario may happen, still
         this subsystem instance can recover all data."""
-        pass
 
     def get_resilience_scenarios(
         self, rec_depth: int = 0
@@ -247,7 +241,6 @@ class RAID_0(SubSystemArray):
         self,
     ) -> tuple[ResilienceScenario, Iterator[SubSystem] | None]:
         """RAID 0 is not resilient against any failure."""
-        pass
 
 
 class RAID_1(SubSystemArray):

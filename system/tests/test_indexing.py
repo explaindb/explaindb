@@ -237,7 +237,7 @@ class BPlusTreeTest(unittest.TestCase):
         )  # keys without duplicates
         if gen_sorted:
             keys.sort()
-        values = [i for i in range(num_keys)]
+        values = list(range(num_keys))
         btree: BPlusTree[int, int] = BPlusTree[int, int]()
         for key, value in zip(keys, values):
             btree.put(key, value)
@@ -266,7 +266,7 @@ class BPlusTreeTest(unittest.TestCase):
                 )
 
                 # a dict for comparing results:
-                d: dict[int, int] = dict()
+                d: dict[int, int] = {}
                 for _ in range(1000):
                     next_int: int = random.randint(1, 400)
                     next_key: int = next_int
@@ -383,10 +383,8 @@ class RadixTrieTest(unittest.TestCase):
 
                 # nodes expected to be created by the trie:
                 inner_nodes: int = sum(
-                    [
-                        children_per_inner_node**level
-                        for level in range(number_of_inner_node_levels)
-                    ]
+                    children_per_inner_node**level
+                    for level in range(number_of_inner_node_levels)
                 )
                 leaves: int = children_per_inner_node**number_of_inner_node_levels
                 total_nodes: int = inner_nodes + leaves

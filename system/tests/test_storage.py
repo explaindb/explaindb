@@ -361,7 +361,6 @@ class RAIDPerformanceTest(AbstractUnitTest):
 
         for rsi in resilience_scenarios_infos:
             rec_depth: int = rsi[0]
-            sub_system: SubSystem = rsi[1]
             resilience_scenario: ResilienceScenario = rsi[2]
             if rec_depth == 1:
                 self.assertTrue(
@@ -379,7 +378,6 @@ class RAIDPerformanceTest(AbstractUnitTest):
     def test_RAID_5005105(self):
         # RAID 5+0+0+5+...: RAID 5 arrays in a RAID 0 subsystem (i.e. bottom layer is RAID 5)
         dev: Device = Device(100, 100, 1000, 1000)
-        scale_factor: int
         number_of_subsystems: int = 3
         array: SubSystem = RAID_5(
             [

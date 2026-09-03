@@ -23,8 +23,6 @@
 import copy
 import logging
 import math
-import os
-import tempfile
 
 from faker import Faker
 
@@ -32,13 +30,11 @@ from system.data_classes import Person
 import unittest
 
 from system.interfaces.queues import QueueFactory
-from system.queues.list_queues import ListQueue
 from system.queues.queue_factories import ExternalQueueFactory, ListQueueFactory
 from system.sorting import (
     RunGenerator,
     SingleStreamMerge,
     ExternalMergeSort,
-    RunMetadata,
     RunGenerationResult,
 )
 
@@ -92,10 +88,8 @@ class MergeSortingTest(unittest.TestCase):
                     run_generation_result.elements_written, number_of_tuples
                 )
                 run_sizes_sum = sum(
-                    [
-                        run_metadata.size
-                        for run_metadata in run_generation_result.runs_metadata
-                    ]
+                    run_metadata.size
+                    for run_metadata in run_generation_result.runs_metadata
                 )
                 self.assertEqual(run_sizes_sum, number_of_tuples)
 

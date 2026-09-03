@@ -46,7 +46,7 @@ class IntegerBitSequence(UncompressedBitSequence):
             and represented_number_of_bits < number.bit_length()
         ):
             raise ValueError(
-                f"Number of bits can not be smaller than the passed bit-sequence number"
+                "Number of bits can not be smaller than the passed bit-sequence number"
             )
         super().__init__(
             represented_number_of_bits
@@ -295,7 +295,7 @@ class BitListBitSequence(UncompressedBitSequence):
             represented_number_of_bits
             and represented_number_of_bits != bits_in_passed_list
         ):
-            raise ValueError(f"Number of bits do not match with the passed bit list!")
+            raise ValueError("Number of bits do not match with the passed bit list!")
         super().__init__(bits_in_passed_list)
 
     def __eq__(self, other: BitListBitSequence) -> bool:

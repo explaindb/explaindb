@@ -55,7 +55,7 @@ class SortedBitmapIndex[Key, Value](BitmapIndex[Key, Value], ABC):
         self.key_bit_sequence_list: list[tuple[Key, BitSequence]] = []
 
         # Maps key values to positions in the bit_sequence list
-        self.key_to_index: dict[Key, int] = dict()
+        self.key_to_index: dict[Key, int] = {}
 
     def _create_empty_bit_sequence_for_key(self, key: Key) -> None:
         """See :meth:`BitmapIndex._create_empty_bit_sequence_for_key`.
@@ -101,7 +101,7 @@ class SortedBitmapIndex[Key, Value](BitmapIndex[Key, Value], ABC):
 
         # Check whether key is sortable
         if not BitmapIndex.key_is_sortable(self.key_bit_sequence_list[0][0]):
-            raise ValueError(f"The key is not sortable!")
+            raise ValueError("The key is not sortable!")
 
         # Sort list of bit sequences
         self.key_bit_sequence_list.sort(key=lambda x: x[0])  # Sort by key
@@ -136,10 +136,8 @@ class SortedBitmapIndex[Key, Value](BitmapIndex[Key, Value], ABC):
         Sums the number of bits over every bit sequence in the list.
         """
         return sum(
-            [
-                bit_sequence.get_number_of_bits()
-                for (_, bit_sequence) in self.key_bit_sequence_list
-            ]
+            bit_sequence.get_number_of_bits()
+            for (_, bit_sequence) in self.key_bit_sequence_list
         )
 
     def __contains__(self, key: Key) -> bool:
@@ -166,7 +164,7 @@ class UnsortedBitmapIndex[Key, Value](BitmapIndex[Key, Value], ABC):
         """
         super().__init__(bit_sequence_type, compression_type)
         # Maps key values to bit sequences
-        self.bit_sequence_map: dict[Key, BitSequence] = dict()
+        self.bit_sequence_map: dict[Key, BitSequence] = {}
 
     def size(self) -> int:
         """See :meth:`Index.size`.
@@ -202,10 +200,8 @@ class UnsortedBitmapIndex[Key, Value](BitmapIndex[Key, Value], ABC):
         Sums the number of bits over every bit sequence in the map.
         """
         return sum(
-            [
-                bit_sequence.get_number_of_bits()
-                for bit_sequence in self.bit_sequence_map.values()
-            ]
+            bit_sequence.get_number_of_bits()
+            for bit_sequence in self.bit_sequence_map.values()
         )
 
     def _create_empty_bit_sequence_for_key(self, key: Key) -> None:

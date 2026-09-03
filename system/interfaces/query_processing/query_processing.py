@@ -35,7 +35,6 @@ class QEP(ABC):
     @abstractmethod
     def __init__(self):
         """Initialize the query execution plan."""
-        pass
 
 
 class QEPQueryable(ABC):
@@ -51,7 +50,6 @@ class QEPQueryable(ABC):
         as a separate transaction, i.e. it will automatically be wrapped into a transaction.
         @return: The result of the query as an Iterator of objects. The objects can be of any type.
         """
-        pass
 
 
 class QueryableComponent(ABC):
@@ -71,7 +69,6 @@ class QueryableComponent(ABC):
         as a separate transaction, i.e. it will automatically be wrapped into a transaction.
         @return: The result of the query as an iterator of objects. The objects can be of any type.
         """
-        pass
 
     def prepare_query(self, query: str, parameters: list[str]) -> int:
         """Prepare a query to be executed multiple times with different parameters.
@@ -82,7 +79,6 @@ class QueryableComponent(ABC):
         @return: The id of the prepared query. This id can be used to execute the query multiple times with different
         parameters using method :func `execute_prepared_query`.
         """
-        pass
 
     @abstractmethod
     def execute_prepared_query(
@@ -96,7 +92,6 @@ class QueryableComponent(ABC):
         as a separate transaction, i.e. it will automatically be wrapped into a transaction.
         @return: The result of the query as an iterator of objects. The objects can be of any type.
         """
-        pass
 
     @dataclass
     class QueryEntry:
@@ -142,7 +137,6 @@ class QueryOptimizer(ABC):
         @param query: The query to create a plan for
         @return: The QEP
         """
-        pass
 
     @abstractmethod
     def prepare_query(self, query: str, parameters: list[str]) -> QEP:
@@ -151,7 +145,6 @@ class QueryOptimizer(ABC):
         @param parameters: The list of parameters the query has.
         @return: The query execution plan (QEP).
         """
-        pass
 
     @abstractmethod
     def bind_parameters(
@@ -163,4 +156,3 @@ class QueryOptimizer(ABC):
         @param parameters: The parameters to bind
         @return: The QEP with the parameters bound
         """
-        pass

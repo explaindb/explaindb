@@ -22,7 +22,6 @@
 
 import pickle
 import tempfile
-from typing import get_origin, get_args
 
 from system.interfaces.queues import (
     ReadWriteQueue,
