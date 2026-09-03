@@ -1,0 +1,10 @@
+# Pylint configuration, kept in sync with black (the formatter of record).
+#
+# black governs line length for code and deliberately does not wrap docstrings,
+# comments, or string literals. Enforcing pylint's own line-length check on top
+# of black therefore only flags lines black already considers correctly
+# formatted, so line-too-long (C0301) is disabled here. This is the alignment
+# recommended by the black documentation. Run `black .` to manage formatting.
+
+[MESSAGES CONTROL]
+disable=line-too-long
