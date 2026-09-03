@@ -1,0 +1,18 @@
+# Configuration for nbqa (https://github.com/nbQA-dev/nbQA), used by the CI
+# `stats_and_linting` job to run pylint over the notebooks. The .py sources use
+# .pylintrc; here we additionally silence checks that fire on patterns inherent
+# to notebooks rather than on real defects:
+#   - imports are introduced per cell, where first needed (wrong-import-*,
+#     ungrouped-imports, multiple-imports, reimported);
+#   - cells share one global namespace (redefined-outer-name);
+#   - notebooks document themselves via markdown, not docstrings
+#     (missing-*-docstring);
+#   - a trailing expression in a cell is how Jupyter displays a value
+#     (pointless-statement);
+#   - short exploratory/teaching names and teaching wildcard imports
+#     (invalid-name, wildcard-import, unused-wildcard-import);
+#   - teaching notebooks legitimately repeat boilerplate setup (duplicate-code).
+[tool.nbqa.addopts]
+pylint = [
+    "--disable=wrong-import-position,wrong-import-order,ungrouped-imports,multiple-imports,reimported,redefined-outer-name,missing-module-docstring,missing-class-docstring,missing-function-docstring,pointless-statement,invalid-name,wildcard-import,unused-wildcard-import,duplicate-code",
+]
