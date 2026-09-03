@@ -61,26 +61,26 @@ CI_NODE_TOTAL: int = 3
 # accordingly.
 EXPECTED_PACKING: dict[int, list[str]] = {
     1: [
-        "Christmas Tree.ipynb",
+        "Christmas-Tree.ipynb",
         "B-tree.ipynb",
         "PlanEnumeration.ipynb",
-        "Result DB.ipynb",
-        "External Merge Sort.ipynb",
+        "Result-DB.ipynb",
+        "External-Merge-Sort.ipynb",
     ],
     2: [
-        "Recursive Model Index.ipynb",
-        "RAID Nesting Trade-offs.ipynb",
-        "Data Layout.ipynb",
-        "Bit Sequences in Pandas.ipynb",
-        "Z-Order Curve.ipynb",
+        "Recursive-Model-Index.ipynb",
+        "RAID-Nesting-Trade-offs.ipynb",
+        "Data-Layout.ipynb",
+        "Bit-Sequences-in-Pandas.ipynb",
+        "Z-Order-Curve.ipynb",
     ],
     3: [
-        "Bitmaps and Bloom Filters.ipynb",
+        "Bitmaps-and-Bloom-Filters.ipynb",
         "CodeGen.ipynb",
-        "Distributed Joins.ipynb",
+        "Distributed-Joins.ipynb",
         "Top-k.ipynb",
-        "Shared Scan.ipynb",
-        "Online Aggregation.ipynb",
+        "Shared-Scan.ipynb",
+        "Online-Aggregation.ipynb",
     ],
 }
 
@@ -131,14 +131,14 @@ class AssignNotebooksTest(unittest.TestCase):
         """Discovery yields bare names so ``notebook_weights.tsv`` keys match."""
         notebooks = self.module.discover_notebooks()
         self.assertEqual(len(notebooks), 16)
-        self.assertIn("Christmas Tree.ipynb", notebooks)
+        self.assertIn("Christmas-Tree.ipynb", notebooks)
         # Bare names, not paths -- otherwise weight lookup silently defaults.
         self.assertFalse(any("/" in name for name in notebooks))
 
         weights = self.module.load_weights(self.module.WEIGHTS_FILE)
         # A recorded weight must resolve through the real key, not the default.
-        self.assertEqual(weights["Christmas Tree.ipynb"], 7.7)
-        self.assertNotEqual(weights["Christmas Tree.ipynb"], self.module.DEFAULT_WEIGHT)
+        self.assertEqual(weights["Christmas-Tree.ipynb"], 7.7)
+        self.assertNotEqual(weights["Christmas-Tree.ipynb"], self.module.DEFAULT_WEIGHT)
 
     def test_printed_slice_covers_every_notebook(self) -> None:
         """The union of the three instances is every notebook, each assigned once."""
@@ -149,6 +149,16 @@ class AssignNotebooksTest(unittest.TestCase):
         # No notebook assigned twice and every one assigned exactly once.
         self.assertEqual(len(printed), 16)
         self.assertEqual(set(printed), set(self.module.discover_notebooks()))
+
+    def test_weights_cover_exactly_the_notebooks(self) -> None:
+        """Every notebook has a recorded weight and every weight names a real notebook.
+
+        Guards against a stale ``notebook_weights.tsv`` key silently falling back
+        to ``DEFAULT_WEIGHT`` -- invisible to the frozen packing when the stale
+        notebook's real weight happens to equal the default.
+        """
+        weights = self.module.load_weights(self.module.WEIGHTS_FILE)
+        self.assertEqual(set(weights), set(self.module.discover_notebooks()))
 
     def test_packing_matches_frozen_baseline(self) -> None:
         """The weight-driven packing reproduces the frozen assignment exactly."""

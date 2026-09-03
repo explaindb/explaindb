@@ -9,7 +9,7 @@ with a `.broken` suffix so the CI `*.ipynb` glob (see `.ci/assign_notebooks.py`,
 by the `ipynb_test` job) and `black --check` skip it. Fix the underlying issue, then rename the file
 back to `.ipynb`.
 
-_None currently._ (`Bitmaps and Bloom Filters.ipynb` was fixed — the WAH iterator no longer recurses
+_None currently._ (`Bitmaps-and-Bloom-Filters.ipynb` was fixed — the WAH iterator no longer recurses
 per 0-fill word; see the regression test `test_iterating_sparse_wah_does_not_overflow_recursion`.)
 
 ## CI / tooling debt
