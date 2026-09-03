@@ -316,6 +316,10 @@ class BitSequence(ABC):
         Returns an iterator to iterate through set bits, from the least significant bit to the most significant bit.
         :return: An iterator to iterate through all set bits.
         """
+        # `self` is always a concrete BitSequence subclass, and every subclass
+        # overrides SetBitsIterator with a concrete nested class, so this never
+        # instantiates the abstract base iterator.
+        # pylint: disable-next=abstract-class-instantiated
         return self.SetBitsIterator(self)
 
     class SetBitsReverseIterator(ABC, Iterator[int]):
@@ -343,6 +347,9 @@ class BitSequence(ABC):
         most significant bit to the least significant bit.
         :return: An iterator to iterate through all set bits.
         """
+        # See __iter__: the concrete subclass always provides a concrete
+        # SetBitsReverseIterator, so the abstract base is never instantiated.
+        # pylint: disable-next=abstract-class-instantiated
         return self.SetBitsReverseIterator(self)
 
 

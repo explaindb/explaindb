@@ -114,11 +114,11 @@ class IndexedTransactionalKeyValueStore(TransactionalKeyValueStore, IndexedACIDS
         superset of matches that still has to be post-filtered.
         """
         if index_name in self.indexes_by_name:
-            raise Exception(f"index {index_name} already exists")
+            raise KeyError(f"index {index_name} already exists")
 
         # only equality indexes are supported at the moment:
         if operator not in ["="]:
-            raise Exception(f"operator {operator} not supported")
+            raise NotImplementedError(f"operator {operator} not supported")
 
         # an index (to start only a python dict) maps from an attribute value to the list of object_ids where there is
         # at least one version in the committed list or the wip-entry qualifying (not all have to match)
@@ -169,7 +169,7 @@ class IndexedTransactionalKeyValueStore(TransactionalKeyValueStore, IndexedACIDS
         name exists.
         """
         if index_name not in self.indexes_by_name:
-            raise Exception(f"index {index_name} does not exist")
+            raise KeyError(f"index {index_name} does not exist")
 
         entry: IndexedTransactionalKeyValueStore.IndexCatalogueEntry = (
             self.indexes_by_name[index_name]

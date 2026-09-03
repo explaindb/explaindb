@@ -160,7 +160,7 @@ class TransactionalKeyValueStore(VersionedKeyValueStore, ACIDStore):
         """
 
         if object_id not in self.key_value_store:
-            raise Exception(f"object {object_id} not found in the store")
+            raise KeyError(f"object {object_id} not found in the store")
 
         # check whether TA <TA_id> already has a wip entry for this object:
         if (
@@ -191,7 +191,7 @@ class TransactionalKeyValueStore(VersionedKeyValueStore, ACIDStore):
         )
 
         if len(committed_object_versions) == 0:
-            raise Exception("object {object_id} has no committed versions")
+            raise RuntimeError(f"object {object_id} has no committed versions")
 
         # post: those object versions are ordered by their start timestamp:
         # Note: entries must be ordered by their commit timestamp, NOT by their start timestamp
@@ -200,7 +200,7 @@ class TransactionalKeyValueStore(VersionedKeyValueStore, ACIDStore):
             >= committed_object_versions[i + 1].start_validity
             for i in range(len(committed_object_versions) - 1)
         ):
-            raise Exception(
+            raise RuntimeError(
                 "committed object versions are not ordered by their validity start"
             )
 
@@ -329,9 +329,9 @@ class TransactionalKeyValueStore(VersionedKeyValueStore, ACIDStore):
         """
 
         if TA_id not in self.TD:
-            raise Exception(f"transaction {TA_id} not found in the system")
+            raise KeyError(f"transaction {TA_id} not found in the system")
         if self.TD[TA_id].committed_timestamp is not None:
-            raise Exception(f"transaction {TA_id} committed already")
+            raise RuntimeError(f"transaction {TA_id} committed already")
 
         ret: list[tuple[str, object]]
         checksum: int
@@ -360,7 +360,7 @@ class TransactionalKeyValueStore(VersionedKeyValueStore, ACIDStore):
         """
 
         if self.TD[TA_id].committed_timestamp is not None:
-            raise Exception(f"transaction {TA_id} committed already")
+            raise RuntimeError(f"transaction {TA_id} committed already")
 
         assert TA_id in self.TD, f"transaction {TA_id} not found in the system"
 
@@ -426,7 +426,7 @@ class TransactionalKeyValueStore(VersionedKeyValueStore, ACIDStore):
         assert TA_id in self.TD, f"transaction {TA_id} not found in the system"
 
         if self.TD[TA_id].committed_timestamp is not None:
-            raise Exception(f"transaction {TA_id} committed already")
+            raise RuntimeError(f"transaction {TA_id} committed already")
 
         # check that there is no other ongoing version of this object in the system
         # by another transaction, i.e. no other writer on this object is allowed:
@@ -434,7 +434,7 @@ class TransactionalKeyValueStore(VersionedKeyValueStore, ACIDStore):
             self.key_value_store[object_id].wip is not None
             and self.key_value_store[object_id].wip.start_validity != TA_id
         ):
-            raise Exception(
+            raise RuntimeError(
                 f"another transaction is currently modifying object {object_id} already"
             )
 

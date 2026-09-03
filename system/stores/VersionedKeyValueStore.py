@@ -118,7 +118,7 @@ class VersionedKeyValueStore(KeyValueStore[str, object]):
         :class:`~system.stores.MVCC.TransactionalKeyValueStore` for those). Raises if the object_id already exists.
         """
         if object_id in self.key_value_store:
-            raise Exception(f"object {object_id} already exists in the store")
+            raise KeyError(f"object {object_id} already exists in the store")
 
         self.key_value_store[object_id] = VersionedKeyValueStore.KVStoreEntry(
             committed=[
@@ -137,7 +137,7 @@ class VersionedKeyValueStore(KeyValueStore[str, object]):
         """
 
         if object_id not in self.key_value_store:
-            raise Exception(f"object {object_id} not found in the store")
+            raise KeyError(f"object {object_id} not found in the store")
 
         # get the most recent committed version of the object available:
         # note: deleted entry not considered here
@@ -152,7 +152,7 @@ class VersionedKeyValueStore(KeyValueStore[str, object]):
         assert _object is None
 
         if object_id not in self.key_value_store:
-            raise Exception(f"object {object_id} not found in the store")
+            raise KeyError(f"object {object_id} not found in the store")
 
         # create a new entry for the kv store that marks the object as deleted:
         new_entry: VersionedKeyValueStore.DeleteEntry = (
