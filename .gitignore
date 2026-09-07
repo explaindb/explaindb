@@ -13,3 +13,8 @@
 codegen.py
 column.csv
 row.csv
+
+# Sphinx: build output and apidoc-generated stubs (regenerated on every build)
+docs/api/_build/
+docs/api/system*.rst
+docs/api/modules.rst

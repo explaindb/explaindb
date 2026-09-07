@@ -19,6 +19,22 @@ variables:
 stages:
   - prepare
   - test
+  - deploy
+
+# Shared build steps for the API documentation. Both the merge-request check
+# (docs_build) and the publish job (pages) run exactly the same build, so the
+# check validates precisely what would be published. sphinx-apidoc regenerates
+# the per-module stubs (--implicit-namespaces is required: `system` is a PEP 420
+# namespace package with no __init__.py); sphinx-build -W turns any warning --
+# an import failure, a dangling :meth: cross-reference, an unconverted Javadoc
+# tag -- into a hard error. Output goes to public/ as GitLab Pages expects.
+.build_docs:
+  script:
+    # --deploy fails the build if Pipfile.lock is out of sync with the Pipfile,
+    # so a stale lockfile is caught rather than silently ignored.
+    - pipenv install --deploy
+    - pipenv run sphinx-apidoc --implicit-namespaces --no-toc --force --separate -o docs/api system system/tests
+    - pipenv run sphinx-build -W -b html docs/api public
 
 # Detect merge requests that only touch Markdown files. If every file changed
 # against the target branch ends in `.md`, export DOCS_ONLY=true as a dotenv
@@ -143,3 +159,39 @@ stats_and_linting:
       - pylint_py.txt
       - pylint_ipynb.txt
   interruptible: true
+
+
+# Build the API documentation on merge requests as a pre-merge check only (no
+# preview is published). A broken import, dangling cross-reference, or
+# unconverted Javadoc tag fails the pipeline here, before the change reaches the
+# default branch where `pages` would publish it. Scoped to merge-request
+# pipelines: on the default branch the `pages` job already runs the same build.
+docs_build:
+  stage: test
+  tags:
+    - test
+  rules:
+    - if: $CI_PIPELINE_SOURCE == 'merge_request_event'
+  script:
+    # Skip when the merge request only changes Markdown (see detect-docs-only);
+    # the API site is generated from the .py sources, so Markdown-only changes
+    # cannot affect it.
+    - if [ "$DOCS_ONLY" = "true" ]; then echo "Only Markdown changed; skipping."; exit 0; fi
+    - !reference [.build_docs, script]
+  interruptible: true
+
+
+# Publish the API documentation to GitLab Pages from the default branch only.
+# Pages serves the `public/` artifact; access is restricted to project members
+# (pages_access_level=private on this project).
+pages:
+  stage: deploy
+  tags:
+    - test
+  rules:
+    - if: $CI_COMMIT_REF_NAME == $CI_DEFAULT_BRANCH
+  script:
+    - !reference [.build_docs, script]
+  artifacts:
+    paths:
+      - public

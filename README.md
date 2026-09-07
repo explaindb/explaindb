@@ -79,3 +79,20 @@ To deactivate the virtual environment, simply run:
     ```sh
     exit
     ```
+
+## API Documentation
+
+An HTML API reference is generated from the source docstrings with
+[Sphinx](https://www.sphinx-doc.org). On every push to the default branch the CI
+pipeline publishes it to GitLab Pages; the published site is reachable via the
+project's **Deploy → Pages** page and is restricted to project members.
+
+To build it locally:
+```sh
+pipenv install
+pipenv run sphinx-apidoc --implicit-namespaces --no-toc --force --separate -o docs/api system system/tests
+pipenv run sphinx-build -W -b html docs/api docs/api/_build
+```
+Then open `docs/api/_build/index.html`. The `sphinx-apidoc`-generated stubs and
+the `_build/` output are git-ignored; the CI check (`docs_build`, run on every
+merge request) builds with `-W` so any documentation warning fails the pipeline.
