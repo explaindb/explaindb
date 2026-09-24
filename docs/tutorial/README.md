@@ -16,7 +16,7 @@ Each section below groups related topics. For every topic you get:
 Read a topic here first, then open its notebook and run it to see it in action:
 
 ```sh
-pipenv run jupyter notebook
+uv run jupyter notebook
 ```
 
 (See the repository [`README.md`](../../README.md) for environment setup.)
