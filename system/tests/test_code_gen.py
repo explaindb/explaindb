@@ -157,11 +157,14 @@ class OperatorTest(unittest.TestCase):
         query.interpret_open()
 
         # wrap each leaf's interpret_close to record whether close reaches the leaves
-        with mock.patch.object(
-            rel_orders, "interpret_close", wraps=rel_orders.interpret_close
-        ) as orders_close, mock.patch.object(
-            rel_books, "interpret_close", wraps=rel_books.interpret_close
-        ) as books_close:
+        with (
+            mock.patch.object(
+                rel_orders, "interpret_close", wraps=rel_orders.interpret_close
+            ) as orders_close,
+            mock.patch.object(
+                rel_books, "interpret_close", wraps=rel_books.interpret_close
+            ) as books_close,
+        ):
             # must not raise (before the fix the leaf Relation.interpret_close raised AssertionError)
             query.interpret_close()
 

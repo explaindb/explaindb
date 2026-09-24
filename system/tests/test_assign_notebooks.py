@@ -121,8 +121,9 @@ class AssignNotebooksTest(unittest.TestCase):
         os.environ["CI_NODE_INDEX"] = str(index)
         buffer = io.StringIO()
         # main() also logs the packing to stderr; discard it to keep test output clean.
-        with contextlib.redirect_stdout(buffer), contextlib.redirect_stderr(
-            io.StringIO()
+        with (
+            contextlib.redirect_stdout(buffer),
+            contextlib.redirect_stderr(io.StringIO()),
         ):
             self.module.main()
         return buffer.getvalue().splitlines()
