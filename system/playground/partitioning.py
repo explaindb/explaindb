@@ -181,17 +181,22 @@ class GateTree:
         return self.root.find_reachable_platform()
 
 
-gt = GateTree(3)
-# gt.show()
+# Playground demo: build a gate tree, run a million random walks recording how
+# often each platform is reached, then print the tree. Guarded so it runs only
+# on direct execution (`python partitioning.py`), not on import -- importing the
+# module (e.g. from a notebook or the docs build) must have no side effect.
+if __name__ == "__main__":
+    gt = GateTree(3)
+    # gt.show()
 
-for i in range(1000000):
-    # find the reachable platform:
-    platform: Platform = gt.find_reachable_platform()
-    # increase the visit counter:
-    platform.increase_visit_counter()
-    # switch a random gate:
-    gate: Gate = rnd.choice(gt.gates)
-    gate.switch()
+    for i in range(1000000):
+        # find the reachable platform:
+        platform: Platform = gt.find_reachable_platform()
+        # increase the visit counter:
+        platform.increase_visit_counter()
+        # switch a random gate:
+        gate: Gate = rnd.choice(gt.gates)
+        gate.switch()
 
-# print the tree including the visit counters of all platforms:
-gt.show()
+    # print the tree including the visit counters of all platforms:
+    gt.show()
