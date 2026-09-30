@@ -72,3 +72,16 @@ uv run sphinx-build -W -b html docs/api docs/api/_build
 Then open `docs/api/_build/index.html`. The `sphinx-apidoc`-generated stubs and
 the `_build/` output are git-ignored; the CI check (`docs_build`, run on every
 merge request) builds with `-W` so any documentation warning fails the pipeline.
+
+## Contributors
+
+People, in order of number of commits:
+
+- [Jens Dittrich](https://bigdata.uni-saarland.de/people/jensdittrich.html)
+- [Marcel Maltry](https://bigdata.uni-saarland.de/people/marcelmaltry.html)
+- [Simon Rink](https://bigdata.uni-saarland.de/people/simonrink.html)
+- [Luca Gretscher](https://bigdata.uni-saarland.de/people/lucagretscher.html)
+- [Joris Nix](https://bigdata.uni-saarland.de/people/jorisnix.html)
+
+With help from [Claude](https://claude.com/claude-code), an AI coding assistant by Anthropic, credited as
+co-author on commits.
