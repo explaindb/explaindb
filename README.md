@@ -59,6 +59,9 @@ uv run python -m unittest discover system/tests/
 
 ## API Documentation
 
+The API documentation is available online at
+<https://bigdata.uni-saarland.de/software/explaindb/index.html>.
+
 An HTML API reference is generated from the source docstrings with
 [Sphinx](https://www.sphinx-doc.org). On every push to the default branch the CI
 pipeline publishes it to GitLab Pages; the published site is reachable via the
