@@ -1,4 +1,4 @@
-# ExplainDB — Database Systems Materials
+# ExplainDB - a Database System built for Understandability
 
 [![License: AGPL v3](https://img.shields.io/github/license/explaindb/explaindb)](LICENSE)
 [![Python 3.12](https://img.shields.io/badge/python-3.12-blue.svg)](https://www.python.org/downloads/)
