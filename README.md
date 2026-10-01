@@ -1,5 +1,13 @@
 # ExplainDB — Database Systems Materials
 
+[![License: AGPL v3](https://img.shields.io/github/license/explaindb/explaindb)](LICENSE)
+[![Python 3.12](https://img.shields.io/badge/python-3.12-blue.svg)](https://www.python.org/downloads/)
+[![uv](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/astral-sh/uv/main/assets/badge/v0.json)](https://github.com/astral-sh/uv)
+[![Code style: black](https://img.shields.io/badge/code%20style-black-000000.svg)](https://github.com/psf/black)
+[![Jupyter notebooks](https://img.shields.io/badge/Jupyter-19_notebooks-F37626?logo=jupyter&logoColor=white)](notebooks/)
+[![Last commit](https://img.shields.io/github/last-commit/explaindb/explaindb)](https://github.com/explaindb/explaindb/commits/main)
+[![GitHub stars](https://img.shields.io/github/stars/explaindb/explaindb?style=social)](https://github.com/explaindb/explaindb)
+
 Teaching materials for a database systems course: a collection of Jupyter notebooks and a didactic
 DBMS implemented in Python (the `system/` package).
 
