@@ -172,7 +172,18 @@ py_test:
     - uv pip freeze
     # Run all unit tests with coverage
     - uv run coverage run -m unittest discover system/tests/
+    # Print the summary so GitLab can read the total (see `coverage:` below).
+    - uv run coverage report
     - uv run coverage html
+  # GitLab reads the coverage value from the TOTAL line of `coverage report`
+  # (shown in merge requests and in the project's coverage badge). Keep the
+  # capture group: GitLab uses it as the value; without it, GitLab would take
+  # the first number on the line (the statement count). Changing the report
+  # layout (e.g. branch coverage or show_missing in .coveragerc, or a coverage
+  # upgrade) can change the TOTAL line; the regex then silently stops matching
+  # and GitLab records no value (no error), so adapt it together with such a
+  # change.
+  coverage: '/^TOTAL\s+\d+\s+\d+\s+(\d+(?:\.\d+)?)%$/'
   interruptible: true
   artifacts:
     paths:
