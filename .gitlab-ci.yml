@@ -79,6 +79,42 @@ formatting:
     - uv run black --check .
   interruptible: true
 
+# mybinder.org cannot read uv.lock, so .binder/requirements.txt is an export of
+# it. Regenerate the export in place and fail if it differs from the committed
+# file (or is missing), i.e. if a dependency change was committed without
+# re-exporting. The export omits header and annotations so only the pins are
+# compared, not text that varies between uv versions. Unlike the command in
+# CONTRIBUTING.md, the job uses --locked instead of --frozen: it additionally
+# fails when uv.lock itself is out of date with pyproject.toml (pyproject.toml
+# edited without running `uv lock`). Otherwise keep the command identical to
+# the one in CONTRIBUTING.md.
+binder_requirements:
+  stage: test
+  tags:
+    - test
+  script:
+    # Skip when the merge request only changes Markdown (see detect-docs-only).
+    - if [ "$DOCS_ONLY" = "true" ]; then echo "Only Markdown changed; skipping."; exit 0; fi
+    # Log the uv version: export output and flags can differ between versions.
+    - uv --version
+    - |
+      if ! uv export --locked --no-dev --no-hashes --no-header --no-annotate --format requirements.txt -o .binder/requirements.txt; then
+        echo "uv export failed (most likely uv.lock is out of date with pyproject.toml; see the error above)."
+        echo "Run 'uv lock', then regenerate .binder/requirements.txt (see CONTRIBUTING.md, section Dependencies)."
+        exit 1
+      fi
+    # git diff prints the changed pins into the job log. If the file was deleted
+    # from the repository, the export above recreates it as an untracked file,
+    # which git diff ignores; git status catches that case. Keep both checks.
+    - |
+      if ! git diff --exit-code -- .binder/requirements.txt || [ -n "$(git status --porcelain -- .binder/requirements.txt)" ]; then
+        echo ".binder/requirements.txt is missing or out of date with uv.lock. Regenerate it with:"
+        echo "  uv export --frozen --no-dev --no-hashes --no-header --no-annotate --format requirements.txt -o .binder/requirements.txt"
+        echo "(see CONTRIBUTING.md, section Dependencies)."
+        exit 1
+      fi
+  interruptible: true
+
 py_test:
   stage: test
   tags:

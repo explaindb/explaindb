@@ -6,6 +6,17 @@ All Python code is formatted with [black](https://black.readthedocs.io) using it
 default settings. The CI pipeline runs `black --check .` and rejects unformatted
 code, so run `black .` before every push.
 
+## Dependencies
+
+Dependencies are managed with [uv](https://docs.astral.sh/uv/) in `pyproject.toml`
+and `uv.lock`. mybinder.org cannot read `uv.lock`, so `.binder/requirements.txt` is
+an export of it. After every dependency change, regenerate it (the CI job
+`binder_requirements` fails if you forget):
+
+```sh
+uv export --frozen --no-dev --no-hashes --no-header --no-annotate --format requirements.txt -o .binder/requirements.txt
+```
+
 ## Docstring conventions
 
 We document code so that the *contract* lives in one place and implementations
