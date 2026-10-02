@@ -167,3 +167,13 @@ People, in order of number of commits:
 
 With help from [Claude](https://claude.com/claude-code), an AI coding assistant by Anthropic, credited as
 co-author on commits.
+
+## Contributing
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) for the code formatting, the docstring conventions, and how
+dependencies, notebooks and the API documentation are maintained.
+
+## License
+
+ExplainDB is licensed under the [GNU Affero General Public License v3.0](LICENSE) (AGPL-3.0).
+Copyright (C) 2026 Prof. Dr. Jens Dittrich, Saarland University.
