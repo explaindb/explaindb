@@ -71,6 +71,30 @@ topic and points to the code that implements it. The launch badge opens a notebo
 |---|---|---|
 | [Z-Order-Curve](notebooks/Z-Order-Curve.ipynb) | Z-codes (Morton codes): mapping 2-D data to 1-D while preserving locality | [![Open Z-Order-Curve on Binder](https://mybinder.org/badge_logo.svg)](https://mybinder.org/v2/gh/explaindb/explaindb/main?urlpath=lab/tree/notebooks/Z-Order-Curve.ipynb) |
 
+## What's Inside the `system/` Package
+
+A small DBMS written for reading, not for speed. Interfaces in
+[`system/interfaces/`](system/interfaces) carry the contracts; the other folders implement them:
+
+- **Storage** ([`storage/`](system/storage)): the storage hierarchy (DRAM, caches, SSD, disk) and RAID
+  block assignment (RAID 0/1/4/5) with a reliability and performance cost model.
+- **Indexes** ([`indexes/`](system/indexes)): B⁺-tree, bitmap indexes (equality- and range-encoded),
+  Bloom filters, radix tries and the "Christmas tree" (a radix trie with node buffers).
+- **Bit sequences** ([`bit_sequences.py`](system/bit_sequences.py)): plain and WAH-compressed bit
+  sequences used by the bitmap indexes.
+- **Transactional stores** ([`stores/`](system/stores)): a versioned key-value store and MVCC
+  (multi-version concurrency control) with journaling, also with an index.
+- **Query processing** ([`query_processing/`](system/query_processing)): operators such as scan,
+  filter, hash join, semi-join and count, plus WHERE-clause predicates.
+- **Sorting and queues** ([`sorting.py`](system/sorting.py), [`queues/`](system/queues)): external
+  merge sort with in-memory and disk-backed queues.
+- **Query optimization** ([`query_optimization/`](system/query_optimization)): join graphs (chain,
+  star, cycle, clique), cardinality estimation, the C_out cost function and plan tables for
+  dynamic-programming join ordering.
+
+[`DBMS.py`](system/DBMS.py) ties these parts together: it manages stores, prepared queries and query
+optimization. Unit tests for all of this live in [`system/tests/`](system/tests).
+
 ## Setting Up the Environment with uv
 
 This repository uses [uv](https://docs.astral.sh/uv/) to manage its Python version and dependencies.
