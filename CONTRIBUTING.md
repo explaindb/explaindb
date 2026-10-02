@@ -40,6 +40,17 @@ above the command giving the reason and the date, and remove the entry again as 
 as a fixed version is available. (A failing job blocks merging because the GitLab project
 setting "Pipelines must succeed" is enabled.)
 
+## Notebooks
+
+The notebooks live in `notebooks/`. When you add, rename or remove one, also update:
+
+- the notebook table in the README (section *Notebooks*): one row with the link, a
+  one-line topic and the Binder badge. `system/tests/test_readme_notebooks.py` fails if
+  the table and `notebooks/` disagree.
+- `.ci/notebook_weights.tsv` (the notebook's run time, used to balance the parallel CI
+  jobs) and the expected packing and notebook count in
+  `system/tests/test_assign_notebooks.py`, which fails otherwise.
+
 ## API documentation
 
 An HTML API reference is generated from the source docstrings with
