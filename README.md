@@ -25,6 +25,52 @@ period of inactivity, or after a few hours at most, and all your changes are los
 you want to keep (**File → Download**). mybinder.org is a free public service: do not upload private or
 confidential data, and do not enter passwords in a Binder session.
 
+## Notebooks
+
+The notebooks are grouped by the chapters of the [tutorial](docs/tutorial/README.md), which explains each
+topic and points to the code that implements it. The launch badge opens a notebook directly on Binder.
+
+### Storage & Data Layout
+
+| Notebook | Topic | Launch |
+|---|---|---|
+| [Data-Layout](notebooks/Data-Layout.ipynb) | Row vs. column layout: how much each layout has to read for different queries | [![Open Data-Layout on Binder](https://mybinder.org/badge_logo.svg)](https://mybinder.org/v2/gh/explaindb/explaindb/main?urlpath=lab/tree/notebooks/Data-Layout.ipynb) |
+| [RAID-Nesting-Trade-offs](notebooks/RAID-Nesting-Trade-offs.ipynb) | Nesting RAID 0 arrays and its effect on sequential read performance | [![Open RAID-Nesting-Trade-offs on Binder](https://mybinder.org/badge_logo.svg)](https://mybinder.org/v2/gh/explaindb/explaindb/main?urlpath=lab/tree/notebooks/RAID-Nesting-Trade-offs.ipynb) |
+
+### Indexing
+
+| Notebook | Topic | Launch |
+|---|---|---|
+| [B-tree](notebooks/B-tree.ipynb) | Building a B⁺-tree step by step, with visualized splits and leaf chain | [![Open B-tree on Binder](https://mybinder.org/badge_logo.svg)](https://mybinder.org/v2/gh/explaindb/explaindb/main?urlpath=lab/tree/notebooks/B-tree.ipynb) |
+| [Bitmaps-and-Bloom-Filters](notebooks/Bitmaps-and-Bloom-Filters.ipynb) | Bitmap indexes, their compression (WAH), and Bloom filters for fast "is this value present?" checks | [![Open Bitmaps-and-Bloom-Filters on Binder](https://mybinder.org/badge_logo.svg)](https://mybinder.org/v2/gh/explaindb/explaindb/main?urlpath=lab/tree/notebooks/Bitmaps-and-Bloom-Filters.ipynb) |
+| [Bit-Sequences-in-Pandas](notebooks/Bit-Sequences-in-Pandas.ipynb) | Boolean masks in pandas as bit sequences: filtering rows and combining masks with AND | [![Open Bit-Sequences-in-Pandas on Binder](https://mybinder.org/badge_logo.svg)](https://mybinder.org/v2/gh/explaindb/explaindb/main?urlpath=lab/tree/notebooks/Bit-Sequences-in-Pandas.ipynb) |
+| [Christmas-Tree](notebooks/Christmas-Tree.ipynb) | Radix and descriptor tries, with buffered and "crystal ball" variants | [![Open Christmas-Tree on Binder](https://mybinder.org/badge_logo.svg)](https://mybinder.org/v2/gh/explaindb/explaindb/main?urlpath=lab/tree/notebooks/Christmas-Tree.ipynb) |
+| [Recursive-Model-Index](notebooks/Recursive-Model-Index.ipynb) | A learned index (RMI) for searching sorted data | [![Open Recursive-Model-Index on Binder](https://mybinder.org/badge_logo.svg)](https://mybinder.org/v2/gh/explaindb/explaindb/main?urlpath=lab/tree/notebooks/Recursive-Model-Index.ipynb) |
+
+### Query Processing
+
+| Notebook | Topic | Launch |
+|---|---|---|
+| [Result-DB](notebooks/Result-DB.ipynb) | Running a query with two joins as a pipeline of operators (push model) | [![Open Result-DB on Binder](https://mybinder.org/badge_logo.svg)](https://mybinder.org/v2/gh/explaindb/explaindb/main?urlpath=lab/tree/notebooks/Result-DB.ipynb) |
+| [CodeGen](notebooks/CodeGen.ipynb) | Generating Python code for the Result-DB query and running it | [![Open CodeGen on Binder](https://mybinder.org/badge_logo.svg)](https://mybinder.org/v2/gh/explaindb/explaindb/main?urlpath=lab/tree/notebooks/CodeGen.ipynb) |
+| [Shared-Scan](notebooks/Shared-Scan.ipynb) | Several concurrent queries sharing one pass over the data | [![Open Shared-Scan on Binder](https://mybinder.org/badge_logo.svg)](https://mybinder.org/v2/gh/explaindb/explaindb/main?urlpath=lab/tree/notebooks/Shared-Scan.ipynb) |
+| [External-Merge-Sort](notebooks/External-Merge-Sort.ipynb) | Sorting data larger than main memory: sort chunks, then merge them | [![Open External-Merge-Sort on Binder](https://mybinder.org/badge_logo.svg)](https://mybinder.org/v2/gh/explaindb/explaindb/main?urlpath=lab/tree/notebooks/External-Merge-Sort.ipynb) |
+| [Top-k](notebooks/Top-k.ipynb) | `ORDER BY title LIMIT 10` without sorting all rows | [![Open Top-k on Binder](https://mybinder.org/badge_logo.svg)](https://mybinder.org/v2/gh/explaindb/explaindb/main?urlpath=lab/tree/notebooks/Top-k.ipynb) |
+| [Online-Aggregation](notebooks/Online-Aggregation.ipynb) | A running estimate of an aggregate before the scan completes | [![Open Online-Aggregation on Binder](https://mybinder.org/badge_logo.svg)](https://mybinder.org/v2/gh/explaindb/explaindb/main?urlpath=lab/tree/notebooks/Online-Aggregation.ipynb) |
+
+### Query Optimization
+
+| Notebook | Topic | Launch |
+|---|---|---|
+| [PlanEnumeration](notebooks/PlanEnumeration.ipynb) | Join-order enumeration algorithms (DPsize, DPsub, DPccp) | [![Open PlanEnumeration on Binder](https://mybinder.org/badge_logo.svg)](https://mybinder.org/v2/gh/explaindb/explaindb/main?urlpath=lab/tree/notebooks/PlanEnumeration.ipynb) |
+| [Distributed-Joins](notebooks/Distributed-Joins.ipynb) | Executing a join across several nodes | [![Open Distributed-Joins on Binder](https://mybinder.org/badge_logo.svg)](https://mybinder.org/v2/gh/explaindb/explaindb/main?urlpath=lab/tree/notebooks/Distributed-Joins.ipynb) |
+
+### Multidimensional
+
+| Notebook | Topic | Launch |
+|---|---|---|
+| [Z-Order-Curve](notebooks/Z-Order-Curve.ipynb) | Z-codes (Morton codes): mapping 2-D data to 1-D while preserving locality | [![Open Z-Order-Curve on Binder](https://mybinder.org/badge_logo.svg)](https://mybinder.org/v2/gh/explaindb/explaindb/main?urlpath=lab/tree/notebooks/Z-Order-Curve.ipynb) |
+
 ## Setting Up the Environment with uv
 
 This repository uses [uv](https://docs.astral.sh/uv/) to manage its Python version and dependencies.

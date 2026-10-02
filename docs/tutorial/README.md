@@ -1,7 +1,7 @@
 # Database Systems Tutorial
 
 A guided learning path through this repository. The material itself lives in the **Jupyter notebooks**
-in the repository root and in the **`system/` package** (a small, didactic DBMS). This tutorial does not
+in the `notebooks/` directory and in the **`system/` package** (a small, didactic DBMS). This tutorial does not
 repeat that content — it orders it, explains how the pieces fit together, and points you at the notebook
 and the source files for each topic.
 
