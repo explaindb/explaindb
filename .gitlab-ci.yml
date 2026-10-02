@@ -26,8 +26,10 @@ stages:
 # tag -- into a hard error. Output goes to public/ as GitLab Pages expects.
 .build_docs:
   script:
-    # --frozen installs exactly what uv.lock pins and never re-resolves, so a
-    # stale lockfile is caught rather than silently updated.
+    # --frozen installs exactly what uv.lock pins and never re-resolves or
+    # rewrites it. It does not check uv.lock against pyproject.toml, so a stale
+    # lockfile is not caught here (that would need --locked); the
+    # binder_requirements job catches it instead.
     - uv sync --frozen
     - uv run sphinx-apidoc --implicit-namespaces --no-toc --force --separate -o docs/api system system/tests
     - uv run sphinx-build -W -b html docs/api public
