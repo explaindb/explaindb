@@ -81,22 +81,9 @@ uv run python -m unittest discover system/tests/
 
 ## API Documentation
 
-The API documentation is available online at
-<https://bigdata.uni-saarland.de/software/explaindb/index.html>.
-
-An HTML API reference is generated from the source docstrings with
-[Sphinx](https://www.sphinx-doc.org). On every push to the default branch the CI
-pipeline publishes it to GitLab Pages; the published site is reachable via the
-project's **Deploy → Pages** page and is restricted to project members.
-
-To build it locally:
-```sh
-uv run sphinx-apidoc --implicit-namespaces --no-toc --force --separate -o docs/api system system/tests
-uv run sphinx-build -W -b html docs/api docs/api/_build
-```
-Then open `docs/api/_build/index.html`. The `sphinx-apidoc`-generated stubs and
-the `_build/` output are git-ignored; the CI check (`docs_build`, run on every
-merge request) builds with `-W` so any documentation warning fails the pipeline.
+The API documentation, generated from the source docstrings, is available online at
+<https://bigdata.uni-saarland.de/software/explaindb/index.html>. How to build it locally is described in
+[CONTRIBUTING.md](CONTRIBUTING.md#api-documentation).
 
 ## Contributors
 
