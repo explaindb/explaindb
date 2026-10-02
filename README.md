@@ -7,9 +7,21 @@
 [![Jupyter notebooks](https://img.shields.io/github/directory-file-count/explaindb/explaindb/notebooks?type=file&extension=ipynb&label=Jupyter%20notebooks&logo=jupyter&logoColor=white&color=F37626)](notebooks/)
 [![Last commit](https://img.shields.io/github/last-commit/explaindb/explaindb)](https://github.com/explaindb/explaindb/commits/main)
 [![GitHub stars](https://img.shields.io/github/stars/explaindb/explaindb?style=social)](https://github.com/explaindb/explaindb)
+[![Binder](https://mybinder.org/badge_logo.svg)](https://mybinder.org/v2/gh/explaindb/explaindb/main?urlpath=lab/tree/notebooks)
 
 Teaching materials for a database systems course: a collection of Jupyter notebooks and a didactic
 DBMS implemented in Python (the `system/` package).
+
+## Try It in the Browser
+
+[![Binder](https://mybinder.org/badge_logo.svg)](https://mybinder.org/v2/gh/explaindb/explaindb/main?urlpath=lab/tree/notebooks)
+
+Click the badge to open the notebooks in JupyterLab on [mybinder.org](https://mybinder.org), with no
+installation needed. The start can take a few minutes the first time, after a change to the repository,
+or after a longer pause, while Binder builds the environment. Sessions are temporary: they end after a
+period of inactivity, or after a few hours at most, and all your changes are lost. Download any notebook
+you want to keep (**File → Download**). mybinder.org is a free public service: do not upload private or
+confidential data, and do not enter passwords in a Binder session.
 
 ## Setting Up the Environment with uv
 
