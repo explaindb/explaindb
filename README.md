@@ -155,6 +155,16 @@ The API documentation, generated from the source docstrings, is available online
 <https://bigdata.uni-saarland.de/software/explaindb/index.html>. How to build it locally is described in
 [CONTRIBUTING.md](CONTRIBUTING.md#api-documentation).
 
+## Contributing
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) for the code formatting, the docstring conventions, and how
+dependencies, notebooks and the API documentation are maintained.
+
+## License
+
+ExplainDB is licensed under the [GNU Affero General Public License v3.0](LICENSE) (AGPL-3.0).
+Copyright (C) 2026 Prof. Dr. Jens Dittrich, Saarland University.
+
 ## Contributors
 
 People, in order of number of commits:
@@ -167,13 +177,3 @@ People, in order of number of commits:
 
 With help from [Claude](https://claude.com/claude-code), an AI coding assistant by Anthropic, credited as
 co-author on commits.
-
-## Contributing
-
-See [CONTRIBUTING.md](CONTRIBUTING.md) for the code formatting, the docstring conventions, and how
-dependencies, notebooks and the API documentation are maintained.
-
-## License
-
-ExplainDB is licensed under the [GNU Affero General Public License v3.0](LICENSE) (AGPL-3.0).
-Copyright (C) 2026 Prof. Dr. Jens Dittrich, Saarland University.
