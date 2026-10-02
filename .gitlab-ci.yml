@@ -40,7 +40,9 @@ stages:
 # `needs` receives the dotenv reports of earlier-stage jobs) and exit early when
 # it is true, so a docs-only merge request runs none of the tests. The check is
 # conservative: it only skips when *every* changed file is Markdown, and it never
-# skips on the default branch -- anything else leaves DOCS_ONLY=false.
+# skips on the default branch -- anything else leaves DOCS_ONLY=false. The
+# top-level README.md does not count as docs-only: a unit test
+# (system/tests/test_readme_notebooks.py) checks its notebook table.
 detect-docs-only:
   stage: prepare
   tags:
@@ -56,8 +58,10 @@ detect-docs-only:
         CHANGED="$(git diff --name-only "$BASE" HEAD)"
         echo "Changed files vs $BASE:"
         printf '%s\n' "$CHANGED"
-        # docs-only: at least one change, and no changed file is a non-.md file
-        if [ -n "$CHANGED" ] && ! printf '%s\n' "$CHANGED" | grep -qvE '\.md$'; then
+        # docs-only: at least one change, no changed file is a non-.md file, and
+        # README.md is not among them (its notebook table is tested)
+        if [ -n "$CHANGED" ] && ! printf '%s\n' "$CHANGED" | grep -qvE '\.md$' \
+            && ! printf '%s\n' "$CHANGED" | grep -qx 'README.md'; then
           DOCS_ONLY=true
         fi
       fi
