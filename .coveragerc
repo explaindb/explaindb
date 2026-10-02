@@ -1,3 +1,11 @@
+[run]
+# Measure the `system` package only, without its tests: the tests themselves are
+# (almost) fully executed on every run, so counting them would inflate the total.
+source =
+    system
+omit =
+    */system/tests/*
+
 [report]
 exclude_also =
     def __repr__
