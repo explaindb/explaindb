@@ -88,8 +88,8 @@ formatting:
 # compared, not text that varies between uv versions. Unlike the command in
 # CONTRIBUTING.md, the job uses --locked instead of --frozen: it additionally
 # fails when uv.lock itself is out of date with pyproject.toml (pyproject.toml
-# edited without running `uv lock`). Otherwise keep the command identical to
-# the one in CONTRIBUTING.md.
+# edited without running `uv lock`). Otherwise keep the export flags identical
+# to the command in CONTRIBUTING.md and in the dependency_audit job below.
 binder_requirements:
   stage: test
   tags:
@@ -115,6 +115,48 @@ binder_requirements:
         echo "(see CONTRIBUTING.md, section Dependencies)."
         exit 1
       fi
+  interruptible: true
+
+# Fail the pipeline if any locked dependency has a known vulnerability. Keep
+# this a hard failure (no allow_failure): findings must block merging, see
+# docs/changes/002-dependency-audit. pip-audit is run via `uv tool run` rather
+# than added as a dependency, so it stays out of uv.lock and the Binder image.
+# To accept an advisory that has no fixed version yet (or a false positive),
+# append `--ignore-vuln <ID>` to the pip-audit command and put a YAML comment
+# above it giving the reason and the date; remove it once a fixed version
+# exists. How to fix a finding: CONTRIBUTING.md, section Dependencies >
+# Security audit.
+dependency_audit:
+  stage: test
+  tags:
+    - test
+  # A network hiccup (downloading pip-audit, querying the vulnerability
+  # service) fails the script just like a finding; one retry absorbs it. A real
+  # finding simply fails twice.
+  retry:
+    max: 1
+    when:
+      - script_failure
+  script:
+    # Skip when the merge request only changes Markdown (see detect-docs-only).
+    - if [ "$DOCS_ONLY" = "true" ]; then echo "Only Markdown changed; skipping."; exit 0; fi
+    # Log the uv version: export output and flags can differ between versions.
+    - uv --version
+    # Same export flags as binder_requirements and CONTRIBUTING.md. --frozen
+    # audits exactly what uv.lock pins (a uv.lock out of date with
+    # pyproject.toml is caught by binder_requirements). --no-dev has no effect
+    # today because the project has no dependency groups; revisit if one is
+    # added.
+    - uv export --frozen --no-dev --no-hashes --no-header --no-annotate --format requirements.txt -o /tmp/audit-requirements.txt
+    # pip-audit is pinned so a new release cannot change the result without
+    # notice, and --exclude-newer pins its own dependencies to what was
+    # published by that date; bump both deliberately (at least once per
+    # semester, to pick up fixes in pip-audit's own dependencies). --no-deps and
+    # --disable-pip: every line is already an exact pin, so nothing needs to be
+    # resolved or installed. --strict also fails if a package cannot be
+    # audited; --desc prints what each vulnerability is; --progress-spinner off
+    # keeps the CI log readable.
+    - uv tool run --exclude-newer 2026-10-01T00:00:00Z pip-audit==2.10.1 --strict --no-deps --disable-pip --progress-spinner off --desc -r /tmp/audit-requirements.txt
   interruptible: true
 
 py_test:

@@ -17,6 +17,29 @@ an export of it. After every dependency change, regenerate it (the CI job
 uv export --frozen --no-dev --no-hashes --no-header --no-annotate --format requirements.txt -o .binder/requirements.txt
 ```
 
+### Security audit
+
+The CI job `dependency_audit` runs [pip-audit](https://pypi.org/project/pip-audit/) on
+the versions pinned in `uv.lock` and fails if any of them has a known vulnerability.
+To fix a finding, move the affected package to a fixed version:
+
+- If the package is an indirect dependency (not listed in `pyproject.toml`), run
+  `uv lock --upgrade-package <package>`.
+- If it is listed in `pyproject.toml` with an exact `==` pin, raise the pin there and
+  run `uv lock`. Do the same if such a pin prevents an indirect dependency from moving
+  to its fixed version.
+
+Then regenerate `.binder/requirements.txt` with the command above. To reproduce the
+check locally, run the `uv export` and `uv tool run` commands of the `dependency_audit`
+job in `.gitlab-ci.yml`.
+
+If no fixed version exists yet, or the finding is a false positive, append
+`--ignore-vuln <ID>` to the pip-audit command in that job, where `<ID>` is the
+vulnerability ID from the job log (for example `GHSA-…` or `PYSEC-…`). Put a comment
+above the command giving the reason and the date, and remove the entry again as soon
+as a fixed version is available. (A failing job blocks merging because the GitLab project
+setting "Pipelines must succeed" is enabled.)
+
 ## Docstring conventions
 
 We document code so that the *contract* lives in one place and implementations
