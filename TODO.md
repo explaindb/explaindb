@@ -14,11 +14,6 @@ per 0-fill word; see the regression test `test_iterating_sparse_wah_does_not_ove
 
 ## CI / tooling debt
 
-- The CI runner image installs `black[jupyter]` **unpinned**. A rebuild drifted it to black 26.5.1,
-  which reformats several files differently and broke `black --check`. The repository was reformatted
-  to 26.5.1 as a stopgap. Durable fix: pin black in the CI image so it can no longer drift (ties in
-  with the deferred uv migration, MR !61).
-- Caching the pipenv virtualenv in CI does **not** work with the current image: it pre-activates an
-  external virtualenv (`ENV VIRTUAL_ENV /venv`), so `pipenv install` installs outside the project and a
-  GitLab `cache` of `.venv/` captures nothing. The ~115s per-job install therefore cannot be cached away
-  without changing the image (or migrating to uv, MR !61).
+_None currently._ Both earlier items were resolved by the migration to uv: black is pinned via
+`pyproject.toml` / `uv.lock` and run with `uv run black`, and the pipenv caching limitation no longer
+applies because uv installs into the project's own `.venv/`.
