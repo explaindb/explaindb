@@ -10,7 +10,9 @@
 [![Binder](https://mybinder.org/badge_logo.svg)](https://mybinder.org/v2/gh/explaindb/explaindb/main?urlpath=lab/tree/notebooks)
 
 Teaching materials for a database systems course: a collection of Jupyter notebooks and a didactic
-DBMS implemented in Python (the `system/` package).
+DBMS implemented in Python (the `system/` package). The lecture that uses this code is available on
+YouTube: [Database Systems 2024/25](https://www.youtube.com/playlist?list=PLC4UZxBVGKteZpmLGukzu2BpNDifaTe9G)
+(Prof. Dr. Jens Dittrich, Big Data Analytics Group, Saarland University).
 
 ## Try It in the Browser
 
