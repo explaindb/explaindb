@@ -47,7 +47,7 @@ alternatives (Homebrew, pipx, etc.).
 ### 2. Clone the Repository
 
 ```sh
-git clone https://gitlab.cs.uni-saarland.de:bigdata/dbsys/explaindb.git
+git clone https://github.com/explaindb/explaindb.git
 cd explaindb
 ```
 
