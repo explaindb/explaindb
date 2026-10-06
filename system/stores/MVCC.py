@@ -672,6 +672,38 @@ class TransactionalKeyValueStore(VersionedKeyValueStore, ACIDStore):
         :class:`TransactionAbortedException` is raised. On success, a :class:`Commit` journal entry is written and
         flushed, and the transaction's work-in-progress versions become visible by moving them from ``wip`` to the
         ``committed`` list under the commit timestamp.
+
+        This method must be executed serially in a concurrent environment, otherwise, write skew anomaly can go
+        undetected.
+        A multithreaded implementation of this method is not yet implemented and not required for a didactical
+        implementation of MVCC.
+        What MVCC does is in fact orthogonal to multithreading and in order to explain MVCC just adds unwarranted
+        complexity which does not facilitate understanding of MVCC.
+
+        E.g., both transactions pass validation and commit in this schedule, although each one read an object
+        that the other one wrote, e.g. write skew::
+
+            T1                              T2
+            r(s), w(t)
+                                            r(t), w(s)
+            gets commit timestamp 6
+                                            gets commit timestamp 7
+
+                                            validation passes, as
+                                            w(t) of T1 is not visible yet
+            validation passes, as
+            w(s) of T2 is not visible yet
+                                            makes its versions visible
+            makes its versions visible
+
+         In serial mode, T1 is validated and their changes are installed first. Afterward, T2 is validated
+         and their changes are installed.
+
+         In multithreaded mode, the validations of T1 and T2 may overlap. Thus, the validation of T2 might not
+         see the versions installed by T1.
+
+         This means, if you want to validate transactions concurrently, you have to add a mechanism to detect and
+         avoid these cases.
         """
 
         assert TA_id in self.TD, f"transaction {TA_id} not found in the system"
