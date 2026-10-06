@@ -174,6 +174,7 @@ People, in order of number of commits:
 - [Simon Rink](https://bigdata.uni-saarland.de/people/simonrink.html)
 - [Luca Gretscher](https://bigdata.uni-saarland.de/people/lucagretscher.html)
 - [Joris Nix](https://bigdata.uni-saarland.de/people/jorisnix.html)
+- [Su Yılmaz](https://bigdata.uni-saarland.de/people/suyilmaz.html)
 
 With help from [Claude](https://claude.com/claude-code), an AI coding assistant by Anthropic, credited as
 co-author on commits.
