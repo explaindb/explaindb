@@ -557,10 +557,12 @@ class TransactionalKeyValueStore(VersionedKeyValueStore, ACIDStore):
                 # this already outdated object.
                 # It does not matter whether object <object_id> is returned now or not!
 
-                # (2b.i.) now the object is returned with a different version
-                # -> checksums will differ as a new version of the object is available
-                # note that this also covers the case that a TA created a new version of the object with the exact same
-                # content as before -> checksums will still differ due to the start_validity timestamp
+                # (2b.i.) now the object is returned with a different content
+                # -> checksums will differ as the checksum is computed over the (object_id, content)-pairs
+                # note that if a TA created a new version of the object with the exact same content as before, the
+                # checksum does NOT differ: the start_validity timestamp is not part of the checksum. This is not a
+                # problem: the read returns the same result as before, so TA <TA_id> may be serialized after that TA
+                # (method 2 below also skips objects whose content did not change)
 
                 # (2b.ii.) now the object is NOT returned
                 # -> checksums will still differ as this object is not returned anymore and not used for the checksum
