@@ -142,7 +142,7 @@ class TransactionalKeyValueStore(VersionedKeyValueStore, ACIDStore):
 
     def _get_visible_object_version(
         self, object_id: str, timestamp: int, ignore_wip=False
-    ) -> object:
+    ) -> object | None:
         """
         Gets the visible version of object <object_id> for TA <TA_id> under snapshot isolation.
 
@@ -150,6 +150,7 @@ class TransactionalKeyValueStore(VersionedKeyValueStore, ACIDStore):
         - getting the most recent committed version of the object that is visible to TA <TA_id> under snapshot isolation
         - this is either the wip entry created by TA <TA_id> or the most recent committed version of the object
         - if the most recent committed version was deleted, None is returned
+        - if the object did not exist yet in this snapshot (no committed version with start < TA_id), None is returned
         - the returned method must have a start < TA_id
 
         @param object_id: the object id of the object to be read
@@ -157,6 +158,7 @@ class TransactionalKeyValueStore(VersionedKeyValueStore, ACIDStore):
         @param ignore_wip: if set to True, the wip entries are ignored, i.e. only committed versions are considered.
 
         @return: the visible version of the object for TA <TA_id> under snapshot isolation, None if it was deleted
+        or did not exist yet in this snapshot
         """
 
         if object_id not in self.key_value_store:
@@ -189,8 +191,10 @@ class TransactionalKeyValueStore(VersionedKeyValueStore, ACIDStore):
             self.key_value_store[object_id].committed
         )
 
+        # no committed version at all, e.g. the object is being inserted by a TA or its insert was aborted:
+        # the object does not exist in this snapshot
         if len(committed_object_versions) == 0:
-            raise RuntimeError(f"object {object_id} has no committed versions")
+            return None
 
         # post: those object versions are ordered by their start timestamp:
         # Note: entries must be ordered by their commit timestamp, NOT by their start timestamp
@@ -212,6 +216,11 @@ class TransactionalKeyValueStore(VersionedKeyValueStore, ACIDStore):
                 committed_object_versions,
             )
         )
+
+        # all committed versions are more recent than this snapshot, e.g. the object was inserted by a TA that
+        # committed after TA <TA_id> started: the object does not exist in this snapshot
+        if len(visible_version_to_TA_id_list) == 0:
+            return None
 
         # get the most recent visible version to this TA_id:
         # note that there may be multiple committed and also deleted versions of the object

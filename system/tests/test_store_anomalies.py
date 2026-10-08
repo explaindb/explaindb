@@ -593,6 +593,131 @@ class StoreTestAnomalies(AbstractUnitTest):
                 else:
                     tkvs.commit_transaction(t1)
 
+    def test_read_skips_object_inserted_and_committed_after_snapshot(self):
+        """A reader does not see an object that a TA inserted and committed after the reader began.
+
+        t_i                                 t_j
+        begin
+                                            begin
+                                            insert C
+                                            commit
+        read all -> sees only A
+        """
+        tkvs: TransactionalKeyValueStore = TransactionalKeyValueStore()
+        tkvs.put("A", StoreTestAnomalies.Stuff(1, 0))
+
+        t_i: int = tkvs.begin_transaction()
+        t_j: int = tkvs.begin_transaction()
+
+        # t_j inserts a brand-new object and commits:
+        tkvs.update_object("C", StoreTestAnomalies.Stuff(42, 0), t_j)
+        tkvs.commit_transaction(t_j)
+
+        # C did not exist in t_i's snapshot:
+        result: list[tuple[str, object]] = tkvs.read_objects(t_i, TrueClause())
+        self.assertEqual(result, [("A", StoreTestAnomalies.Stuff(1, 0))])
+
+    def test_read_skips_object_inserted_by_uncommitted_concurrent_TA(self):
+        """A reader does not see an object that another, still running TA has inserted.
+
+        t_i                                 t_j
+        begin
+                                            begin
+                                            insert C
+        read all -> sees only A
+        """
+        tkvs: TransactionalKeyValueStore = TransactionalKeyValueStore()
+        tkvs.put("A", StoreTestAnomalies.Stuff(1, 0))
+
+        t_i: int = tkvs.begin_transaction()
+        t_j: int = tkvs.begin_transaction()
+
+        # t_j inserts a brand-new object, but does not commit:
+        tkvs.update_object("C", StoreTestAnomalies.Stuff(42, 0), t_j)
+
+        result: list[tuple[str, object]] = tkvs.read_objects(t_i, TrueClause())
+        self.assertEqual(result, [("A", StoreTestAnomalies.Stuff(1, 0))])
+
+    def test_read_own_insert(self):
+        """A TA sees the object it inserted itself, next to the pre-existing objects.
+
+        t inserts C and reads everything: it sees A and C with their values.
+        """
+        tkvs: TransactionalKeyValueStore = TransactionalKeyValueStore()
+        tkvs.put("A", StoreTestAnomalies.Stuff(1, 0))
+
+        t: int = tkvs.begin_transaction()
+        tkvs.update_object("C", StoreTestAnomalies.Stuff(2, 0), t)
+
+        result: list[tuple[str, object]] = tkvs.read_objects(t, TrueClause())
+        self.assertEqual(
+            sorted(result, key=lambda item: item[0]),
+            [
+                ("A", StoreTestAnomalies.Stuff(1, 0)),
+                ("C", StoreTestAnomalies.Stuff(2, 0)),
+            ],
+        )
+
+    def test_aborted_insert_is_invisible_and_key_can_be_reinserted(self):
+        """An aborted insert leaves no visible object behind, and the key can be inserted again later.
+
+        t inserts C and aborts: t2 sees only A. t3 inserts C again and commits: t4 sees A and C with t3's value.
+        """
+        tkvs: TransactionalKeyValueStore = TransactionalKeyValueStore()
+        tkvs.put("A", StoreTestAnomalies.Stuff(1, 0))
+
+        # insert C and abort:
+        t: int = tkvs.begin_transaction()
+        tkvs.update_object("C", StoreTestAnomalies.Stuff(2, 0), t)
+        tkvs.abort_transaction(t)
+
+        # the aborted insert must not be visible:
+        t2: int = tkvs.begin_transaction()
+        result_t2: list[tuple[str, object]] = tkvs.read_objects(t2, TrueClause())
+        self.assertEqual(result_t2, [("A", StoreTestAnomalies.Stuff(1, 0))])
+
+        # re-insert C and commit:
+        t3: int = tkvs.begin_transaction()
+        tkvs.update_object("C", StoreTestAnomalies.Stuff(3, 0), t3)
+        tkvs.commit_transaction(t3)
+
+        # a later TA sees the re-inserted value:
+        t4: int = tkvs.begin_transaction()
+        result_t4: list[tuple[str, object]] = tkvs.read_objects(t4, TrueClause())
+        self.assertEqual(
+            sorted(result_t4, key=lambda item: item[0]),
+            [
+                ("A", StoreTestAnomalies.Stuff(1, 0)),
+                ("C", StoreTestAnomalies.Stuff(3, 0)),
+            ],
+        )
+
+    def test_get_visible_object_version_returns_None_if_object_not_in_snapshot(self):
+        """_get_visible_object_version returns None for an object that does not exist in the reader's snapshot.
+
+        This covers an object whose only committed version starts at or after the reader's timestamp, and an object
+        with an empty committed list.
+        """
+        tkvs: TransactionalKeyValueStore = TransactionalKeyValueStore()
+
+        # (a) the only committed version became valid at timestamp 5:
+        tkvs.key_value_store["late"] = VersionedKeyValueStore.KVStoreEntry(
+            committed=[
+                VersionedKeyValueStore.UpdateEntry(
+                    start_validity=5, value=StoreTestAnomalies.Stuff(1, 0)
+                )
+            ]
+        )
+        # an older reader and a reader with the same timestamp (boundary) must not see it:
+        self.assertIsNone(tkvs._get_visible_object_version("late", 3))
+        self.assertIsNone(tkvs._get_visible_object_version("late", 5))
+
+        # (b) no committed version at all:
+        tkvs.key_value_store["empty"] = VersionedKeyValueStore.KVStoreEntry(
+            committed=[]
+        )
+        self.assertIsNone(tkvs._get_visible_object_version("empty", 3))
+
 
 if __name__ == "__main__":
     unittest.main(argv=["ignored", "-v"], verbosity=2, exit=False)
