@@ -80,7 +80,7 @@ class IndexedTransactionalKeyValueStore(TransactionalKeyValueStore, IndexedACIDS
             # get the value of that attribute
             attribute_value: object = getattr(old_object, attribute)
 
-            # delete tne entry from the index:
+            # delete the entry from the index:
             index.delete(attribute_value, object_id)
 
     @staticmethod
@@ -290,7 +290,7 @@ class IndexedTransactionalKeyValueStore(TransactionalKeyValueStore, IndexedACIDS
         new_object: object = self._get_visible_object_version(object_id, TA_id)
 
         # 4. finally, maintain all indexes for this change:
-        # no need to pass the old object version as we are not going to de-index it:
+        # index the new version; de-index only a superseded wip version of this TA (committed versions stay indexed):
         self._maintain_indexes(
             object_id,
             object_to_index=new_object,
