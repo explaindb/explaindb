@@ -27,6 +27,21 @@ exist:
   does not see it."""`.
 - The history of a bug belongs in the commit message and the merge request.
 
+## Schedules of concurrent transactions
+
+When a docstring or comment describes interleaved transactions (typically in
+tests), show the schedule as a table with one column per transaction and time
+pointing down, as in `TransactionalKeyValueStore.commit_transaction`:
+
+```text
+t_i                         t_j
+begin
+                            begin
+                            insert C
+                            commit
+read all -> sees only A
+```
+
 ## Formatting
 
 All Python code is formatted with [black](https://black.readthedocs.io) (default
