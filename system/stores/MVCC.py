@@ -416,9 +416,10 @@ class TransactionalKeyValueStore(VersionedKeyValueStore, ACIDStore):
     def delete_object(self, object_id: str, TA_id: int) -> None:
         """See :meth:`ACIDStore.delete_object`.
 
-        Must be executed atomically in a concurrent environment. Raises if another transaction currently holds a
-        work-in-progress version of the object. Writes a :class:`Delete` journal entry, adds a delete-marker
-        work-in-progress version, and records the object_id in the transaction's write set.
+        Must be executed atomically in a concurrent environment. Aborts the transaction and raises
+        :class:`TransactionAbortedException` if another transaction currently holds a work-in-progress version of the
+        object. Writes a :class:`Delete` journal entry, adds a delete-marker work-in-progress version, and records the
+        object_id in the transaction's write set.
         """
 
         assert TA_id in self.TD, f"transaction {TA_id} not found in the system"
@@ -432,7 +433,8 @@ class TransactionalKeyValueStore(VersionedKeyValueStore, ACIDStore):
             self.key_value_store[object_id].wip is not None
             and self.key_value_store[object_id].wip.start_validity != TA_id
         ):
-            raise RuntimeError(
+            self.abort_transaction(TA_id)
+            raise TransactionAbortedException(
                 f"another transaction is currently modifying object {object_id} already"
             )
 

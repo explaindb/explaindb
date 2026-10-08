@@ -27,7 +27,12 @@ import unittest
 
 from system.query_processing.predicates import WHERE_Clause, TrueClause
 from system.stores.VersionedKeyValueStore import VersionedKeyValueStore
-from system.stores.MVCC import TransactionAbortedException, TransactionalKeyValueStore
+from system.stores.MVCC import (
+    Abort,
+    Begin,
+    TransactionAbortedException,
+    TransactionalKeyValueStore,
+)
 from dataclasses import dataclass
 from faker import Faker
 
@@ -423,6 +428,66 @@ class StoreTestAnomalies(AbstractUnitTest):
         # there can only be one writer at a time
         with self.assertRaises(TransactionAbortedException):
             tkvs.update_object(object_id, StoreTestAnomalies.Stuff(1, 2), TA_ID_2)
+
+    def test_write_write_conflict_on_delete(self):
+        """A transaction that deletes an object on which another transaction holds a wip entry is aborted.
+
+        t1                                  t2
+        begin
+                                            begin
+        update or delete "4242"
+                                            delete "4242" -> aborted
+        commit -> succeeds
+
+        t2 is removed from the transaction dictionary and its journal holds only Begin and Abort; t1's wip entry
+        is untouched. Checked for a first writer that updates and one that deletes.
+        """
+        for first_write in ["update", "delete"]:
+            with self.subTest(first_write=first_write):
+                tkvs: TransactionalKeyValueStore = TransactionalKeyValueStore()
+                object_id: str = "4242"
+                tkvs.put(object_id, StoreTestAnomalies.Stuff(1, 0))
+
+                TA_ID_1: int = tkvs.begin_transaction()
+                TA_ID_2: int = tkvs.begin_transaction()
+
+                # TA 1 becomes the single writer of the object:
+                if first_write == "update":
+                    tkvs.update_object(
+                        object_id, StoreTestAnomalies.Stuff(1, 1), TA_ID_1
+                    )
+                else:
+                    tkvs.delete_object(object_id, TA_ID_1)
+
+                # TA 2 tries to delete the same object: write-write conflict, TA 2 must be aborted:
+                with self.assertRaises(TransactionAbortedException):
+                    tkvs.delete_object(object_id, TA_ID_2)
+
+                # TA 2 is gone from the transaction dictionary:
+                self.assertNotIn(TA_ID_2, tkvs.TD)
+
+                # TA 1's wip entry is unchanged:
+                entry: VersionedKeyValueStore.KVStoreEntry = tkvs.key_value_store[
+                    object_id
+                ]
+                wip: VersionedKeyValueStore.VersionEntry | None = entry.wip
+                self.assertIsNotNone(wip)
+                self.assertEqual(wip.start_validity, TA_ID_1)
+                if first_write == "update":
+                    self.assertIsInstance(wip, VersionedKeyValueStore.UpdateEntry)
+                    self.assertEqual(wip.value, StoreTestAnomalies.Stuff(1, 1))
+                else:
+                    self.assertIsInstance(wip, VersionedKeyValueStore.DeleteEntry)
+
+                # TA 2 wrote nothing to the journal except its begin and abort entries:
+                self.assertEqual(
+                    list(tkvs.journal.get(TA_ID_2)),
+                    [Begin(TA_id=TA_ID_2), Abort(TA_id=TA_ID_2)],
+                )
+
+                # TA 1 can still commit:
+                tkvs.commit_transaction(TA_ID_1)
+                self.assertEqual(tkvs.committed_transactions_trace[-1], TA_ID_1)
 
     def test_double_update_from_same_transaction(self):
         tkvs = TransactionalKeyValueStore()
