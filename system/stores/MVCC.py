@@ -642,26 +642,39 @@ class TransactionalKeyValueStore(VersionedKeyValueStore, ACIDStore):
             if len(combined_write_set) == 0:
                 return True
 
+            def selected(where: Clause | None, _object: object | None) -> bool:
+                """Returns True if <_object> is returned by a read with the where clause <where>.
+
+                A missing object (not existing or deleted, i.e. None) is never returned; a read without a where
+                clause (None) returns every existing object.
+                """
+                return _object is not None and (
+                    where is None or where.evaluate(_object)
+                )
+
             # 2. check the combined write set against the read clauses of the TA <TA_id> to be validated:
             rc: HashableDict
             for rc in self.TD[TA_id].read_clauses:
                 # for each where clause independently:
                 # note: no disjunction here, e.g. a disjunction of where clauses would lead to errors
-                where: Clause = rc["where_clause"]
+                where: Clause | None = rc["where_clause"]
 
                 object_id: str
                 for object_id in combined_write_set:
                     # for each object_id in the combined write set, we check whether the object was visible by
                     # TA <TA_id>
-                    # get the most recent visible version of the object to TA <TA_id> under snapshot isolation:
-                    _object_as_of_TA_ID: object = self._get_visible_object_version(
-                        object_id, TA_id
+                    # get the version of the object TA <TA_id> read under snapshot isolation, i.e. ignoring the wip
+                    # entry of TA <TA_id> itself (None if it did not exist in or was deleted from the snapshot):
+                    _object_as_of_TA_ID: object | None = (
+                        self._get_visible_object_version(
+                            object_id, TA_id, ignore_wip=True
+                        )
                     )
-                    # get the most recent committed version of the object available now:
-                    # TODO: deleted entry not considered here
-                    _object_as_of_now: object = (
-                        self.key_value_store[object_id].committed[-1].value
-                    )  # last version in the commited list
+                    # get the most recent committed version of the object available now, i.e. at the commit timestamp
+                    # of TA <TA_id> (None if it was deleted):
+                    _object_as_of_now: object | None = self._get_visible_object_version(
+                        object_id, commit_timestamp_for_this_TA, ignore_wip=True
+                    )
 
                     # compare the snapshot seen for TA <TA_id> with the most recent committed version,
                     # feed both in the where clause: if any where-clause returns an object, we have a conflict
@@ -670,8 +683,8 @@ class TransactionalKeyValueStore(VersionedKeyValueStore, ACIDStore):
                         # no conflict
                         continue
 
-                    if where.evaluate(_object_as_of_TA_ID) or where.evaluate(
-                        _object_as_of_now
+                    if selected(where, _object_as_of_TA_ID) or selected(
+                        where, _object_as_of_now
                     ):
                         return False
 

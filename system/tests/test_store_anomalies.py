@@ -718,6 +718,213 @@ class StoreTestAnomalies(AbstractUnitTest):
         )
         self.assertIsNone(tkvs._get_visible_object_version("empty", 3))
 
+    def test_validation_detects_lost_update_on_read_object(self):
+        """A TA that read an object and then overwrites it aborts if another TA committed a change to it meanwhile.
+
+        t_i                                 t_j
+        begin
+                                            begin
+        read a==42 -> sees A=(42, 0)
+                                            update A to (7, 0)
+                                            commit
+        update A to (5, 0)
+        commit -> aborted
+
+        Validation compares against the version t_i read, (42, 0), not t_i's own work-in-progress version. Checked for
+        both validation methods.
+        """
+        for use_brute_force_validation in [True, False]:
+            with self.subTest(use_brute_force_validation=use_brute_force_validation):
+                tkvs: TransactionalKeyValueStore = TransactionalKeyValueStore(
+                    use_brute_force_validation=use_brute_force_validation
+                )
+                tkvs.put("A", StoreTestAnomalies.Stuff(42, 0))
+
+                t_i: int = tkvs.begin_transaction()
+                t_j: int = tkvs.begin_transaction()
+
+                # t_i reads A:
+                result: list[tuple[str, object]] = tkvs.read_objects(
+                    t_i, WHERE_Clause("a", "==", 42)
+                )
+                self.assertEqual(result, [("A", StoreTestAnomalies.Stuff(42, 0))])
+
+                # t_j changes A and commits:
+                tkvs.update_object("A", StoreTestAnomalies.Stuff(7, 0), t_j)
+                tkvs.commit_transaction(t_j)
+
+                # t_i overwrites A based on its outdated read (allowed: no wip entry on A anymore):
+                tkvs.update_object("A", StoreTestAnomalies.Stuff(5, 0), t_i)
+
+                with self.assertRaises(TransactionAbortedException):
+                    tkvs.commit_transaction(t_i)
+
+    def test_validation_detects_phantom_insert(self):
+        """A TA aborts if another TA committed an insert that matches one of its earlier reads.
+
+        t_i                                 t_j
+        begin
+                                            begin
+        read a==42 -> sees nothing
+                                            insert C=(42, 0)
+                                            commit
+        update A
+        commit -> aborted
+
+        C did not exist in t_i's snapshot but matches now. Checked for both validation methods.
+        """
+        for use_brute_force_validation in [True, False]:
+            with self.subTest(use_brute_force_validation=use_brute_force_validation):
+                tkvs: TransactionalKeyValueStore = TransactionalKeyValueStore(
+                    use_brute_force_validation=use_brute_force_validation
+                )
+                tkvs.put("A", StoreTestAnomalies.Stuff(1, 0))
+
+                t_i: int = tkvs.begin_transaction()
+                t_j: int = tkvs.begin_transaction()
+
+                # t_i reads and finds nothing:
+                result: list[tuple[str, object]] = tkvs.read_objects(
+                    t_i, WHERE_Clause("a", "==", 42)
+                )
+                self.assertEqual(result, [])
+
+                # t_j inserts a matching object and commits (phantom for t_i):
+                tkvs.update_object("C", StoreTestAnomalies.Stuff(42, 0), t_j)
+                tkvs.commit_transaction(t_j)
+
+                # t_i writes something, so it is not read-only and must be validated:
+                tkvs.update_object("A", StoreTestAnomalies.Stuff(2, 0), t_i)
+
+                with self.assertRaises(TransactionAbortedException):
+                    tkvs.commit_transaction(t_i)
+
+    def test_validation_detects_concurrent_delete_of_read_object(self):
+        """A TA aborts if another TA committed the deletion of an object it had read.
+
+        t_i                                 t_j
+        begin
+                                            begin
+        read a==42 -> sees A
+                                            delete A
+                                            commit
+        update B
+        commit -> aborted
+
+        A matched in t_i's snapshot. Checked for both validation methods.
+        """
+        for use_brute_force_validation in [True, False]:
+            with self.subTest(use_brute_force_validation=use_brute_force_validation):
+                tkvs: TransactionalKeyValueStore = TransactionalKeyValueStore(
+                    use_brute_force_validation=use_brute_force_validation
+                )
+                tkvs.put("A", StoreTestAnomalies.Stuff(42, 0))
+                tkvs.put("B", StoreTestAnomalies.Stuff(0, 0))
+
+                t_i: int = tkvs.begin_transaction()
+                t_j: int = tkvs.begin_transaction()
+
+                # t_i reads A:
+                result: list[tuple[str, object]] = tkvs.read_objects(
+                    t_i, WHERE_Clause("a", "==", 42)
+                )
+                self.assertEqual(result, [("A", StoreTestAnomalies.Stuff(42, 0))])
+
+                # t_j deletes A and commits:
+                tkvs.delete_object("A", t_j)
+                tkvs.commit_transaction(t_j)
+
+                # t_i writes a different object, possibly based on what it read about A:
+                tkvs.update_object("B", StoreTestAnomalies.Stuff(1, 0), t_i)
+
+                with self.assertRaises(TransactionAbortedException):
+                    tkvs.commit_transaction(t_i)
+
+    def test_validation_detects_change_after_read_without_predicate(self):
+        """A TA that read all objects (no WHERE clause) aborts if another TA committed a change to any of them.
+
+        t_i                                 t_j
+        begin
+                                            begin
+        read all -> sees A and B
+                                            update A
+                                            commit
+        update B
+        commit -> aborted
+
+        A read without a WHERE clause selects every existing object. Checked for both validation methods.
+        """
+        for use_brute_force_validation in [True, False]:
+            with self.subTest(use_brute_force_validation=use_brute_force_validation):
+                tkvs: TransactionalKeyValueStore = TransactionalKeyValueStore(
+                    use_brute_force_validation=use_brute_force_validation
+                )
+                tkvs.put("A", StoreTestAnomalies.Stuff(1, 0))
+                tkvs.put("B", StoreTestAnomalies.Stuff(1, 0))
+
+                t_i: int = tkvs.begin_transaction()
+                t_j: int = tkvs.begin_transaction()
+
+                # t_i reads everything, i.e. without a WHERE clause:
+                result: list[tuple[str, object]] = tkvs.read_objects(t_i)
+                self.assertEqual(
+                    sorted(result, key=lambda item: item[0]),
+                    [
+                        ("A", StoreTestAnomalies.Stuff(1, 0)),
+                        ("B", StoreTestAnomalies.Stuff(1, 0)),
+                    ],
+                )
+
+                # t_j changes A and commits:
+                tkvs.update_object("A", StoreTestAnomalies.Stuff(9, 0), t_j)
+                tkvs.commit_transaction(t_j)
+
+                # t_i writes B, possibly based on what it read about A:
+                tkvs.update_object("B", StoreTestAnomalies.Stuff(5, 0), t_i)
+
+                with self.assertRaises(TransactionAbortedException):
+                    tkvs.commit_transaction(t_i)
+
+    def test_validation_ignores_concurrent_write_outside_read_predicate(self):
+        """A TA commits if the only concurrent change touched an object that never matched its reads.
+
+        t_i                                 t_j
+        begin
+                                            begin
+        read a==42 -> sees A
+                                            update X from (1, 0) to (2, 0)
+                                            commit
+        update A
+        commit -> succeeds
+
+        X matches a==42 neither before nor after t_j's change. Checked for both validation methods.
+        """
+        for use_brute_force_validation in [True, False]:
+            with self.subTest(use_brute_force_validation=use_brute_force_validation):
+                tkvs: TransactionalKeyValueStore = TransactionalKeyValueStore(
+                    use_brute_force_validation=use_brute_force_validation
+                )
+                tkvs.put("A", StoreTestAnomalies.Stuff(42, 0))
+                tkvs.put("X", StoreTestAnomalies.Stuff(1, 0))
+
+                t_i: int = tkvs.begin_transaction()
+                t_j: int = tkvs.begin_transaction()
+
+                # t_i reads A:
+                result: list[tuple[str, object]] = tkvs.read_objects(
+                    t_i, WHERE_Clause("a", "==", 42)
+                )
+                self.assertEqual(result, [("A", StoreTestAnomalies.Stuff(42, 0))])
+
+                # t_j changes X, which never matches t_i's read, and commits:
+                tkvs.update_object("X", StoreTestAnomalies.Stuff(2, 0), t_j)
+                tkvs.commit_transaction(t_j)
+
+                # t_i updates A and must commit:
+                tkvs.update_object("A", StoreTestAnomalies.Stuff(43, 0), t_i)
+                tkvs.commit_transaction(t_i)
+                self.assertEqual(tkvs.committed_transactions_trace[-1], t_i)
+
 
 if __name__ == "__main__":
     unittest.main(argv=["ignored", "-v"], verbosity=2, exit=False)
