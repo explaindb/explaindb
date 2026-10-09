@@ -323,8 +323,9 @@ class TransactionalKeyValueStore(VersionedKeyValueStore, ACIDStore):
     def read_objects(
         self, TA_id: int, where: Clause = None, collect_read_clause: bool = True
     ) -> list[tuple[str, object]]:
-        """Returns a list with all objects that match the WHERE_clause. If the store uses brute force validation, the
-        checksum of the returned list is also computed.
+        """Returns a list with all objects that match the WHERE_clause. If the store uses brute force validation, a
+        checksum is also computed over the objects matching the WHERE_clause in the committed snapshot of TA <TA_id>,
+        i.e. without TA <TA_id>'s own work-in-progress changes.
 
         In any case, the where clause (and checksum) are added to the read set of TA <TA_id>.
 
@@ -341,12 +342,13 @@ class TransactionalKeyValueStore(VersionedKeyValueStore, ACIDStore):
             raise RuntimeError(f"transaction {TA_id} committed already")
 
         ret: list[tuple[str, object]]
-        checksum: int
-        # issue the read twice to get correct checksums:
-        # TODO: this is not efficient, and can be fixed using indexes
-        # (1.) ignore the wip entries for the checksum computation
-        _, checksum = self._read_snapshot(TA_id, where, ignore_wip=True)
-        # (2.) consider the wip entries for the actual returned list
+        checksum: int | None = None
+        if self.use_brute_force_validation:
+            # only validation method 1 uses a checksum; it is computed over the committed snapshot,
+            # i.e. ignoring the wip entries of TA <TA_id>:
+            # TODO: this is not efficient, and can be fixed using indexes
+            _, checksum = self._read_snapshot(TA_id, where, ignore_wip=True)
+        # the returned list includes the wip entries of TA <TA_id>:
         ret, _ = self._read_snapshot(TA_id, where)
 
         if collect_read_clause:

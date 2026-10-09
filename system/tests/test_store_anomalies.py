@@ -26,13 +26,14 @@
 import unittest
 
 from system.query_processing.predicates import WHERE_Clause, TrueClause
-from system.stores.VersionedKeyValueStore import VersionedKeyValueStore
+from system.stores.VersionedKeyValueStore import HashableDict, VersionedKeyValueStore
 from system.stores.MVCC import (
     Abort,
     Begin,
     TransactionAbortedException,
     TransactionalKeyValueStore,
 )
+from system.stores.IndexedMVCC import IndexedTransactionalKeyValueStore
 from dataclasses import dataclass
 from faker import Faker
 
@@ -924,6 +925,72 @@ class StoreTestAnomalies(AbstractUnitTest):
                 tkvs.update_object("A", StoreTestAnomalies.Stuff(43, 0), t_i)
                 tkvs.commit_transaction(t_i)
                 self.assertEqual(tkvs.committed_transactions_trace[-1], t_i)
+
+    def test_read_objects_evaluates_where_clause_twice_only_for_method_1(self):
+        """With validation method 2, read_objects evaluates the where clause once per object; method 1 evaluates it a
+        second time on the committed snapshot to compute the checksum. The result contains the transaction's own
+        change.
+
+        Checked for both store classes and both validation methods.
+        """
+
+        class CountingWHERE_Clause(WHERE_Clause):
+            """A WHERE clause that counts how often it is evaluated."""
+
+            def __init__(self, attribute: str, operator: str, constant):
+                """See :meth:`WHERE_Clause.__init__`. Starts the evaluation counter at 0."""
+                super().__init__(attribute, operator, constant)
+                self.evaluations: int = 0
+
+            def evaluate(self, _object: object) -> bool:
+                """See :meth:`WHERE_Clause.evaluate`. Also increments the evaluation counter."""
+                self.evaluations += 1
+                return super().evaluate(_object)
+
+        for store_class in [
+            TransactionalKeyValueStore,
+            IndexedTransactionalKeyValueStore,
+        ]:
+            for use_brute_force_validation in [True, False]:
+                with self.subTest(
+                    store_class=store_class.__name__,
+                    use_brute_force_validation=use_brute_force_validation,
+                ):
+                    tkvs: TransactionalKeyValueStore = store_class(
+                        use_brute_force_validation=use_brute_force_validation
+                    )
+                    tkvs.put("A", StoreTestAnomalies.Stuff(42, 0))
+                    # B does not match the where clause, it is evaluated nevertheless:
+                    tkvs.put("B", StoreTestAnomalies.Stuff(7, 0))
+
+                    t_i: int = tkvs.begin_transaction()
+                    # t_i changes A such that it still matches the where clause:
+                    tkvs.update_object("A", StoreTestAnomalies.Stuff(42, 1), t_i)
+
+                    where: CountingWHERE_Clause = CountingWHERE_Clause("a", "==", 42)
+                    result: list[tuple[str, object]] = tkvs.read_objects(t_i, where)
+
+                    # check the counter before any commit, as validation in commit evaluates the clause again:
+                    # two objects, evaluated twice (method 1) or once (method 2) each:
+                    self.assertEqual(
+                        where.evaluations, 4 if use_brute_force_validation else 2
+                    )
+                    self.assertEqual(result, [("A", StoreTestAnomalies.Stuff(42, 1))])
+
+                    # method 1 checksums the committed version of A, method 2 stores no checksum:
+                    expected_checksum: int | None = (
+                        hash(("A", StoreTestAnomalies.Stuff(42, 0)))
+                        if use_brute_force_validation
+                        else None
+                    )
+                    self.assertEqual(
+                        tkvs.TD[t_i].read_clauses,
+                        {
+                            HashableDict(
+                                {"where_clause": where, "checksum": expected_checksum}
+                            )
+                        },
+                    )
 
 
 if __name__ == "__main__":
