@@ -65,6 +65,19 @@ class IndexedTransactionalKeyValueStore(TransactionalKeyValueStore, IndexedACIDS
         ]()
 
     @staticmethod
+    def _object_of(
+        version_entry: VersionedKeyValueStore.VersionEntry | None,
+    ) -> object | None:
+        """Returns the object stored in a version entry.
+
+        @param version_entry: a committed or work-in-progress version entry, or None
+        @return: the value of an UpdateEntry; None for a DeleteEntry (a delete marker carries no object) or no entry
+        """
+        if isinstance(version_entry, VersionedKeyValueStore.UpdateEntry):
+            return version_entry.value
+        return None
+
+    @staticmethod
     def _deindex_object(
         index: Index, attribute: str, object_id: str, old_object: object
     ) -> None:
@@ -156,11 +169,16 @@ class IndexedTransactionalKeyValueStore(TransactionalKeyValueStore, IndexedACIDS
         kv_entry: VersionedKeyValueStore.KVStoreEntry
         for object_id, kv_entry in self.key_value_store.items():
 
-            version_entry: VersionedKeyValueStore.UpdateEntry
+            # index every version that carries an object (delete markers carry none):
+            version_entry: VersionedKeyValueStore.VersionEntry
             for version_entry in kv_entry:
-                IndexedTransactionalKeyValueStore._index_object(
-                    index, attribute, object_id, version_entry.value
+                version_object: object | None = (
+                    IndexedTransactionalKeyValueStore._object_of(version_entry)
                 )
+                if version_object is not None:
+                    IndexedTransactionalKeyValueStore._index_object(
+                        index, attribute, object_id, version_object
+                    )
 
     def drop_index(self, index_name: str) -> None:
         """See :meth:`IndexedACIDStore.drop_index`.
@@ -189,14 +207,16 @@ class IndexedTransactionalKeyValueStore(TransactionalKeyValueStore, IndexedACIDS
         object_id: str
         for object_id in self.TD[TA_id].write_set:
             # get the wip entry of this object_id:
-            wip_entry: VersionedKeyValueStore.UpdateEntry = self.key_value_store[
-                object_id
-            ].wip
+            wip_entry: VersionedKeyValueStore.VersionEntry | None = (
+                self.key_value_store[object_id].wip
+            )
             assert wip_entry is not None
             assert wip_entry.start_validity == TA_id
 
-            # get the old object version of the wip entry:
-            old_object: object = wip_entry.value
+            # get the old object version of the wip entry (None for a delete marker, nothing to de-index):
+            old_object: object | None = IndexedTransactionalKeyValueStore._object_of(
+                wip_entry
+            )
 
             # maintain the indexes for this change, i.e. remove this wip entry from all indexes:
             self._maintain_indexes(
@@ -271,12 +291,13 @@ class IndexedTransactionalKeyValueStore(TransactionalKeyValueStore, IndexedACIDS
         assert object_id in self.key_value_store
 
         # 1. get the existing wip entry if it exists:
-        wip_entry: VersionedKeyValueStore.UpdateEntry = self.key_value_store[
+        wip_entry: VersionedKeyValueStore.VersionEntry | None = self.key_value_store[
             object_id
         ].wip
 
-        existing_wip_entry_object: object = (
-            wip_entry.value if wip_entry is not None else None
+        # the object of that wip entry (None for no wip entry or a delete marker):
+        existing_wip_entry_object: object | None = (
+            IndexedTransactionalKeyValueStore._object_of(wip_entry)
         )
 
         # 2. call super method to update the object_id as before:
@@ -305,11 +326,12 @@ class IndexedTransactionalKeyValueStore(TransactionalKeyValueStore, IndexedACIDS
         """
 
         # 1. get the existing wip entry if it exists:
-        wip_entry: VersionedKeyValueStore.UpdateEntry = self.key_value_store[
+        wip_entry: VersionedKeyValueStore.VersionEntry | None = self.key_value_store[
             object_id
         ].wip
-        existing_wip_entry_object: object = (
-            wip_entry.value if wip_entry is not None else None
+        # the object of that wip entry (None for no wip entry or a delete marker):
+        existing_wip_entry_object: object | None = (
+            IndexedTransactionalKeyValueStore._object_of(wip_entry)
         )
 
         # 2. call kv store method to delete the object_id (which actually adds a wip entry marking the deleted object):

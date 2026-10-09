@@ -158,9 +158,9 @@ class StoreTestBasics(AbstractUnitTest):
         self.assertEqual(itkvs.indexes_by_name, {})
 
         self.assertEqual(itkvs.indexes_by_properties, {})
-        itkvs.create_index("a", "a", "=")
+        itkvs.create_index("a_idx", "a", "=")
 
-        itkvs.drop_index("a")
+        itkvs.drop_index("a_idx")
 
 
 if __name__ == "__main__":

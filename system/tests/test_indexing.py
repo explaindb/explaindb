@@ -31,7 +31,9 @@ from system.indexes.indexes import (
     PythonDictionaryIndex,
 )
 from system.indexes.radix_trie import RadixTrie, KeyMapping
+from system.query_processing.predicates import TrueClause, WHERE_Clause
 from system.stores.IndexedMVCC import IndexedTransactionalKeyValueStore
+from system.stores.MVCC import TransactionAbortedException
 from faker import Faker
 
 from system.tests.abstract_unit_test import AbstractUnitTest
@@ -77,9 +79,9 @@ class IndexingTest(AbstractUnitTest):
         store.bulkload(fake_data)
 
         self.assertEqual(store.size(), 100)
-        store.create_index("a", "a", "=")
+        store.create_index("a_idx", "a", "=")
         with self.assertRaises(Exception):
-            store.create_index("a", "b", "=")
+            store.create_index("a_idx", "b", "=")
 
         # check for existence of metadata:
         self.assertEqual(len(store.indexes_by_properties), 1)
@@ -87,7 +89,7 @@ class IndexingTest(AbstractUnitTest):
 
         # get the index:
         index_entry: IndexedTransactionalKeyValueStore.IndexCatalogueEntry = (
-            store.indexes_by_name["a"]
+            store.indexes_by_name["a_idx"]
         )
         no_unique_keys = len(set([x[1].a for x in fake_data]))
         # worst case: all "a" values are unique
@@ -97,27 +99,27 @@ class IndexingTest(AbstractUnitTest):
         self.assertEqual(index_entry.index.size(), no_unique_keys)
 
         # drop the index:
-        store.drop_index("a")
+        store.drop_index("a_idx")
         self.assertEqual(len(store.indexes_by_properties), 0)
         self.assertEqual(len(store.indexes_by_name), 0)
 
         # drop the index again:
         with self.assertRaises(Exception):
-            store.drop_index("a")
+            store.drop_index("a_idx")
 
         # create the index again:
-        store.create_index("a", "a", "=")
+        store.create_index("a_idx", "a", "=")
         self.assertEqual(len(store.indexes_by_properties), 1)
         self.assertEqual(len(store.indexes_by_name), 1)
 
         # create a second index on "b":
-        store.create_index("b", "b", "=")
+        store.create_index("b_idx", "b", "=")
         self.assertEqual(len(store.indexes_by_properties), 2)
         self.assertEqual(len(store.indexes_by_name), 2)
 
         # get index on "b":
         index_entry_b: IndexedTransactionalKeyValueStore.IndexCatalogueEntry = (
-            store.indexes_by_name["b"]
+            store.indexes_by_name["b_idx"]
         )
         no_unique_keys_on_b = len(set([x[1].b for x in fake_data]))
         # worst case: all "b" values are unique
@@ -132,8 +134,8 @@ class IndexingTest(AbstractUnitTest):
         store.put("1", IndexingTest.Stuff(2, 3))
         store.put("2", IndexingTest.Stuff(4, 3))
 
-        store.create_index("a", "a", "=")
-        store.create_index("b", "b", "=")
+        store.create_index("a_idx", "a", "=")
+        store.create_index("b_idx", "b", "=")
 
         # test get_suitable_indexes():
         suitable_indexes_a = list(store.get_suitable_indexes("a", "="))
@@ -148,14 +150,14 @@ class IndexingTest(AbstractUnitTest):
         suitable_indexes_c = list(store.get_suitable_indexes("c", "="))
         self.assertEqual(len(suitable_indexes_c), 0)
 
-        # check for correct index entries of index a:
-        self.assertEqual(store.indexes_by_name["a"].index.size(), 2)
-        self.assertEqual(list(store.indexes_by_name["a"].index.get(2)), ["1"])
-        self.assertEqual(list(store.indexes_by_name["a"].index.get(4)), ["2"])
+        # check for correct index entries of index a_idx:
+        self.assertEqual(store.indexes_by_name["a_idx"].index.size(), 2)
+        self.assertEqual(list(store.indexes_by_name["a_idx"].index.get(2)), ["1"])
+        self.assertEqual(list(store.indexes_by_name["a_idx"].index.get(4)), ["2"])
 
-        # check for correct index entries of index b:
-        self.assertEqual(store.indexes_by_name["b"].index.size(), 1)
-        self.assertEqual(list(store.indexes_by_name["b"].index.get(3)), ["1", "2"])
+        # check for correct index entries of index b_idx:
+        self.assertEqual(store.indexes_by_name["b_idx"].index.size(), 1)
+        self.assertEqual(list(store.indexes_by_name["b_idx"].index.get(3)), ["1", "2"])
 
         # check index maintenance while running transactions
         TA_ID_1: int = store.begin_transaction()
@@ -164,18 +166,18 @@ class IndexingTest(AbstractUnitTest):
         store.update_object("1", IndexingTest.Stuff(3, 4), TA_ID_1)
 
         def check_indexes(_self, _store):
-            # check for correct index entries of index a:
-            _self.assertEqual(_store.indexes_by_name["a"].index.size(), 3)
-            _self.assertEqual(list(_store.indexes_by_name["a"].index.get(2)), ["1"])
-            _self.assertEqual(list(_store.indexes_by_name["a"].index.get(3)), ["1"])
-            _self.assertEqual(list(_store.indexes_by_name["a"].index.get(4)), ["2"])
+            # check for correct index entries of index a_idx:
+            _self.assertEqual(_store.indexes_by_name["a_idx"].index.size(), 3)
+            _self.assertEqual(list(_store.indexes_by_name["a_idx"].index.get(2)), ["1"])
+            _self.assertEqual(list(_store.indexes_by_name["a_idx"].index.get(3)), ["1"])
+            _self.assertEqual(list(_store.indexes_by_name["a_idx"].index.get(4)), ["2"])
 
-            # check for correct index entries of index b:
-            _self.assertEqual(_store.indexes_by_name["b"].index.size(), 2)
+            # check for correct index entries of index b_idx:
+            _self.assertEqual(_store.indexes_by_name["b_idx"].index.size(), 2)
             _self.assertEqual(
-                list(_store.indexes_by_name["b"].index.get(3)), ["1", "2"]
+                list(_store.indexes_by_name["b_idx"].index.get(3)), ["1", "2"]
             )
-            _self.assertEqual(list(_store.indexes_by_name["b"].index.get(4)), ["1"])
+            _self.assertEqual(list(_store.indexes_by_name["b_idx"].index.get(4)), ["1"])
 
         check_indexes(self, store)
         # check delete functionality:
@@ -194,8 +196,8 @@ class IndexingTest(AbstractUnitTest):
 
         store.put("1", IndexingTest.Stuff(2, 3))
 
-        store.create_index("a", "a", "=")
-        store.create_index("b", "b", "=")
+        store.create_index("a_idx", "a", "=")
+        store.create_index("b_idx", "b", "=")
 
         # check index maintenance while running transactions
         TA_ID_1: int = store.begin_transaction()
@@ -206,11 +208,192 @@ class IndexingTest(AbstractUnitTest):
         # abort the transaction:
         store.abort_transaction(TA_ID_1)
 
-        # check for correct index entries of indexes a and b:
-        self.assertEqual(store.indexes_by_name["a"].index.size(), 1)
-        self.assertEqual(store.indexes_by_name["b"].index.size(), 1)
-        self.assertEqual(list(store.indexes_by_name["a"].index.get(2)), ["1"])
-        self.assertEqual(list(store.indexes_by_name["b"].index.get(3)), ["1"])
+        # check for correct index entries of indexes a_idx and b_idx:
+        self.assertEqual(store.indexes_by_name["a_idx"].index.size(), 1)
+        self.assertEqual(store.indexes_by_name["b_idx"].index.size(), 1)
+        self.assertEqual(list(store.indexes_by_name["a_idx"].index.get(2)), ["1"])
+        self.assertEqual(list(store.indexes_by_name["b_idx"].index.get(3)), ["1"])
+
+    def test_index_maintenance_transactional_store_double_delete(self):
+        """A transaction may delete an object twice and commit; the index keeps the committed version."""
+        store = IndexedTransactionalKeyValueStore()
+        store.put("1", IndexingTest.Stuff(2, 3))
+        store.create_index("a_idx", "a", "=")
+
+        TA_ID_1: int = store.begin_transaction()
+        store.delete_object("1", TA_ID_1)
+        store.delete_object("1", TA_ID_1)
+        store.commit_transaction(TA_ID_1)
+
+        # a later transaction no longer sees the object:
+        TA_ID_2: int = store.begin_transaction()
+        self.assertEqual(store.read_objects(TA_ID_2, TrueClause()), [])
+
+        # the committed version before the delete is still indexed:
+        self.assertEqual(store.indexes_by_name["a_idx"].index.size(), 1)
+        self.assertEqual(list(store.indexes_by_name["a_idx"].index.get(2)), ["1"])
+
+    def test_index_maintenance_transactional_store_delete_then_update(self):
+        """A transaction may update an object it deleted before.
+
+        The new version is indexed next to the committed one; the delete marker adds nothing.
+        """
+        store = IndexedTransactionalKeyValueStore()
+        store.put("1", IndexingTest.Stuff(2, 3))
+        store.create_index("a_idx", "a", "=")
+
+        TA_ID_1: int = store.begin_transaction()
+        store.delete_object("1", TA_ID_1)
+        store.update_object("1", IndexingTest.Stuff(5, 5), TA_ID_1)
+
+        # the transaction sees its own update:
+        self.assertEqual(
+            store.read_objects(TA_ID_1, TrueClause()),
+            [("1", IndexingTest.Stuff(5, 5))],
+        )
+
+        # committed version and new wip version are both indexed:
+        self.assertEqual(store.indexes_by_name["a_idx"].index.size(), 2)
+        self.assertEqual(list(store.indexes_by_name["a_idx"].index.get(2)), ["1"])
+        self.assertEqual(list(store.indexes_by_name["a_idx"].index.get(5)), ["1"])
+
+    def test_index_maintenance_transactional_store_update_delete_abort(self):
+        """Aborting after a delete (preceded by an update) restores the index to its state before the transaction."""
+        store = IndexedTransactionalKeyValueStore()
+        store.put("1", IndexingTest.Stuff(2, 3))
+        store.create_index("a_idx", "a", "=")
+
+        TA_ID_1: int = store.begin_transaction()
+        store.update_object("1", IndexingTest.Stuff(7, 7), TA_ID_1)
+        store.delete_object("1", TA_ID_1)
+        store.abort_transaction(TA_ID_1)
+
+        # a later transaction sees the original object:
+        TA_ID_2: int = store.begin_transaction()
+        self.assertEqual(
+            store.read_objects(TA_ID_2, TrueClause()),
+            [("1", IndexingTest.Stuff(2, 3))],
+        )
+
+        # the index is exactly as before the aborted transaction:
+        self.assertEqual(store.indexes_by_name["a_idx"].index.size(), 1)
+        self.assertEqual(list(store.indexes_by_name["a_idx"].index.get(2)), ["1"])
+        with self.assertRaises(KeyError):
+            list(store.indexes_by_name["a_idx"].index.get(7))
+
+    def test_index_maintenance_transactional_store_update_conflicts_with_delete(
+        self,
+    ):
+        """A transaction cannot update an object that another transaction has deleted but not yet committed.
+
+        t1                          t2
+        begin
+                                    begin
+        delete "1"
+                                    update "1" -> aborted
+        commit
+        """
+        store = IndexedTransactionalKeyValueStore()
+        store.put("1", IndexingTest.Stuff(2, 3))
+        store.create_index("a_idx", "a", "=")
+
+        TA_ID_1: int = store.begin_transaction()
+        TA_ID_2: int = store.begin_transaction()
+        store.delete_object("1", TA_ID_1)
+
+        # TA 2 conflicts with the delete of TA 1 and is aborted:
+        with self.assertRaises(TransactionAbortedException):
+            store.update_object("1", IndexingTest.Stuff(5, 5), TA_ID_2)
+        self.assertNotIn(TA_ID_2, store.TD)
+
+        store.commit_transaction(TA_ID_1)
+
+        # the aborted update left no trace in the index:
+        self.assertEqual(store.indexes_by_name["a_idx"].index.size(), 1)
+        self.assertEqual(list(store.indexes_by_name["a_idx"].index.get(2)), ["1"])
+
+    def test_create_index_after_committed_delete(self):
+        """Creating an index after a committed delete indexes every committed object version, none for the delete."""
+        store = IndexedTransactionalKeyValueStore()
+        store.put("1", IndexingTest.Stuff(2, 3))
+        store.put("2", IndexingTest.Stuff(4, 3))
+
+        # delete "2" transactionally, leaving a committed delete marker:
+        TA_ID_1: int = store.begin_transaction()
+        store.delete_object("2", TA_ID_1)
+        store.commit_transaction(TA_ID_1)
+
+        store.create_index("a_idx", "a", "=")
+
+        # only real object versions are indexed:
+        self.assertEqual(store.indexes_by_name["a_idx"].index.size(), 2)
+        self.assertEqual(list(store.indexes_by_name["a_idx"].index.get(2)), ["1"])
+        self.assertEqual(list(store.indexes_by_name["a_idx"].index.get(4)), ["2"])
+
+    def test_index_contains_uncommitted_version_but_concurrent_reader_sees_snapshot(
+        self,
+    ):
+        """A transaction does not see another transaction's uncommitted update, although the index already holds it.
+
+        t1                          t2                          t3
+        begin
+        update "1" to (5, 5)
+                                    begin
+                                    read a==2 -> sees (2, 3)
+                                    read a==5 -> sees nothing
+        read a==5 -> sees (5, 5)
+        commit
+                                    read a==2 -> still sees (2, 3)
+                                                                begin
+                                                                read a==5 -> sees (5, 5)
+
+        The index holds all versions of an object, including uncommitted ones. Reads do not consult the index;
+        which version a transaction sees is decided by the store's snapshot rule.
+        """
+        store = IndexedTransactionalKeyValueStore()
+        store.put("1", IndexingTest.Stuff(2, 3))
+        store.create_index("a_idx", "a", "=")
+        where_a_2: WHERE_Clause = WHERE_Clause("a", "==", 2)
+        where_a_5: WHERE_Clause = WHERE_Clause("a", "==", 5)
+
+        TA_ID_1: int = store.begin_transaction()
+        store.update_object("1", IndexingTest.Stuff(5, 5), TA_ID_1)
+        TA_ID_2: int = store.begin_transaction()
+
+        # the index already offers "1" for both the committed and the uncommitted value:
+        self.assertEqual(list(store.indexes_by_name["a_idx"].index.get(2)), ["1"])
+        self.assertEqual(list(store.indexes_by_name["a_idx"].index.get(5)), ["1"])
+
+        # a read using the index would get "1" as a candidate for a==5, but TA 2's visible version does not
+        # satisfy a==5:
+        self.assertEqual(
+            store._get_visible_object_version("1", TA_ID_2), IndexingTest.Stuff(2, 3)
+        )
+        self.assertEqual(
+            store.read_objects(TA_ID_2, where_a_2), [("1", IndexingTest.Stuff(2, 3))]
+        )
+        self.assertEqual(store.read_objects(TA_ID_2, where_a_5), [])
+
+        # TA 1 sees its own update:
+        self.assertEqual(
+            store.read_objects(TA_ID_1, where_a_5), [("1", IndexingTest.Stuff(5, 5))]
+        )
+
+        store.commit_transaction(TA_ID_1)
+
+        # the index keeps both versions after the commit:
+        self.assertEqual(store.indexes_by_name["a_idx"].index.size(), 2)
+        self.assertEqual(list(store.indexes_by_name["a_idx"].index.get(2)), ["1"])
+        self.assertEqual(list(store.indexes_by_name["a_idx"].index.get(5)), ["1"])
+
+        # TA 2 keeps its snapshot; a transaction that starts now sees the new version:
+        self.assertEqual(
+            store.read_objects(TA_ID_2, where_a_2), [("1", IndexingTest.Stuff(2, 3))]
+        )
+        TA_ID_3: int = store.begin_transaction()
+        self.assertEqual(
+            store.read_objects(TA_ID_3, where_a_5), [("1", IndexingTest.Stuff(5, 5))]
+        )
 
 
 num_runs = 10
