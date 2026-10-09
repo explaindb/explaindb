@@ -23,6 +23,7 @@
 from __future__ import annotations
 
 import copy
+import hashlib
 import pprint
 from abc import ABC
 from dataclasses import dataclass
@@ -95,7 +96,7 @@ class TransactionalKeyValueStore(VersionedKeyValueStore, ACIDStore):
         """Entries used for the transaction dictionary."""
 
         # a set of where clauses used by the transaction to read objects from the store:
-        read_clauses: set[HashableDict[str, Clause | int]]
+        read_clauses: set[HashableDict[str, Clause | str | None]]
 
         # a set of object_ids of objects that were modified by the transaction:
         write_set: set[str]
@@ -295,17 +296,24 @@ class TransactionalKeyValueStore(VersionedKeyValueStore, ACIDStore):
 
     def _read_snapshot(
         self, timestamp: int, where: Clause = None, ignore_wip=False
-    ) -> tuple[list[tuple[str, object]], int]:
+    ) -> tuple[list[tuple[str, object]], str | None]:
         """Returns a list with all (object_id,objects)-pairs that match the WHERE_clause for the given snapshot
         <timestamp> plus the checksum. If the store uses brute force validation, the checksum of the returned list
-        is also computed.
+        is also computed, otherwise the checksum is None.
+
+        The checksum is the SHA-256 digest of the repr of the returned list, so it changes whenever the repr of the
+        result changes. This requires that the repr of an object shows its full content; otherwise a change of the
+        object can go undetected. Python's default repr shows the memory address of an object, so such objects are
+        compared by identity; this is safe as committed versions are never removed, so no other object can get the
+        address of a version that was read. Equal objects with different reprs only cause unnecessary aborts.
 
         @param timestamp: the timestamp to use for reading data, typically a transaction ID, required for snapshot
         isolation
         @param where: a where clause expression that is evaluated against the actual data (not the object ids)
         @param ignore_wip: if set to True, the wip entries are ignored, i.e. only committed versions are considered
 
-        @return: a pair with a list over the (object_id, object)-items in the result, plus a checksum
+        @return: a pair with a list over the (object_id, object)-items in the result, plus the checksum as a hex string
+        (None if the store does not use brute force validation)
         """
 
         # materialize the iterable to a list in order to be able to compute checksums:
@@ -313,10 +321,13 @@ class TransactionalKeyValueStore(VersionedKeyValueStore, ACIDStore):
             self._read_objects_iterable(timestamp, where, ignore_wip=ignore_wip)
         )
 
-        checksum: int | None = None
+        checksum: str | None = None
         if self.use_brute_force_validation:
-            # compute a checksum for the list of objects:
-            checksum = sum(map(lambda x: x.__hash__(), ret_list))
+            # compute a checksum for the list of objects: the repr contains the object_ids, contents, and order of
+            # the items, a cryptographic hash makes it practically impossible that different results collide:
+            checksum = hashlib.sha256(
+                repr(ret_list).encode("utf-8", "surrogatepass")
+            ).hexdigest()
 
         return ret_list, checksum
 
@@ -342,7 +353,7 @@ class TransactionalKeyValueStore(VersionedKeyValueStore, ACIDStore):
             raise RuntimeError(f"transaction {TA_id} committed already")
 
         ret: list[tuple[str, object]]
-        checksum: int | None = None
+        checksum: str | None = None
         if self.use_brute_force_validation:
             # only validation method 1 uses a checksum; it is computed over the committed snapshot,
             # i.e. ignoring the wip entries of TA <TA_id>:
@@ -575,7 +586,9 @@ class TransactionalKeyValueStore(VersionedKeyValueStore, ACIDStore):
                 # note that if a TA created a new version of the object with the exact same content as before, the
                 # checksum does NOT differ: the start_validity timestamp is not part of the checksum. This is not a
                 # problem: the read returns the same result as before, so TA <TA_id> may be serialized after that TA
-                # (method 2 below also skips objects whose content did not change)
+                # (method 2 below also skips objects whose content did not change). For objects with Python's default
+                # repr, however, the checksum differs, as their repr shows the object's identity; this only causes an
+                # unnecessary abort.
 
                 # (2b.ii.) now the object is NOT returned
                 # -> checksums will still differ as this object is not returned anymore and not used for the checksum
@@ -603,7 +616,7 @@ class TransactionalKeyValueStore(VersionedKeyValueStore, ACIDStore):
                 # In summary, we catch all cases by checking the checksums of the read clauses under both snapshots.
 
                 where: Clause = rc["where_clause"]
-                checksum: int = rc["checksum"]
+                checksum: str = rc["checksum"]
 
                 _, new_checksum = self._read_snapshot(
                     commit_timestamp_for_this_TA, where=where

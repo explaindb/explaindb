@@ -23,6 +23,7 @@
 # pylint: disable=invalid-name,missing-class-docstring,missing-function-docstring
 """Tests for transactional store isolation and anomalies (snapshot isolation, write skew)."""
 
+import hashlib
 import unittest
 
 from system.query_processing.predicates import WHERE_Clause, TrueClause
@@ -36,6 +37,7 @@ from system.stores.MVCC import (
 from system.stores.IndexedMVCC import IndexedTransactionalKeyValueStore
 from dataclasses import dataclass
 from faker import Faker
+from pydantic import BaseModel
 
 from system.tests.abstract_unit_test import AbstractUnitTest
 
@@ -926,6 +928,222 @@ class StoreTestAnomalies(AbstractUnitTest):
                 tkvs.commit_transaction(t_i)
                 self.assertEqual(tkvs.committed_transactions_trace[-1], t_i)
 
+    def test_validation_detects_write_skew_on_objects_with_equal_hash(self):
+        """A TA aborts if a concurrent TA changed an object it read, even if both versions have the same Python hash.
+
+        t_i                                 t_j
+        begin
+                                            begin
+        read a<0 -> sees A=(-1, 0)
+                                            read a>=0 -> sees B=(0, 0)
+                                            update A to (-2, 0)
+                                            commit
+        update B to (1, 0)
+        commit -> aborted
+
+        In CPython hash(-1) == hash(-2), so both versions of A have equal Python hashes; validation must still see the
+        change. Checked for both store classes and both validation methods.
+        """
+        for store_class in [
+            TransactionalKeyValueStore,
+            IndexedTransactionalKeyValueStore,
+        ]:
+            for use_brute_force_validation in [True, False]:
+                with self.subTest(
+                    store_class=store_class.__name__,
+                    use_brute_force_validation=use_brute_force_validation,
+                ):
+                    tkvs: TransactionalKeyValueStore = store_class(
+                        use_brute_force_validation=use_brute_force_validation
+                    )
+                    # precondition of this test: both versions of A have the same Python hash:
+                    self.assertEqual(
+                        hash(("A", StoreTestAnomalies.Stuff(-1, 0))),
+                        hash(("A", StoreTestAnomalies.Stuff(-2, 0))),
+                    )
+                    tkvs.put("A", StoreTestAnomalies.Stuff(-1, 0))
+                    tkvs.put("B", StoreTestAnomalies.Stuff(0, 0))
+
+                    t_i: int = tkvs.begin_transaction()
+                    t_j: int = tkvs.begin_transaction()
+
+                    # t_i reads A:
+                    result_i: list[tuple[str, object]] = tkvs.read_objects(
+                        t_i, WHERE_Clause("a", "<", 0)
+                    )
+                    self.assertEqual(result_i, [("A", StoreTestAnomalies.Stuff(-1, 0))])
+
+                    # t_j reads B:
+                    result_j: list[tuple[str, object]] = tkvs.read_objects(
+                        t_j, WHERE_Clause("a", ">=", 0)
+                    )
+                    self.assertEqual(result_j, [("B", StoreTestAnomalies.Stuff(0, 0))])
+
+                    # t_j changes A to a version with the same Python hash and commits:
+                    tkvs.update_object("A", StoreTestAnomalies.Stuff(-2, 0), t_j)
+                    tkvs.commit_transaction(t_j)
+
+                    # t_i writes B, possibly based on what it read about A:
+                    tkvs.update_object("B", StoreTestAnomalies.Stuff(1, 0), t_i)
+
+                    with self.assertRaises(TransactionAbortedException):
+                        tkvs.commit_transaction(t_i)
+
+    def test_validation_detects_swapped_values_of_read_objects(self):
+        """A TA aborts if a concurrent TA swapped the values of two objects it read.
+
+        t_i                                 t_j
+        begin
+                                            begin
+        read all -> sees x=(1, 0), z=(0, 0)
+                                            update x to (0, 0)
+                                            update z to (1, 0)
+                                            commit
+        update x to (1, 1)
+        commit -> aborted
+
+        The read result contains the same values before and after t_j, but assigned to other objects. Checked for both
+        store classes and both validation methods.
+        """
+        for store_class in [
+            TransactionalKeyValueStore,
+            IndexedTransactionalKeyValueStore,
+        ]:
+            for use_brute_force_validation in [True, False]:
+                with self.subTest(
+                    store_class=store_class.__name__,
+                    use_brute_force_validation=use_brute_force_validation,
+                ):
+                    tkvs: TransactionalKeyValueStore = store_class(
+                        use_brute_force_validation=use_brute_force_validation
+                    )
+                    tkvs.put("x", StoreTestAnomalies.Stuff(1, 0))
+                    tkvs.put("z", StoreTestAnomalies.Stuff(0, 0))
+
+                    t_i: int = tkvs.begin_transaction()
+                    t_j: int = tkvs.begin_transaction()
+
+                    # t_i reads everything, i.e. without a WHERE clause:
+                    result: list[tuple[str, object]] = tkvs.read_objects(t_i)
+                    self.assertEqual(
+                        sorted(result, key=lambda item: item[0]),
+                        [
+                            ("x", StoreTestAnomalies.Stuff(1, 0)),
+                            ("z", StoreTestAnomalies.Stuff(0, 0)),
+                        ],
+                    )
+
+                    # t_j swaps the values of x and z and commits:
+                    tkvs.update_object("x", StoreTestAnomalies.Stuff(0, 0), t_j)
+                    tkvs.update_object("z", StoreTestAnomalies.Stuff(1, 0), t_j)
+                    tkvs.commit_transaction(t_j)
+
+                    # t_i writes x, possibly based on what it read:
+                    tkvs.update_object("x", StoreTestAnomalies.Stuff(1, 1), t_i)
+
+                    with self.assertRaises(TransactionAbortedException):
+                        tkvs.commit_transaction(t_i)
+
+    def test_validation_accepts_unhashable_objects(self):
+        """A TA can read, update, and commit objects that are not hashable, e.g. a non-frozen pydantic model.
+
+        t_i
+        begin
+        read a==1 -> sees A=(1, 0)
+        update A to (1, 1)
+        commit -> succeeds
+
+        Checked for both store classes and both validation methods.
+        """
+
+        class Account(BaseModel):
+            """A mutable pydantic model; its instances are not hashable."""
+
+            a: int
+            b: int
+
+        for store_class in [
+            TransactionalKeyValueStore,
+            IndexedTransactionalKeyValueStore,
+        ]:
+            for use_brute_force_validation in [True, False]:
+                with self.subTest(
+                    store_class=store_class.__name__,
+                    use_brute_force_validation=use_brute_force_validation,
+                ):
+                    tkvs: TransactionalKeyValueStore = store_class(
+                        use_brute_force_validation=use_brute_force_validation
+                    )
+                    tkvs.put("A", Account(a=1, b=0))
+
+                    t_i: int = tkvs.begin_transaction()
+
+                    # t_i reads A (pydantic models compare by field values):
+                    result: list[tuple[str, object]] = tkvs.read_objects(
+                        t_i, WHERE_Clause("a", "==", 1)
+                    )
+                    self.assertEqual(result, [("A", Account(a=1, b=0))])
+
+                    # t_i updates A and must commit:
+                    tkvs.update_object("A", Account(a=1, b=1), t_i)
+                    tkvs.commit_transaction(t_i)
+                    self.assertEqual(tkvs.committed_transactions_trace[-1], t_i)
+
+    def test_validation_detects_conflict_on_unhashable_objects(self):
+        """A TA aborts if a concurrent TA committed a change to an unhashable object it read.
+
+        t_i                                 t_j
+        begin
+                                            begin
+        read a==1 -> sees A=(1, 0)
+                                            update A to (1, 1)
+                                            commit
+        update B to (2, 1)
+        commit -> aborted
+
+        The objects are non-frozen pydantic models. Checked for both store classes and both validation methods.
+        """
+
+        class Account(BaseModel):
+            """A mutable pydantic model; its instances are not hashable."""
+
+            a: int
+            b: int
+
+        for store_class in [
+            TransactionalKeyValueStore,
+            IndexedTransactionalKeyValueStore,
+        ]:
+            for use_brute_force_validation in [True, False]:
+                with self.subTest(
+                    store_class=store_class.__name__,
+                    use_brute_force_validation=use_brute_force_validation,
+                ):
+                    tkvs: TransactionalKeyValueStore = store_class(
+                        use_brute_force_validation=use_brute_force_validation
+                    )
+                    tkvs.put("A", Account(a=1, b=0))
+                    tkvs.put("B", Account(a=2, b=0))
+
+                    t_i: int = tkvs.begin_transaction()
+                    t_j: int = tkvs.begin_transaction()
+
+                    # t_i reads A (pydantic models compare by field values):
+                    result: list[tuple[str, object]] = tkvs.read_objects(
+                        t_i, WHERE_Clause("a", "==", 1)
+                    )
+                    self.assertEqual(result, [("A", Account(a=1, b=0))])
+
+                    # t_j changes A and commits:
+                    tkvs.update_object("A", Account(a=1, b=1), t_j)
+                    tkvs.commit_transaction(t_j)
+
+                    # t_i writes B, possibly based on what it read about A:
+                    tkvs.update_object("B", Account(a=2, b=1), t_i)
+
+                    with self.assertRaises(TransactionAbortedException):
+                        tkvs.commit_transaction(t_i)
+
     def test_read_objects_evaluates_where_clause_twice_only_for_method_1(self):
         """With validation method 2, read_objects evaluates the where clause once per object; method 1 evaluates it a
         second time on the committed snapshot to compute the checksum. The result contains the transaction's own
@@ -977,9 +1195,14 @@ class StoreTestAnomalies(AbstractUnitTest):
                     )
                     self.assertEqual(result, [("A", StoreTestAnomalies.Stuff(42, 1))])
 
-                    # method 1 checksums the committed version of A, method 2 stores no checksum:
-                    expected_checksum: int | None = (
-                        hash(("A", StoreTestAnomalies.Stuff(42, 0)))
+                    # method 1 checksums the committed version of A (SHA-256 over the repr of the result list),
+                    # method 2 stores no checksum:
+                    expected_checksum: str | None = (
+                        hashlib.sha256(
+                            repr([("A", StoreTestAnomalies.Stuff(42, 0))]).encode(
+                                "utf-8", "surrogatepass"
+                            )
+                        ).hexdigest()
                         if use_brute_force_validation
                         else None
                     )
