@@ -40,6 +40,56 @@ above the command giving the reason and the date, and remove the entry again as 
 as a fixed version is available. (A failing job blocks merging because the GitLab project
 setting "Pipelines must succeed" is enabled.)
 
+## Security checks
+
+Besides the dependency audit above, the CI scans every merge request for secrets.
+
+### Secret detection
+
+The CI job `gitleaks_secret_detection` runs [Gitleaks](https://github.com/gitleaks/gitleaks)
+on the commits of a merge request (not on older commits) and fails if one of them adds a
+secret, such as a password, an API token or a private key. The job log lists each finding
+with its file, line, rule and fingerprint, with the secret itself replaced by `REDACTED`;
+the job's artifact `gitleaks-report.json` holds the same.
+
+If a real secret was committed:
+
+1. Revoke or replace it right away and treat it as public: it may already have been copied,
+   and older versions of the merge request still show it.
+2. Remove it from the commit that added it, e.g. with `git rebase -i`, and force-push the
+   branch; removing it in a later commit is not enough, as the job scans every commit.
+3. Tell a project owner: until they redact the secret from the repository (Settings > Repository >
+   Repository maintenance > Redact text) or delete the merge request, the old commit stays visible
+   by its ID and in the merge request's older versions.
+
+If a finding is a false positive, accept it in one of two ways:
+
+- add the comment `gitleaks:allow` on the same line (e.g. `# gitleaks:allow` in Python), in the
+  commit that adds the line (amend or rewrite that commit; a later commit does not change the
+  earlier one), or
+- add the finding's `Fingerprint` from `gitleaks-report.json` as a line to the file
+  `.gitleaksignore` in the repository root. The fingerprint contains the commit ID, so after
+  a rebase, amend or squash, take the new fingerprint from the new report. (For a file that had
+  a merge conflict, the path in the fingerprint starts with `b/`; copy it as it is.) Reviewers
+  accept only entries that start with a commit ID: Gitleaks also accepts the short form
+  `path:rule:line`, but that would hide every later secret at that place, too.
+
+Reviewers check every new `gitleaks:allow` comment and `.gitleaksignore` entry. The job fails
+on a merge of three or more branches ("octopus" merge), which it cannot scan; use normal merges
+instead.
+
+To run the check locally with [Gitleaks installed](https://github.com/gitleaks/gitleaks#installing)
+and git 2.42 or newer, update `origin/main` (or the merge request's target branch) and scan the
+commits that are not yet on it. Like the CI job, the commands use only Gitleaks' default rules and
+ignore a `.gitleaks.toml` and the `.gitattributes` in the repository (`GIT_ATTR_SOURCE` points
+to git's empty tree, a fixed ID that git uses for an empty directory):
+
+```sh
+git fetch origin
+printf '[extend]\nuseDefault = true\n' > /tmp/gitleaks.toml
+GIT_ATTR_SOURCE=4b825dc642cb6eb9a060e54bf8d69288fbee4904 gitleaks git . --log-opts="--remerge-diff origin/main..HEAD" --config /tmp/gitleaks.toml --redact --verbose
+```
+
 ## Notebooks
 
 The notebooks live in `notebooks/`. When you add, rename or remove one, also update:

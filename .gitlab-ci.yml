@@ -163,6 +163,89 @@ dependency_audit:
     - uv tool run --exclude-newer 2026-10-01T00:00:00Z pip-audit==2.10.1 --strict --no-deps --disable-pip --progress-spinner off --desc -r /tmp/audit-requirements.txt
   interruptible: true
 
+# Secret detection with Gitleaks in merge requests: scans only the commits of
+# the merge request (from the merge base with the target branch to HEAD), so
+# old commits never block a merge request, and fails if one of them adds a
+# secret (password, API token, private key, ...). It also runs when only
+# Markdown changed, as secrets can be in any file. Gitleaks' default rules
+# apply; CONTRIBUTING.md explains how to accept a false positive (see also
+# docs/changes/007-gitleaks-secret-detection).
+gitleaks_secret_detection:
+  # In the first stage: the job is quick, and if it finds a secret the test
+  # stage does not run at all.
+  stage: prepare
+  tags:
+    - test
+  # The official image, pinned by tag and digest (a checksum of the exact
+  # image) so that a new release or a moved tag cannot change the result
+  # without notice; bump both together. The image starts the gitleaks command by
+  # default; the empty entrypoint [""] makes GitLab run the script lines below
+  # in a shell instead.
+  image:
+    name: zricethezav/gitleaks:v8.30.1@sha256:c00b6bd0aeb3071cbcb79009cb16a60dd9e0a7c60e2be9ab65d25e6bc8abbb7f
+    entrypoint: [""]
+  variables:
+    # Full history, so that the merge base with the target branch can be found.
+    GIT_DEPTH: 0
+    # Read git attributes from the empty tree (git's fixed ID for it) instead of
+    # the merge request's .gitattributes: an entry such as `* -diff` would hide
+    # file contents from `git log -p` and so from the scan. Files that git
+    # itself detects as binary are still skipped. Needs git 2.42 or newer; an
+    # older git ignores the variable without any warning.
+    GIT_ATTR_SOURCE: 4b825dc642cb6eb9a060e54bf8d69288fbee4904
+  # The job fetches from GitLab; one retry absorbs a network hiccup. A found
+  # secret simply fails twice.
+  retry:
+    max: 1
+    when:
+      - script_failure
+  script:
+    # Avoid git's "dubious ownership" error on a checkout owned by another user.
+    - git config --global --add safe.directory "$CI_PROJECT_DIR"
+    # Log the git version: GIT_ATTR_SOURCE needs git 2.42 or newer (an older
+    # git ignores it silently), --remerge-diff below needs 2.36 or newer.
+    - git --version
+    # Fetch the current target branch explicitly: the runner's checkout may lack
+    # it or hold an old copy, and an old merge base would make the scan include
+    # commits that are already on the target branch.
+    - git fetch origin "+refs/heads/$CI_MERGE_REQUEST_TARGET_BRANCH_NAME:refs/remotes/origin/$CI_MERGE_REQUEST_TARGET_BRANCH_NAME"
+    # The commit the merge request branched off: only commits after it are scanned.
+    - BASELINE="$(git merge-base "origin/$CI_MERGE_REQUEST_TARGET_BRANCH_NAME" HEAD)"
+    - echo "Scanning $(git rev-list --count "$BASELINE..HEAD") commit(s) after $BASELINE"
+    # A fixed configuration with only the default rules: otherwise gitleaks
+    # would read a .gitleaks.toml from the merge request itself, which could
+    # switch rules off unnoticed. (.gitleaksignore and gitleaks:allow comments
+    # still apply; reviewers check every new entry.)
+    - printf '[extend]\nuseDefault = true\n' > /tmp/gitleaks.toml
+    # Merges of three or more branches ("octopus" merges) cannot be scanned
+    # (--remerge-diff below handles two parents only), so they fail the job.
+    - test -z "$(git rev-list --min-parents=3 "$BASELINE..HEAD")" || { echo "Octopus merges cannot be scanned; split them into normal merges."; exit 1; }
+    # --remerge-diff also scans what a merge commit changes compared with an
+    # automatic merge of its parents, e.g. a secret added while resolving a
+    # conflict; gitleaks reads commits with `git log -p`, which by default shows
+    # nothing for merge commits. --redact keeps a found secret out of the job
+    # log and the report (job logs are readable by every logged-in user); the
+    # report keeps the fingerprints needed for .gitleaksignore. gitleaks exits 1
+    # on a finding, which fails the job.
+    - >
+      gitleaks git .
+      --log-opts="--remerge-diff $BASELINE..HEAD"
+      --config /tmp/gitleaks.toml
+      --redact
+      --verbose
+      --report-format json
+      --report-path gitleaks-report.json
+  artifacts:
+    # Keep the report also when the job fails, so findings can be inspected.
+    when: always
+    paths:
+      - gitleaks-report.json
+    expire_in: 1 week
+  rules:
+    # Only in merge requests: the scan needs a target branch.
+    - if: $CI_PIPELINE_SOURCE == 'merge_request_event'
+  interruptible: true
+
 py_test:
   stage: test
   tags:
