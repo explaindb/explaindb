@@ -25,6 +25,7 @@
 
 import hashlib
 import unittest
+from typing import Literal
 
 from system.query_processing.predicates import WHERE_Clause, TrueClause
 from system.stores.VersionedKeyValueStore import HashableDict, VersionedKeyValueStore
@@ -42,6 +43,9 @@ from pydantic import BaseModel
 from system.tests.abstract_unit_test import AbstractUnitTest
 
 Faker.seed(42)
+
+# how a transaction writes an object in the isolation level tests (see StoreTestAnomalies._write):
+WriteKind = Literal["insert", "update", "delete"]
 
 
 class StoreTestAnomalies(AbstractUnitTest):
@@ -1389,6 +1393,297 @@ class StoreTestAnomalies(AbstractUnitTest):
                             )
                         },
                     )
+
+    @staticmethod
+    def _write(
+        kind: WriteKind,
+        store: TransactionalKeyValueStore,
+        object_id: str,
+        TA_id: int,
+    ) -> None:
+        """Lets transaction <TA_id> write object <object_id> in <store>.
+
+        @param kind: "insert" or "update" calls update_object with the value Stuff(1, TA_id), which differs from the
+        value Stuff(1, 0) the tests put into the store and from the value of every other transaction; "delete" calls
+        delete_object
+        @param store: the store to write to
+        @param object_id: the object id of the object to write
+        @param TA_id: the transaction id of the writing transaction
+        """
+        if kind == "delete":
+            store.delete_object(object_id, TA_id)
+        else:
+            store.update_object(object_id, StoreTestAnomalies.Stuff(1, TA_id), TA_id)
+
+    def test_snapshot_isolation_level_aborts_write_to_object_committed_after_begin(
+        self,
+    ):
+        """Under snapshot isolation, a transaction that writes an object another transaction changed and committed
+        after the writer began is aborted at once, even if it never read the object.
+
+        t_i                                 t_j
+        begin
+                                            begin
+                                            update, delete or insert x
+                                            commit
+        update, delete or insert x -> aborted
+
+        t_i is removed from the transaction dictionary, its journal holds only Begin and Abort, and x has no wip entry.
+        Checked for every combination of t_j updating or deleting x and t_i updating or deleting x, on both store
+        classes (the indexed store checks that the isolation level is forwarded), and for t_j and t_i inserting the
+        same new key on TransactionalKeyValueStore (the indexed store does not support inserts).
+        """
+        write_kinds: list[WriteKind] = ["update", "delete"]
+        variants: list[
+            tuple[type[TransactionalKeyValueStore], WriteKind, WriteKind]
+        ] = [
+            (store_class, write_j, write_i)
+            for store_class in [
+                TransactionalKeyValueStore,
+                IndexedTransactionalKeyValueStore,
+            ]
+            for write_j in write_kinds
+            for write_i in write_kinds
+        ] + [
+            (TransactionalKeyValueStore, "insert", "insert")
+        ]
+
+        for store_class, write_j, write_i in variants:
+            with self.subTest(
+                store_class=store_class.__name__, write_j=write_j, write_i=write_i
+            ):
+                tkvs: TransactionalKeyValueStore = store_class(
+                    isolation_level="snapshot isolation"
+                )
+                object_id: str = "x"
+                if write_j != "insert":
+                    tkvs.put(object_id, StoreTestAnomalies.Stuff(1, 0))
+
+                t_i: int = tkvs.begin_transaction()
+                t_j: int = tkvs.begin_transaction()
+
+                # t_j writes x and commits after t_i began:
+                self._write(write_j, tkvs, object_id, t_j)
+                tkvs.commit_transaction(t_j)
+
+                # t_i writes x: aborted at the write by the snapshot isolation rule, not only at its commit:
+                with self.assertRaisesRegex(
+                    TransactionAbortedException, "aborted under snapshot isolation"
+                ):
+                    self._write(write_i, tkvs, object_id, t_i)
+
+                # t_i is gone from the transaction dictionary:
+                self.assertNotIn(t_i, tkvs.TD)
+
+                # t_i wrote nothing to the journal except its begin and abort entries:
+                self.assertEqual(
+                    list(tkvs.journal.get(t_i)),
+                    [Begin(TA_id=t_i), Abort(TA_id=t_i)],
+                )
+
+                # t_i left no wip entry on x:
+                self.assertIsNone(tkvs.key_value_store[object_id].wip)
+
+    def test_serializable_level_commits_blind_write_after_concurrent_commit(self):
+        """Under serializable, a transaction that writes an object another transaction changed and committed after
+        the writer began commits if it never read the object (blind write).
+
+        t_i                                 t_j
+        begin
+                                            begin
+                                            update or delete x
+                                            commit
+        update or delete x
+        commit -> succeeds
+
+        The result is the same as if t_j had run completely before t_i. Under snapshot isolation, t_i is aborted at
+        its write, see test_snapshot_isolation_level_aborts_write_to_object_committed_after_begin; with a read of x
+        before t_j's commit, t_i is aborted under serializable as well, see
+        test_validation_detects_lost_update_on_read_object. An update after a committed delete re-inserts the object.
+        Checked for every combination of t_j updating or deleting x and t_i updating or deleting x.
+        """
+        write_kinds: list[WriteKind] = ["update", "delete"]
+        for write_j in write_kinds:
+            for write_i in write_kinds:
+                with self.subTest(write_j=write_j, write_i=write_i):
+                    tkvs: TransactionalKeyValueStore = TransactionalKeyValueStore(
+                        isolation_level="serializable"
+                    )
+                    object_id: str = "x"
+                    tkvs.put(object_id, StoreTestAnomalies.Stuff(1, 0))
+
+                    t_i: int = tkvs.begin_transaction()
+                    t_j: int = tkvs.begin_transaction()
+
+                    # t_j writes x and commits after t_i began:
+                    self._write(write_j, tkvs, object_id, t_j)
+                    tkvs.commit_transaction(t_j)
+
+                    # t_i writes x without having read it and commits:
+                    self._write(write_i, tkvs, object_id, t_i)
+                    tkvs.commit_transaction(t_i)
+                    self.assertEqual(tkvs.committed_transactions_trace[-1], t_i)
+
+                    # t_i's version is the newest committed version of x:
+                    newest: VersionedKeyValueStore.VersionEntry = tkvs.key_value_store[
+                        object_id
+                    ].committed[-1]
+                    self.assertEqual(
+                        newest.start_validity, tkvs.TD[t_i].committed_timestamp
+                    )
+                    if write_i == "update":
+                        self.assertIsInstance(
+                            newest, VersionedKeyValueStore.UpdateEntry
+                        )
+                        self.assertEqual(newest.value, StoreTestAnomalies.Stuff(1, t_i))
+                    else:
+                        self.assertIsInstance(
+                            newest, VersionedKeyValueStore.DeleteEntry
+                        )
+
+    def test_snapshot_isolation_level_allows_write_skew(self):
+        """Under snapshot isolation, two transactions that read the same two objects and each update a different one
+        both commit (write skew).
+
+        t_i                                 t_j
+        begin
+                                            begin
+        read all -> sees s=(1, 0), t=(2, 0)
+                                            read all -> sees s=(1, 0), t=(2, 0)
+        update s to (1, 1)
+        commit -> succeeds
+                                            update t to (2, 1)
+                                            commit -> succeeds
+
+        Snapshot isolation looks only at the written object and does not validate reads at commit. Under serializable,
+        the second commit is aborted, see test_write_skew_anomaly.
+        """
+        tkvs: TransactionalKeyValueStore = TransactionalKeyValueStore(
+            isolation_level="snapshot isolation"
+        )
+        tkvs.put("s", StoreTestAnomalies.Stuff(1, 0))
+        tkvs.put("t", StoreTestAnomalies.Stuff(2, 0))
+        original: list[tuple[str, object]] = [
+            ("s", StoreTestAnomalies.Stuff(1, 0)),
+            ("t", StoreTestAnomalies.Stuff(2, 0)),
+        ]
+
+        t_i: int = tkvs.begin_transaction()
+        t_j: int = tkvs.begin_transaction()
+
+        # both transactions read s and t:
+        result_i: list[tuple[str, object]] = tkvs.read_objects(t_i)
+        self.assertEqual(sorted(result_i, key=lambda item: item[0]), original)
+        result_j: list[tuple[str, object]] = tkvs.read_objects(t_j)
+        self.assertEqual(sorted(result_j, key=lambda item: item[0]), original)
+
+        # t_i updates s and commits:
+        tkvs.update_object("s", StoreTestAnomalies.Stuff(1, 1), t_i)
+        tkvs.commit_transaction(t_i)
+
+        # t_j updates t and commits, although t_i changed s, which t_j read:
+        tkvs.update_object("t", StoreTestAnomalies.Stuff(2, 1), t_j)
+        tkvs.commit_transaction(t_j)
+        self.assertEqual(tkvs.committed_transactions_trace[-2:], [t_i, t_j])
+
+        # a later transaction sees both changes:
+        t_k: int = tkvs.begin_transaction()
+        result_k: list[tuple[str, object]] = tkvs.read_objects(t_k)
+        self.assertEqual(
+            sorted(result_k, key=lambda item: item[0]),
+            [
+                ("s", StoreTestAnomalies.Stuff(1, 1)),
+                ("t", StoreTestAnomalies.Stuff(2, 1)),
+            ],
+        )
+
+    def test_snapshot_isolation_level_allows_write_to_object_committed_before_begin(
+        self,
+    ):
+        """Under snapshot isolation, a transaction may write an object another transaction changed and committed
+        before the writer began.
+
+        t_i                                 t_j
+                                            begin
+                                            update x to (1, t_j)
+                                            commit
+        begin
+        update x to (1, t_i)
+        commit -> succeeds
+
+        Only commits after the begin of the writer count; commits before it are part of its snapshot.
+        """
+        tkvs: TransactionalKeyValueStore = TransactionalKeyValueStore(
+            isolation_level="snapshot isolation"
+        )
+        object_id: str = "x"
+        tkvs.put(object_id, StoreTestAnomalies.Stuff(1, 0))
+
+        # t_j updates x and commits before t_i begins:
+        t_j: int = tkvs.begin_transaction()
+        self._write("update", tkvs, object_id, t_j)
+        tkvs.commit_transaction(t_j)
+
+        # t_i updates x and commits:
+        t_i: int = tkvs.begin_transaction()
+        self._write("update", tkvs, object_id, t_i)
+        tkvs.commit_transaction(t_i)
+        self.assertEqual(tkvs.committed_transactions_trace[-1], t_i)
+        self.assertEqual(
+            tkvs.key_value_store[object_id].committed[-1].value,
+            StoreTestAnomalies.Stuff(1, t_i),
+        )
+
+    def test_snapshot_isolation_level_rejects_invalid_configuration(self):
+        """The store raises ValueError for an unknown isolation level and for snapshot isolation combined with brute
+        force validation (snapshot isolation does not validate reads).
+        """
+        with self.subTest(case="unknown isolation level"):
+            # the message lists the allowed isolation levels:
+            with self.assertRaisesRegex(
+                ValueError, "'serializable', 'snapshot isolation'"
+            ):
+                TransactionalKeyValueStore(isolation_level="read committed")
+        with self.subTest(case="snapshot isolation with brute force validation"):
+            with self.assertRaisesRegex(ValueError, "use_brute_force_validation"):
+                TransactionalKeyValueStore(
+                    use_brute_force_validation=True,
+                    isolation_level="snapshot isolation",
+                )
+
+    def test_snapshot_isolation_level_allows_reinsert_after_aborted_insert(self):
+        """Under snapshot isolation, a key whose insert was aborted can be inserted again and committed.
+
+        t_i                                 t_j
+                                            begin
+                                            insert x=(1, t_j)
+                                            abort
+        begin
+        insert x=(1, t_i)
+        commit -> succeeds
+
+        After the aborted insert, x has an entry in the store but no committed version.
+        """
+        tkvs: TransactionalKeyValueStore = TransactionalKeyValueStore(
+            isolation_level="snapshot isolation"
+        )
+        object_id: str = "x"
+
+        # t_j inserts x and aborts:
+        t_j: int = tkvs.begin_transaction()
+        self._write("insert", tkvs, object_id, t_j)
+        tkvs.abort_transaction(t_j)
+        self.assertEqual(tkvs.key_value_store[object_id].committed, [])
+
+        # t_i inserts x again and commits:
+        t_i: int = tkvs.begin_transaction()
+        self._write("insert", tkvs, object_id, t_i)
+        tkvs.commit_transaction(t_i)
+        self.assertEqual(tkvs.committed_transactions_trace[-1], t_i)
+        self.assertEqual(
+            tkvs.key_value_store[object_id].committed[-1].value,
+            StoreTestAnomalies.Stuff(1, t_i),
+        )
 
 
 if __name__ == "__main__":

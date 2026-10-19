@@ -28,7 +28,7 @@ from typing import Dict, Iterator
 from system.indexes.indexes import PythonDictionaryIndex
 from system.interfaces.indexing.Index import IndexProperties, Index, KeyValueStore
 from system.interfaces.stores import IndexedACIDStore
-from system.stores.MVCC import TransactionalKeyValueStore
+from system.stores.MVCC import IsolationLevel, TransactionalKeyValueStore
 from system.stores.VersionedKeyValueStore import VersionedKeyValueStore
 
 
@@ -45,14 +45,23 @@ class IndexedTransactionalKeyValueStore(TransactionalKeyValueStore, IndexedACIDS
         # the index itself:
         index: KeyValueStore[object, str]
 
-    def __init__(self, use_brute_force_validation: bool = False):
+    def __init__(
+        self,
+        use_brute_force_validation: bool = False,
+        isolation_level: IsolationLevel = "serializable",
+    ):
         """Initialize the store and its (initially empty) index catalogues.
 
         :param use_brute_force_validation: if True, the underlying store uses the brute-force validation
             algorithm in the validation phase (see :class:`~system.stores.MVCC.TransactionalKeyValueStore`).
+        :param isolation_level: the isolation level of the underlying store, "serializable" or "snapshot isolation"
+            (see :class:`~system.stores.MVCC.TransactionalKeyValueStore`).
         """
         # a dictionary of indexes:
-        super().__init__(use_brute_force_validation=use_brute_force_validation)
+        super().__init__(
+            use_brute_force_validation=use_brute_force_validation,
+            isolation_level=isolation_level,
+        )
 
         # a dictionary mapping from the index name to (IndexProperties, Index):
         self.indexes_by_name: Dict[

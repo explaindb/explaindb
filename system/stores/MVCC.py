@@ -27,7 +27,7 @@ import hashlib
 import pprint
 from abc import ABC
 from dataclasses import dataclass
-from typing import Dict, ItemsView, cast
+from typing import Dict, ItemsView, Literal, cast
 
 from pydantic import BaseModel
 
@@ -36,6 +36,10 @@ from system.interfaces.indexing.Index import KeyValueStore
 from system.interfaces.stores import ACIDStore
 from system.query_processing.predicates import Clause
 from system.stores.VersionedKeyValueStore import HashableDict, VersionedKeyValueStore
+
+# the isolation levels the store supports:
+IsolationLevel = Literal["serializable", "snapshot isolation"]
+ISOLATION_LEVELS: tuple[IsolationLevel, ...] = ("serializable", "snapshot isolation")
 
 
 class TransactionAbortedException(Exception):
@@ -88,7 +92,24 @@ class TransactionalKeyValueStore(VersionedKeyValueStore, ACIDStore):
     Notice that this store goes far beyond the typical key value store, which typically is only transactional per
     SINGLE key update/insert/delete.
     In contrast, this store is FULLY transaction, i.e. it allows for multiple keys to be updated within a single
-    transaction. Those changes are SERIALIZABLE. The write skew anomaly is detected and avoided.
+    transaction.
+
+    The store supports two isolation levels, chosen in ``__init__``. In both, a transaction reads the snapshot of its
+    begin plus its own writes (snapshot read; older comments in this file that say "under snapshot isolation" for
+    reading, e.g. in ``_get_visible_object_version``, mean this snapshot read, which both levels use). In both, a
+    transaction that writes an object which another transaction is still writing (not yet committed) is aborted. In
+    addition:
+
+    - serializable (default): at its commit, the store checks whether a transaction that committed in the meantime
+      changed something this transaction read; if so, it is aborted. The write skew anomaly is detected and avoided.
+    - snapshot isolation: reads are not checked. Instead, a transaction that writes an object is aborted at once if
+      another transaction changed that object and committed after the writer began. Together with the rule above,
+      of two concurrent transactions that write the same object, the later writer is aborted at once (first updater
+      wins). Lost updates cannot happen, but write skew can.
+
+    Note: a blind write (one that does not read the object first) to an object that another transaction changed and
+    committed since the writer began is aborted under snapshot isolation, but can commit under serializable. The
+    tutorial page "MVCC & Versioned Stores" explains write skew and shows both schedules.
     """
 
     @dataclass
@@ -111,16 +132,33 @@ class TransactionalKeyValueStore(VersionedKeyValueStore, ACIDStore):
         self,
         use_brute_force_validation: bool = False,
         persistence_layer: KeyValueStore = None,
+        isolation_level: IsolationLevel = "serializable",
     ):
         """Initializes the store.
 
+        Raises ValueError if the isolation level is unknown, or if snapshot isolation is combined with brute force
+        validation.
+
         @param use_brute_force_validation: if set to True, the store will use the brute force validation algorithm in
-        the validation phase.
+        the validation phase; only applies to the isolation level serializable.
+        @param isolation_level: "serializable" (default) validates the reads of a transaction at its commit;
+        "snapshot isolation" does not validate reads; instead, it aborts a transaction as soon as it writes an object
+        that another transaction changed and committed after the writer began.
         @param persistence_layer: the persistence layer to use for the store
         TODO: DISCUSS the following
         @param journal: the journal (file) aka journal aka redo journal to use for the store, key: TA_id, list of TA_log_entry,
                 called journal here to avoid confusing it with Python's logging module
         """
+
+        if isolation_level not in ISOLATION_LEVELS:
+            raise ValueError(
+                f"unknown isolation level {isolation_level!r}, expected one of {ISOLATION_LEVELS}"
+            )
+        if isolation_level == "snapshot isolation" and use_brute_force_validation:
+            raise ValueError(
+                "snapshot isolation does not validate reads, so use_brute_force_validation=True requires "
+                "isolation_level='serializable'"
+            )
 
         super().__init__(persistence_layer=persistence_layer)
 
@@ -128,6 +166,7 @@ class TransactionalKeyValueStore(VersionedKeyValueStore, ACIDStore):
             int, JournalEntry
         ]()
         self.use_brute_force_validation: bool = use_brute_force_validation
+        self.isolation_level: IsolationLevel = isolation_level
 
         # transaction id counter:
         self.TA_id: int = 1
@@ -369,6 +408,44 @@ class TransactionalKeyValueStore(VersionedKeyValueStore, ACIDStore):
 
         return ret
 
+    def _committed_after_begin(self, object_id: str, TA_id: int) -> bool:
+        """Returns True if another transaction committed a version of object <object_id> after TA <TA_id> began.
+
+        @param object_id: the object id of the object to be written
+        @param TA_id: the transaction id of the writing transaction, i.e. its begin timestamp
+        @return: True if the newest committed version of the object is newer than the begin of TA <TA_id>, False
+        otherwise, in particular if there is no committed version
+        """
+        if object_id not in self.key_value_store:
+            return False
+        committed: list[VersionedKeyValueStore.VersionEntry] = self.key_value_store[
+            object_id
+        ].committed
+        # transaction ids and commit timestamps come from the same counter (non-transactional writes use 0), so a
+        # larger timestamp means "committed after TA <TA_id> began":
+        return len(committed) > 0 and committed[-1].start_validity > TA_id
+
+    def _abort_if_committed_after_begin(self, object_id: str, TA_id: int) -> None:
+        """Under snapshot isolation, aborts TA <TA_id> if another transaction committed object <object_id> after
+        TA <TA_id> began.
+
+        Snapshot isolation does not validate reads, so it cannot tell whether TA <TA_id> read the object; to rule out
+        lost updates, it aborts every write to an object committed after TA <TA_id> began, even a blind one. Raises
+        :class:`TransactionAbortedException` after aborting the transaction; does nothing under serializable.
+
+        @param object_id: the object id of the object to be written
+        @param TA_id: the transaction id of the writing transaction, i.e. its begin timestamp
+        """
+        if (
+            self.isolation_level == "snapshot isolation"
+            and self._committed_after_begin(object_id, TA_id)
+        ):
+            self.abort_transaction(TA_id)
+            raise TransactionAbortedException(
+                f"transaction {TA_id} aborted under snapshot isolation: another transaction changed object "
+                f"{object_id} and committed after transaction {TA_id} began"
+            )
+
     def update_object(self, object_id: str, updated_object: object, TA_id: int) -> None:
         """See :meth:`ACIDStore.update_object`.
 
@@ -376,7 +453,8 @@ class TransactionalKeyValueStore(VersionedKeyValueStore, ACIDStore):
         concurrent environment. Aborts the transaction and raises :class:`TransactionAbortedException` if another
         transaction currently holds a work-in-progress version of the object. Writes an :class:`Update` journal
         entry, stores a deep copy of the value as an append-only work-in-progress version, and records the
-        object_id in the transaction's write set.
+        object_id in the transaction's write set. Under the isolation level snapshot isolation, also aborts the
+        transaction if another transaction changed the object and committed after the transaction began.
         """
 
         if self.TD[TA_id].committed_timestamp is not None:
@@ -398,6 +476,9 @@ class TransactionalKeyValueStore(VersionedKeyValueStore, ACIDStore):
             raise TransactionAbortedException(
                 f"another transaction is currently modifying object {object_id} already"
             )
+
+        # under snapshot isolation, no other transaction may have committed the object since TA <TA_id> began:
+        self._abort_if_committed_after_begin(object_id, TA_id)
 
         # 1. write to the journal:
         # update the journal for this TA:
@@ -441,7 +522,8 @@ class TransactionalKeyValueStore(VersionedKeyValueStore, ACIDStore):
         Must be executed atomically in a concurrent environment. Aborts the transaction and raises
         :class:`TransactionAbortedException` if another transaction currently holds a work-in-progress version of the
         object. Writes a :class:`Delete` journal entry, adds a delete-marker work-in-progress version, and records the
-        object_id in the transaction's write set.
+        object_id in the transaction's write set. Under the isolation level snapshot isolation, also aborts the
+        transaction if another transaction changed the object and committed after the transaction began.
         """
 
         assert TA_id in self.TD, f"transaction {TA_id} not found in the system"
@@ -459,6 +541,9 @@ class TransactionalKeyValueStore(VersionedKeyValueStore, ACIDStore):
             raise TransactionAbortedException(
                 f"another transaction is currently modifying object {object_id} already"
             )
+
+        # under snapshot isolation, no other transaction may have committed the object since TA <TA_id> began:
+        self._abort_if_committed_after_begin(object_id, TA_id)
 
         # 1. write to the journal:
 
@@ -525,13 +610,18 @@ class TransactionalKeyValueStore(VersionedKeyValueStore, ACIDStore):
         """Validates TA <TA_id> against all TAs that committed after TA <TA_id> started.
 
         Uses the efficient method 2, which only checks the write sets of TAs that committed after TA <TA_id>
-        started.
+        started. Under the isolation level snapshot isolation, always passes, as reads are not validated (conflicting
+        writes are refused in update_object / delete_object).
 
         @param TA_id: the transaction id to be validated
         @param commit_timestamp_for_this_TA: the commit timestamp for this transaction
 
         @return True if the validation was successful, i.e. there was no conflict; False otherwise.
         """
+
+        # snapshot isolation does not validate reads (write skew can happen):
+        if self.isolation_level == "snapshot isolation":
+            return True
 
         # "Our variation of precision locking tests discrete writes (updates, deletions, and insertions of
         # records) of recently committed transactions against predicate-oriented reads of the transaction that is
