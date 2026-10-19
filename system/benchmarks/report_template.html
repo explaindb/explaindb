@@ -1,0 +1,183 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<!--
+    This is ExplainDB, educational database systems materials.
+
+    Copyright (C) 2026 Prof. Dr. Jens Dittrich, Saarland University
+
+    This program is free software: you can redistribute it and/or modify
+    it under the terms of the GNU Affero General Public License as
+    published by the Free Software Foundation, either version 3 of the
+    License, or (at your option) any later version.
+
+    This program is distributed in the hope that it will be useful,
+    but WITHOUT ANY WARRANTY; without even the implied warranty of
+    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+    GNU Affero General Public License for more details.
+
+    You should have received a copy of the GNU Affero General Public License
+    along with this program.  If not, see <https://www.gnu.org/licenses/>.
+
+    benchmarks/index.html is written by system/benchmarks/report.py from system/benchmarks/report_template.html;
+    edit the template, not the page.
+-->
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>MVCC store benchmarks: Python and Rust</title>
+<style>
+:root {
+  --background: #ffffff; --text: #1a1a1a; --muted: #555555; --grid: #dddddd; --axis: #888888;
+  --python: #0072b2; --rust: #d55e00; --table-stripe: #f4f4f4;
+  color-scheme: light dark;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --background: #121212; --text: #e6e6e6; --muted: #a8a8a8; --grid: #3a3a3a; --axis: #777777;
+    --python: #56b4e9; --rust: #e69f00; --table-stripe: #1d1d1d;
+  }
+}
+@media print {
+  :root {
+    --background: #ffffff; --text: #000000; --muted: #444444; --grid: #cccccc; --axis: #888888;
+    --python: #0072b2; --rust: #d55e00; --table-stripe: #f4f4f4;
+  }
+}
+body {
+  margin: 0 auto; padding: 1rem; max-width: 40rem; background: var(--background); color: var(--text);
+  font-family: system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; line-height: 1.5;
+}
+h1 { font-size: 1.6rem; line-height: 1.25; }
+h2 { font-size: 1.25rem; margin-top: 2rem; }
+code, pre { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 0.9em; }
+pre { overflow-x: auto; padding: 0.5rem; background: var(--table-stripe); }
+figure { margin: 1.5rem 0; }
+figcaption { color: var(--muted); font-size: 0.9rem; }
+svg { display: block; width: 100%; height: auto; }
+svg.bar-chart { max-width: 30rem; }
+svg .label { fill: var(--text); }
+svg .heading { fill: var(--text); font-weight: 600; }
+svg .grid { stroke: var(--grid); }
+svg .axis { stroke: var(--axis); }
+svg .line { fill: none; }
+svg .python { stroke: var(--python); }
+svg .rust { stroke: var(--rust); }
+svg .marker.python, svg .bar.python { fill: var(--python); stroke: none; }
+svg .marker.rust, svg .bar.rust { fill: var(--rust); stroke: none; }
+.panels { display: grid; grid-template-columns: 1fr 1fr; gap: 0.5rem; }
+@media (max-width: 30rem) { .panels { grid-template-columns: 1fr; } }
+.legend { font-size: 0.9rem; }
+.legend .python { color: var(--python); }
+.legend .rust { color: var(--rust); }
+.table-wrapper { overflow-x: auto; }
+table { border-collapse: collapse; font-size: 0.85rem; white-space: nowrap; }
+caption { text-align: left; caption-side: bottom; padding-top: 0.5rem; color: var(--muted); }
+th, td { padding: 0.25rem 0.5rem; text-align: right; }
+th:first-child, td:first-child { text-align: left; }
+tbody tr:nth-child(odd) { background: var(--table-stripe); }
+dl { display: grid; grid-template-columns: max-content 1fr; gap: 0.25rem 1rem; }
+dd { margin: 0; overflow-wrap: anywhere; }
+</style>
+</head>
+<body>
+<h1>MVCC store benchmarks: Python and Rust</h1>
+
+<p>The same multi-version concurrency control (MVCC) store exists twice in ExplainDB: in Python, as used by the
+course notebooks, and as a port to Rust with the same algorithm. On the machine below, Rust is between
+$lowest_speedup and $highest_speedup as fast as Python.</p>
+
+<h2>What is measured</h2>
+<p>Seven workloads run on both stores with the same data: a store of <i>n</i> objects, each with two numbers
+<code>a</code> and <code>b</code> computed from its position. Only the work in the list below is timed; building
+the data, and filling the store for all workloads but <code>bulkload</code>, are not.</p>
+<ul>
+<li><code>bulkload</code>: loading <i>n</i> objects, time per object.</li>
+<li><code>get</code>: one non-transactional <code>get</code> of every object, time per get.</li>
+<li><code>read</code>: $read_operations reads of the objects with <code>a == 42</code> in one transaction,
+time per read; each read scans all <i>n</i> objects.</li>
+<li><code>update_commit</code>: $update_commit_operations transactions of one update and a commit, time per
+transaction.</li>
+<li><code>read_only</code>: $read_only_operations transactions reading the objects with <code>a &lt; 100</code>,
+time per transaction.</li>
+<li><code>read_write_disjoint</code>: $read_write_disjoint_operations transactions each reading one object and
+updating it, without conflicts, time per transaction.</li>
+<li><code>read_write_contention</code>: $contention_pairs pairs of transactions on the same objects where the
+second fails validation, time per transaction, committed or aborted.</li>
+</ul>
+<p>The first four, the micro-benchmarks, run with $micro_sizes objects and validation method 2; the last three
+with $tps_size objects and both validation methods: method 1 compares checksums of everything a
+transaction read, method 2 checks which objects concurrent transactions wrote.</p>
+<p>Each benchmark (workload, store size and validation method) runs in its own process, once per language. A
+pass runs the workload on a fresh store; a repetition repeats passes until their timed parts add up to at least
+$min_milliseconds&nbsp;ms. After a warm-up, $repetitions repetitions are measured; the charts show their median,
+the micro-benchmark charts also their range as thin bars, and the table shows every range. Python's garbage
+collector is switched off during a repetition, as Python's <code>timeit</code> does. After every pass both
+programs report a fingerprint of the work done (commits, aborts, objects read, the final transaction counter,
+which counts begins and commits, versions stored and a checksum of the final objects), and the run stops if
+Python and Rust differ.</p>
+
+<h2>Micro-benchmarks</h2>
+<figure data-testid="chart-micro">
+<p class="legend" aria-hidden="true"><span class="python">● Python</span>
+&nbsp; <span class="rust">■ Rust</span></p>
+<div class="panels">$micro_charts</div>
+<figcaption>Time per operation over the size of the store; both axes are logarithmic and all four charts share
+the time axis. <code>read</code> grows with the store because every read scans all objects; the other
+operations take about the same time at every size.</figcaption>
+</figure>
+
+<h2>Transactions per second</h2>
+<figure data-testid="chart-tps">
+<p class="legend" aria-hidden="true"><span class="python">■ Python</span>
+&nbsp; <span class="rust">■ Rust</span></p>
+$tps_chart
+<figcaption>Transactions per second on a store of $tps_size objects, for each validation method; for
+<code>read_write_contention</code>, committed and aborted transactions count alike. The axis is linear, so the
+Python bars are short; their values are written next to them.</figcaption>
+</figure>
+
+<h2>Speed-up</h2>
+<figure data-testid="chart-speedup">
+$speedup_chart
+<figcaption>How many times as fast Rust is as Python: the Python median divided by the Rust median, for every
+benchmark (store sizes for the micro-benchmarks, validation methods for the transactions).</figcaption>
+</figure>
+
+<h2>All numbers</h2>
+<p>For every benchmark: the median and the range of the time per operation in each language, the speed-up of Rust,
+and the commits and aborts of one pass. On a narrow screen, the table scrolls sideways.</p>
+<div class="table-wrapper">
+<table data-testid="results-table">
+<caption>Time per operation of every benchmark in Python and Rust</caption>
+<thead><tr><th scope="col">Workload</th><th scope="col">Method</th><th scope="col">Objects</th>
+<th scope="col">Python median</th><th scope="col">Python range</th><th scope="col">Rust median</th>
+<th scope="col">Rust range</th><th scope="col">Speed-up</th><th scope="col">Commits</th>
+<th scope="col">Aborts</th></tr></thead>
+<tbody>
+$table_rows
+</tbody>
+</table>
+</div>
+
+<h2>How fair is the comparison?</h2>
+<p>Both stores run the same algorithm on the same data, single-threaded, and both scan all objects for every
+<code>read_objects</code> and keep every version, so both pay for the algorithm itself. The comparison measures
+the two implementations, not the languages alone: Python also pays for its pydantic version and journal objects,
+for deep copies on writes and for the generator of <code>get</code>; Rust pays for copies of the objects and ids
+it returns from <code>read_objects</code> and of the values it puts into the journal on updates. The numbers
+depend on the machine; they were measured once on the machine below.</p>
+
+<h2>Machine</h2>
+<dl data-testid="provenance">
+$provenance
+</dl>
+
+<h2>How to reproduce</h2>
+<p>In a checkout of the ExplainDB repository with Python (uv) and Rust installed, on an otherwise idle machine
+on mains power:</p>
+<pre><code>uv run python -m system.benchmarks.run
+uv run python -m system.benchmarks.report</code></pre>
+<p>The first command measures and writes <code>benchmarks/results.json</code>; the second writes this page.</p>
+</body>
+</html>

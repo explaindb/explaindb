@@ -814,13 +814,17 @@ class RunTest(unittest.TestCase):
         """The provenance holds exactly the date, the machine (CPU, architecture, cores, operating system), the
         Python and Rust versions, the git commit and whether the working tree has changes.
 
-        Would fail if `git_dirty` ignored changes, or a new field, e.g. the host or user name, revealed who measured
-        the results where.
+        Would fail if `git_dirty` ignored changes, a new field, e.g. the host or user name, revealed who measured
+        the results where, or rustc ran outside generated/rust/, whose rust-toolchain.toml names the Rust version
+        that builds the benchmark program.
         """
         for porcelain, dirty in ((" M generated/rust/Cargo.toml\n", True), ("", False)):
             with self.subTest(porcelain=porcelain):
-                result: dict[str, object] = run.provenance(
-                    FakeRunner("", "", porcelain)
+                runner: FakeRunner = FakeRunner("", "", porcelain)
+                result: run.Provenance = run.provenance(runner)
+                self.assertIn(
+                    (["rustc", "--version"], run.ROOT / "generated" / "rust"),
+                    runner.calls,
                 )
                 self.assertEqual(
                     {
@@ -834,11 +838,11 @@ class RunTest(unittest.TestCase):
                         "git_commit",
                         "git_dirty",
                     },
-                    set(result),
+                    set(vars(result)),
                 )
-                self.assertEqual("0123456789abcdef", result["git_commit"])
-                self.assertEqual(dirty, result["git_dirty"])
-                self.assertEqual("rustc 1.98.1 (fake 2026-10-01)", result["rustc"])
+                self.assertEqual("0123456789abcdef", result.git_commit)
+                self.assertEqual(dirty, result.git_dirty)
+                self.assertEqual("rustc 1.98.1 (fake 2026-10-01)", result.rustc)
 
     def test_run_records_provenance_before_building(self) -> None:
         """A run asks git and rustc for the provenance before it builds the Rust program, builds it in generated/rust/

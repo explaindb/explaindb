@@ -45,7 +45,7 @@ The port is built in steps (see
 | audit | blocking `cargo audit` of the Rust dependencies in CI | done |
 | 1b | MVCC store (`TransactionalKeyValueStore`) with journal, both validation methods | done |
 | 2 | indexed MVCC store, serializability test | planned |
-| 3 | benchmarks: Python against Rust | workloads and results done; HTML report planned |
+| 3 | benchmarks: Python against Rust | done: workloads, results and HTML report |
 
 The notebooks and the query optimizer stay Python only.
 
@@ -131,6 +131,19 @@ The comparison measures the two implementations of the same algorithm, not the l
 for pydantic version and journal objects, deep copies on writes and the generator of `get`, and runs with its
 garbage collector switched off while timing; Rust pays for copies of the objects and ids it returns from
 `read_objects` and of the values it puts into the journal on updates.
+
+The results of a full run are shown in [`benchmarks/index.html`](../../benchmarks/index.html), a single static page
+with charts, a table of all numbers and the text on what is measured and how fair it is; it needs no scripts or
+other files, so it can be put on any web site. After a new full run, write it again:
+
+```sh
+uv run python -m system.benchmarks.report
+```
+
+[`system/benchmarks/report.py`](../../system/benchmarks/report.py) fills the template
+[`report_template.html`](../../system/benchmarks/report_template.html) (the page's text and style) with the charts
+drawn by [`charts.py`](../../system/benchmarks/charts.py); a test fails if the committed page does not match the
+committed results.
 
 ## Where to find what
 
@@ -225,6 +238,7 @@ includes the test files of that folder and the shared `tests/common/mod.rs`.
 | `test_indexing.py::test_indexing_basics_with_duplicates` | `test_indexing.rs::test_indexing_basics_with_duplicates`; the other tests of `test_indexing.py` (B-trees, radix tries, ...) are not ported; those of the indexed transactional store follow in step 2 |
 | `test_DBMS.py` (uses the versioned store) | not ported: the DBMS is not part of the port |
 | `test_store_benchmark.py` (tests of the benchmarks) | the tests at the end of `examples/benchmarks/workloads.rs`: the same fingerprints of the same small runs, plus the Rust program's own argument parsing and the fingerprints of the runs the runner measures, with 1 000 objects and 100 reads or 1 000 transactions (`fingerprints_of_realistic_runs`, Rust only, too slow for the Python tests); the runner (`system/benchmarks/run.py`) is tested in Python only |
+| `test_benchmark_report.py`, `test_benchmark_charts.py` (tests of the HTML report and its charts) | none: the report is Python only |
 
 The other tests in the Rust files have no Python counterpart; they check the behaviour of each operator, the errors,
 several of the deviations listed above and further edge cases of the stores, the index and the predicates.

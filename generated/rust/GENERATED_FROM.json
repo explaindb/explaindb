@@ -12,7 +12,7 @@
       "path": "Cargo.toml"
     },
     {
-      "sha256": "sha256:00f2e7d6c9ce0e4a",
+      "sha256": "sha256:15a6977636278ef3",
       "sources": [],
       "path": "README.md"
     },
@@ -24,7 +24,7 @@
           "path": "system/benchmarks/workloads.py"
         },
         {
-          "sha256": "sha256:03d299b9e165468b",
+          "sha256": "sha256:8169cc3f0cbed1b0",
           "path": "system/tests/benchmarks/test_store_benchmark.py"
         }
       ],

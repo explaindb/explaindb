@@ -6,3 +6,5 @@ generated/rust/** gitlab-generated linguist-generated text eol=lf
 generated/rust/Cargo.toml -gitlab-generated -linguist-generated
 generated/rust/Cargo.lock -gitlab-generated -linguist-generated
 generated/rust/rust-toolchain.toml -gitlab-generated -linguist-generated
+# A test compares the benchmark report byte for byte with a fresh rendering, which has LF line endings:
+benchmarks/index.html text eol=lf

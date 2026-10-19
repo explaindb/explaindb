@@ -34,6 +34,7 @@ import math
 import os
 import platform
 import re
+import shlex
 import statistics
 import subprocess
 import sys
@@ -54,6 +55,9 @@ RUST_TARGET: Path = RUST_FOLDER / "target"
 RUST_BENCHMARK: Path = RUST_TARGET / "release" / "examples" / "workloads"
 # where the results go:
 RESULTS: Path = ROOT / "benchmarks" / "results.json"
+# the HTML report of the results, and the command that writes it (see system/benchmarks/report.py):
+REPORT: Path = ROOT / "benchmarks" / "index.html"
+REPORT_COMMAND: str = "uv run python -m system.benchmarks.report"
 
 # runs a command (a list of arguments, no shell) in a directory and returns its standard output:
 CommandRunner = Callable[[list[str], Path], str]
@@ -97,7 +101,7 @@ class Measurement:
     # the fingerprint of a pass, the same in every repetition:
     fingerprint: Fingerprint
 
-    # the median, minimum and maximum below are for the HTML report (next merge request) and the tests:
+    # the median, minimum and maximum below are for the HTML report and the tests:
 
     @property
     def median(self) -> float:
@@ -252,19 +256,42 @@ def cpu_model(runner: CommandRunner) -> str:
     return platform.processor() or platform.machine()
 
 
-def provenance(runner: CommandRunner) -> dict[str, object]:
-    """Returns where and when the results were measured: machine (no host or user name), versions, git commit."""
-    return {
-        "date": datetime.datetime.now(datetime.UTC).isoformat(timespec="seconds"),
-        "cpu": cpu_model(runner),
-        "machine": platform.machine(),
-        "cores": os.cpu_count(),
-        "os": platform.platform(terse=True),
-        "python": platform.python_version(),
-        "rustc": runner(["rustc", "--version"], RUST_FOLDER).strip(),
-        "git_commit": runner(["git", "rev-parse", "HEAD"], ROOT).strip(),
-        "git_dirty": runner(["git", "status", "--porcelain"], ROOT).strip() != "",
-    }
+@dataclass(frozen=True)
+class Provenance:  # pylint: disable=too-many-instance-attributes
+    """Where and when results were measured; deliberately without host or user name."""
+
+    # the start of the run in UTC, ISO 8601:
+    date: str
+    # the CPU model:
+    cpu: str
+    # the processor architecture, e.g. arm64:
+    machine: str
+    # the number of logical cores, None if unknown:
+    cores: int | None
+    # the operating system and its version:
+    os: str
+    # the Python version:
+    python: str
+    # the output of `rustc --version`:
+    rustc: str
+    # the git commit the run started from, and whether the working tree had changes:
+    git_commit: str
+    git_dirty: bool
+
+
+def provenance(runner: CommandRunner) -> Provenance:
+    """Returns where and when the results are measured: machine, versions and git commit."""
+    return Provenance(
+        date=datetime.datetime.now(datetime.UTC).isoformat(timespec="seconds"),
+        cpu=cpu_model(runner),
+        machine=platform.machine(),
+        cores=os.cpu_count(),
+        os=platform.platform(terse=True),
+        python=platform.python_version(),
+        rustc=runner(["rustc", "--version"], RUST_FOLDER).strip(),
+        git_commit=runner(["git", "rev-parse", "HEAD"], ROOT).strip(),
+        git_dirty=runner(["git", "status", "--porcelain"], ROOT).strip() != "",
+    )
 
 
 def build_rust(runner: CommandRunner) -> None:
@@ -288,7 +315,7 @@ def run(quick: bool, repetitions: int, runner: CommandRunner) -> dict[str, objec
     """Builds the Rust program, runs every benchmark in both languages and returns the results with provenance,
     which is recorded first, so that the results name the commit and working-tree state the run started from.
     """
-    started_from: dict[str, object] = provenance(runner)
+    started_from: Provenance = provenance(runner)
     build_rust(runner)
     measurements: list[dict[str, object]] = []
     all_configs: list[Config] = configs(quick)
@@ -305,14 +332,32 @@ def run(quick: bool, repetitions: int, runner: CommandRunner) -> dict[str, objec
         ):
             measurements.append(asdict(measurement))
     return {
-        "provenance": started_from,
+        "provenance": asdict(started_from),
         "repetitions": repetitions,
         "measurements": measurements,
     }
 
 
+def report_hint(results: Path) -> str:
+    """Returns the command that writes the HTML report from the results file `results`, with the paths quoted for
+    the shell.
+
+    For results elsewhere than `RESULTS`, the page goes next to them with the suffix ``.html``, or with
+    ``-report.html`` if that would overwrite the results or the committed page.
+    """
+    if results.resolve() == RESULTS.resolve():
+        return REPORT_COMMAND
+    page: Path = results.with_suffix(".html")
+    if page.resolve() in (results.resolve(), REPORT.resolve()):
+        page = results.with_name(f"{results.stem}-report.html")
+    # with "=", a path that starts with "-" is not taken for an option:
+    return f"{REPORT_COMMAND} --results={shlex.quote(str(results))} --output={shlex.quote(str(page))}"
+
+
 def main(arguments: list[str]) -> None:
-    """Runs the benchmarks and writes the results to `benchmarks/results.json` (or `--output`)."""
+    """Runs the benchmarks and writes the results to `benchmarks/results.json` (or `--output`); after a full run,
+    prints the command that writes the HTML report.
+    """
     parser: argparse.ArgumentParser = argparse.ArgumentParser(
         prog="python -m system.benchmarks.run",
         description="Runs the benchmarks of the MVCC store in Python and Rust.",
@@ -342,6 +387,11 @@ def main(arguments: list[str]) -> None:
     options.output.parent.mkdir(parents=True, exist_ok=True)
     options.output.write_text(json.dumps(results, indent=2) + "\n", encoding="utf-8")
     print(f"wrote {options.output}", file=sys.stderr)
+    if not options.quick:
+        print(
+            f"write the HTML report with: {report_hint(options.output)}",
+            file=sys.stderr,
+        )
 
 
 if __name__ == "__main__":
