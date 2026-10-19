@@ -19,9 +19,12 @@
 //
 //
 
-//! The tests of the package `stores`, one module per Python test file in `system/tests/stores/`.
+//! The tests of the package `stores`, one module per Python test file in `system/tests/stores/`, and the Rust-only
+//! tests of the MVCC store in `mvcc`.
 
 #[path = "../common/mod.rs"]
 mod common;
 
+mod mvcc;
+mod test_store_anomalies;
 mod test_stores_basics;

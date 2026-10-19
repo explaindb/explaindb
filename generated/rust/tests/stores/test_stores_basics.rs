@@ -19,11 +19,12 @@
 //
 //
 
-//! Tests for the versioned key-value store (Python: `system/tests/stores/test_stores_basics.py`).
+//! Tests for the versioned and the transactional key-value store (Python: `system/tests/stores/test_stores_basics.py`).
 
-use crate::common::{Stuff, create_fake_data};
+use crate::common::{Stuff, create_fake_data, delete_marker, update};
 use explaindb::{
-    KvStoreEntry, StoreError, Version, VersionEntry, VersionedKeyValueStore, VersionedStore,
+    JournalEntry, KvStoreEntry, StoreError, TdEntry, TransactionalKeyValueStore,
+    TransactionalStore, Version, VersionEntry, VersionedKeyValueStore, VersionedStore,
 };
 use indexmap::IndexMap;
 
@@ -61,27 +62,144 @@ where
     }
 }
 
-/// The basics of [`check_key_value_store_basics`] hold for every store; the transactional stores are added here as
-/// they are ported.
+/// The basics of [`check_key_value_store_basics`] hold for every store; the indexed transactional store is added
+/// here once it is ported.
 #[test]
 fn test_key_value_store_basics() {
     check_key_value_store_basics::<VersionedKeyValueStore<Stuff>>();
+    check_key_value_store_basics::<TransactionalKeyValueStore<Stuff>>();
 }
 
-/// Returns a committed update version with the given start of validity and value.
-fn update(start_validity: u64, value: Stuff) -> VersionEntry<Stuff> {
-    VersionEntry {
-        start_validity,
-        version: Version::Update(value),
-    }
+/// A new transactional store is empty (no objects, no transactions, no journal entries) and hands out the
+/// transaction ids 1, 2, ... in this order.
+#[test]
+fn test_transactional_key_value_store() {
+    let mut store: TransactionalKeyValueStore<Stuff> = TransactionalKeyValueStore::new();
+    assert_eq!(store.size(), 0);
+    assert!(store.state.td.is_empty());
+    assert!(store.state.committed_transactions_trace.is_empty());
+    assert_eq!(store.state.journal.size(), 0);
+    assert_eq!(store.state.ta_id, 1);
+    assert_eq!(store.next_ta_id(), 1);
+    assert_eq!(store.next_ta_id(), 2);
 }
 
-/// Returns a delete marker with the given start of validity.
-fn delete_marker(start_validity: u64) -> VersionEntry<Stuff> {
-    VersionEntry {
-        start_validity,
-        version: Version::Delete,
-    }
+/// `begin_transaction` adds the transaction to the transaction dictionary with no reads, no writes, no commit
+/// timestamp and the number of transactions committed so far (0); committing it does not change that number, and a
+/// transaction that begins afterwards gets 1.
+///
+/// Python stores the index of the last committed transaction in the trace instead, which is -1 before the first
+/// commit; Rust stores the length of the trace, i.e. the position after that index.
+#[test]
+fn test_begin_transaction() {
+    let mut store: TransactionalKeyValueStore<Stuff> = TransactionalKeyValueStore::new();
+    let ta_id: u64 = store.begin_transaction();
+
+    // check store:
+    assert_eq!(store.key_value_store().len(), 0);
+    let td_entry: &TdEntry<Stuff> = &store.state.td[&ta_id];
+    assert!(td_entry.read_clauses.is_empty());
+    assert!(td_entry.write_set.is_empty());
+    assert_eq!(td_entry.committed_timestamp, None);
+    assert_eq!(td_entry.committed_transactions_at_begin, 0);
+
+    store.begin_transaction();
+
+    store.commit_transaction(ta_id).unwrap();
+    assert_eq!(store.state.td[&ta_id].committed_transactions_at_begin, 0);
+
+    // a transaction that begins after one commit sees a trace of length 1 (Python: index 0):
+    let later_ta_id: u64 = store.begin_transaction();
+    assert_eq!(
+        store.state.td[&later_ta_id].committed_transactions_at_begin,
+        1
+    );
+}
+
+/// Every step of a transaction appends one entry to the journal of that transaction: `Begin`, then `Commit` with
+/// its commit timestamp, or `Update` and `Delete` with the object id, and `Abort`. The journal has one key per
+/// transaction, so its size is the number of transactions begun.
+#[test]
+fn test_journaling() {
+    let mut store: TransactionalKeyValueStore<String> = TransactionalKeyValueStore::new();
+    let ta_id: u64 = store.begin_transaction();
+
+    // check begin:
+    assert_eq!(store.state.journal.size(), 1);
+    assert_eq!(
+        store.state.journal.get(&ta_id).unwrap(),
+        [JournalEntry::Begin { ta_id }]
+    );
+
+    let ta_id_2: u64 = store.begin_transaction();
+    // check second begin:
+    assert_eq!(store.state.journal.size(), 2);
+    assert_eq!(store.state.journal.get(&ta_id).unwrap().len(), 1);
+    assert_eq!(
+        store.state.journal.get(&ta_id_2).unwrap(),
+        [JournalEntry::Begin { ta_id: ta_id_2 }]
+    );
+
+    store.commit_transaction(ta_id).unwrap();
+    // check commit: transaction ids 1 and 2 are taken, so the commit timestamp is 3
+    assert_eq!(store.state.journal.size(), 2);
+    assert_eq!(
+        store.state.journal.get(&ta_id).unwrap(),
+        [
+            JournalEntry::Begin { ta_id },
+            JournalEntry::Commit {
+                ta_id,
+                commit_timestamp: 3
+            },
+        ]
+    );
+
+    store.update_object("a", "b".to_string(), ta_id_2).unwrap();
+    // check update:
+    assert_eq!(store.state.journal.size(), 2);
+    assert_eq!(store.state.journal.get(&ta_id_2).unwrap().len(), 2);
+    assert_eq!(
+        store.state.journal.get(&ta_id_2).unwrap()[1],
+        JournalEntry::Update {
+            ta_id: ta_id_2,
+            object_id: "a".to_string(),
+            new_value: "b".to_string(),
+        }
+    );
+
+    store.update_object("b", "c".to_string(), ta_id_2).unwrap();
+    // check update:
+    assert_eq!(store.state.journal.size(), 2);
+    assert_eq!(store.state.journal.get(&ta_id_2).unwrap().len(), 3);
+    assert_eq!(
+        store.state.journal.get(&ta_id_2).unwrap()[2],
+        JournalEntry::Update {
+            ta_id: ta_id_2,
+            object_id: "b".to_string(),
+            new_value: "c".to_string(),
+        }
+    );
+
+    store.delete_object("b", ta_id_2).unwrap();
+    // check delete:
+    assert_eq!(store.state.journal.size(), 2);
+    assert_eq!(store.state.journal.get(&ta_id_2).unwrap().len(), 4);
+    assert_eq!(
+        store.state.journal.get(&ta_id_2).unwrap()[3],
+        JournalEntry::Delete {
+            ta_id: ta_id_2,
+            object_id: "b".to_string(),
+        }
+    );
+
+    store.abort_transaction(ta_id_2);
+    // check abort:
+    assert_eq!(store.state.journal.size(), 2);
+    assert_eq!(store.state.journal.get(&ta_id_2).unwrap().len(), 5);
+    assert_eq!(
+        store.state.journal.get(&ta_id_2).unwrap()[4],
+        JournalEntry::Abort { ta_id: ta_id_2 }
+    );
 }
 
 /// Checks that `put` of a key that is already in the store `S` fails with `KeyExists` and leaves the stored value
@@ -105,10 +223,12 @@ where
     );
 }
 
-/// `put` of an existing key fails in a [`VersionedKeyValueStore`], see [`check_put_of_existing_key_fails`].
+/// `put` of an existing key fails in the versioned and in the transactional store, see
+/// [`check_put_of_existing_key_fails`].
 #[test]
 fn put_of_existing_key_fails() {
     check_put_of_existing_key_fails::<VersionedKeyValueStore<Stuff>>();
+    check_put_of_existing_key_fails::<TransactionalKeyValueStore<Stuff>>();
 }
 
 /// Checks that `get` and `delete` of a key that is not in the store `S` fail with `KeyNotFound`, both in an empty
@@ -140,11 +260,12 @@ where
     assert_eq!(store.size(), 1);
 }
 
-/// `get` and `delete` of a missing key fail in a [`VersionedKeyValueStore`], see
+/// `get` and `delete` of a missing key fail in the versioned and in the transactional store, see
 /// [`check_get_and_delete_of_missing_key_fail`].
 #[test]
 fn get_and_delete_of_missing_key_fail() {
     check_get_and_delete_of_missing_key_fail::<VersionedKeyValueStore<Stuff>>();
+    check_get_and_delete_of_missing_key_fail::<TransactionalKeyValueStore<Stuff>>();
 }
 
 /// Checks what a delete leaves behind in the store `S`: the key stays in the store, so `size` still counts it and
@@ -180,11 +301,12 @@ where
     assert_eq!(entry.wip, None);
 }
 
-/// A delete in a [`VersionedKeyValueStore`] keeps the key with a delete marker, see
-/// [`check_delete_keeps_key_with_delete_marker`].
+/// A non-transactional delete in the versioned and in the transactional store keeps the key with a delete marker,
+/// see [`check_delete_keeps_key_with_delete_marker`].
 #[test]
 fn delete_keeps_key_with_delete_marker() {
     check_delete_keeps_key_with_delete_marker::<VersionedKeyValueStore<Stuff>>();
+    check_delete_keeps_key_with_delete_marker::<TransactionalKeyValueStore<Stuff>>();
 }
 
 /// Checks that `get` fails with `NotVisible` for a key of the store `S` that has no committed version, only a
@@ -206,11 +328,12 @@ where
     assert_eq!(store.get("A"), Err(StoreError::NotVisible("A".to_string())));
 }
 
-/// `get` of a key without committed version in a [`VersionedKeyValueStore`] fails, see
+/// `get` of a key without committed version fails in the versioned and in the transactional store, see
 /// [`check_get_without_committed_version_is_not_visible`].
 #[test]
 fn get_without_committed_version_is_not_visible() {
     check_get_without_committed_version_is_not_visible::<VersionedKeyValueStore<Stuff>>();
+    check_get_without_committed_version_is_not_visible::<TransactionalKeyValueStore<Stuff>>();
 }
 
 /// Checks that a bulkload into the store `S` whose input repeats a key fails with `KeyExists` for that key: the
@@ -241,11 +364,12 @@ where
     );
 }
 
-/// A bulkload into a [`VersionedKeyValueStore`] stops at a duplicate key, see
+/// A bulkload into the versioned and into the transactional store stops at a duplicate key, see
 /// [`check_bulkload_stops_at_duplicate_key`].
 #[test]
 fn bulkload_stops_at_duplicate_key() {
     check_bulkload_stops_at_duplicate_key::<VersionedKeyValueStore<Stuff>>();
+    check_bulkload_stops_at_duplicate_key::<TransactionalKeyValueStore<Stuff>>();
 }
 
 /// Checks that `flush` of the store `S`, for all objects or for a single one, leaves the store unchanged, as the
@@ -268,10 +392,11 @@ where
     assert_eq!(after, expected);
 }
 
-/// `flush` of a [`VersionedKeyValueStore`] changes nothing, see [`check_flush_changes_nothing`].
+/// `flush` of the versioned and of the transactional store changes nothing, see [`check_flush_changes_nothing`].
 #[test]
 fn flush_changes_nothing() {
     check_flush_changes_nothing::<VersionedKeyValueStore<Stuff>>();
+    check_flush_changes_nothing::<TransactionalKeyValueStore<Stuff>>();
 }
 
 /// Iterating over a store entry, with `iter()` or with `for version in &entry`, yields the committed versions in

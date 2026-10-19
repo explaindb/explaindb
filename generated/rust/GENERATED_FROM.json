@@ -7,12 +7,12 @@
       "path": "Cargo.lock"
     },
     {
-      "sha256": "sha256:d1168417571914f2",
+      "sha256": "sha256:38791ce9d9090d84",
       "sources": [],
       "path": "Cargo.toml"
     },
     {
-      "sha256": "sha256:54d4c152aa86d8a4",
+      "sha256": "sha256:9a6fb1b0ae8f3689",
       "sources": [],
       "path": "README.md"
     },
@@ -22,17 +22,44 @@
       "path": "rust-toolchain.toml"
     },
     {
-      "sha256": "sha256:b2f1b06f984d7313",
+      "sha256": "sha256:2f2ad3f4df6dac41",
       "sources": [
         {
           "sha256": "sha256:0f03f16811d7a201",
           "path": "system/stores/VersionedKeyValueStore.py"
+        },
+        {
+          "sha256": "sha256:cea4d1575521f87d",
+          "path": "system/stores/MVCC.py"
+        },
+        {
+          "sha256": "sha256:febd3617388ff80d",
+          "path": "system/indexes/indexes.py"
         }
       ],
       "path": "src/error.rs"
     },
     {
-      "sha256": "sha256:626c314552108a8d",
+      "sha256": "sha256:2558533e8f2ae0ee",
+      "sources": [],
+      "path": "src/indexes.rs"
+    },
+    {
+      "sha256": "sha256:c342d24a4e0f9760",
+      "sources": [
+        {
+          "sha256": "sha256:febd3617388ff80d",
+          "path": "system/indexes/indexes.py"
+        },
+        {
+          "sha256": "sha256:85cf14725bb24f6d",
+          "path": "system/interfaces/indexing/Index.py"
+        }
+      ],
+      "path": "src/indexes/indexes.rs"
+    },
+    {
+      "sha256": "sha256:eee735bc535d20a4",
       "sources": [],
       "path": "src/lib.rs"
     },
@@ -52,9 +79,27 @@
       "path": "src/query_processing/predicates.rs"
     },
     {
-      "sha256": "sha256:4b41496d8f6545a5",
+      "sha256": "sha256:42b82c88618dc436",
       "sources": [],
       "path": "src/stores.rs"
+    },
+    {
+      "sha256": "sha256:76251343c3abea0c",
+      "sources": [
+        {
+          "sha256": "sha256:cea4d1575521f87d",
+          "path": "system/stores/MVCC.py"
+        },
+        {
+          "sha256": "sha256:16cf8eeca61850b9",
+          "path": "system/interfaces/stores.py"
+        },
+        {
+          "sha256": "sha256:0f03f16811d7a201",
+          "path": "system/stores/VersionedKeyValueStore.py"
+        }
+      ],
+      "path": "src/stores/mvcc.rs"
     },
     {
       "sha256": "sha256:43180c0b63735088",
@@ -71,7 +116,7 @@
       "path": "src/stores/versioned_key_value_store.rs"
     },
     {
-      "sha256": "sha256:caacebfe8da02514",
+      "sha256": "sha256:dda4fc4be5171edf",
       "sources": [
         {
           "sha256": "sha256:1ddec413ed1c5fdf",
@@ -80,9 +125,28 @@
         {
           "sha256": "sha256:07d1ee218136eb1e",
           "path": "system/tests/query_processing/test_query_processing.py"
+        },
+        {
+          "sha256": "sha256:7aaa705bfdead95f",
+          "path": "system/tests/stores/test_store_anomalies.py"
         }
       ],
       "path": "tests/common/mod.rs"
+    },
+    {
+      "sha256": "sha256:6d35db9023889543",
+      "sources": [],
+      "path": "tests/indexes/main.rs"
+    },
+    {
+      "sha256": "sha256:d9bc71b7e1ada1e4",
+      "sources": [
+        {
+          "sha256": "sha256:79f7e68faed3d115",
+          "path": "system/tests/indexes/test_indexing.py"
+        }
+      ],
+      "path": "tests/indexes/test_indexing.rs"
     },
     {
       "sha256": "sha256:6b83250d4d75f527",
@@ -100,12 +164,36 @@
       "path": "tests/query_processing/test_query_processing.rs"
     },
     {
-      "sha256": "sha256:a17ff04c76c7ddec",
+      "sha256": "sha256:093949c68fa46653",
       "sources": [],
       "path": "tests/stores/main.rs"
     },
     {
-      "sha256": "sha256:1b46d5cab0055ec7",
+      "sha256": "sha256:f7e802f0925251f6",
+      "sources": [
+        {
+          "sha256": "sha256:cea4d1575521f87d",
+          "path": "system/stores/MVCC.py"
+        },
+        {
+          "sha256": "sha256:c00eeb75bdf5b1a8",
+          "path": "system/playground/mvcc_playground.py"
+        }
+      ],
+      "path": "tests/stores/mvcc.rs"
+    },
+    {
+      "sha256": "sha256:cf1ca9f14697c16d",
+      "sources": [
+        {
+          "sha256": "sha256:7aaa705bfdead95f",
+          "path": "system/tests/stores/test_store_anomalies.py"
+        }
+      ],
+      "path": "tests/stores/test_store_anomalies.rs"
+    },
+    {
+      "sha256": "sha256:18bbf1855da3ae6e",
       "sources": [
         {
           "sha256": "sha256:bdfb8582c10c10a3",

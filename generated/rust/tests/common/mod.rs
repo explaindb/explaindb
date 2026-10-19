@@ -1,4 +1,4 @@
-// Code generated from system/tests/abstract_unit_test.py, system/tests/query_processing/test_query_processing.py. DO NOT EDIT.
+// Code generated from system/tests/abstract_unit_test.py, system/tests/query_processing/test_query_processing.py, system/tests/stores/test_store_anomalies.py. DO NOT EDIT.
 //
 //    This is ExplainDB, educational database systems materials.
 //
@@ -19,16 +19,18 @@
 //
 //
 
-//! Test objects and test data shared by the test files (Python: `system/tests/abstract_unit_test.py`).
+//! Test objects and test data shared by the test files (Python: `system/tests/abstract_unit_test.py`; `Named` stands
+//! in for the `Stuff` with a string attribute in `system/tests/query_processing/test_query_processing.py`, and
+//! `Account` is the value type of `system/tests/stores/test_store_anomalies.py`).
 
 // Each test target in tests/ is compiled as its own crate and uses only some of these items; the others would be
 // reported as unused.
 #![allow(dead_code)]
 
-use explaindb::{Attributes, ScalarRef};
+use explaindb::{Attributes, ScalarRef, Version, VersionEntry};
 
-/// A test object with two integer attributes (Python: the frozen dataclass `Stuff`).
-#[derive(Clone, Debug, PartialEq, Eq)]
+/// A test object with two integer attributes (Python: the frozen dataclass `Stuff`, which is hashable).
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct Stuff {
     /// The attribute `a`.
     pub a: i64,
@@ -68,6 +70,27 @@ impl Attributes for Named {
     }
 }
 
+/// A test object with two integer attributes that, unlike [`Stuff`], has no `Hash` and no `Eq` (Python: a
+/// non-frozen pydantic model, whose instances are not hashable). The stores never need `Hash` of their values.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Account {
+    /// The attribute `a`.
+    pub a: i64,
+    /// The attribute `b`.
+    pub b: i64,
+}
+
+impl Attributes for Account {
+    /// See [`Attributes::attribute`].
+    fn attribute(&self, name: &str) -> Option<ScalarRef<'_>> {
+        match name {
+            "a" => Some(ScalarRef::Int(self.a)),
+            "b" => Some(ScalarRef::Int(self.b)),
+            _ => None,
+        }
+    }
+}
+
 /// Returns `number_of_tuples` pairs `("0", Stuff), ("1", Stuff), ...` with `a` in 0..=1000 and `b` in 0..=2000.
 ///
 /// Python draws the values with Faker; here a fixed formula spreads them, so every run uses the same data.
@@ -83,4 +106,20 @@ pub fn create_fake_data(number_of_tuples: i64) -> Vec<(String, Stuff)> {
             )
         })
         .collect()
+}
+
+/// Returns an update version (committed or work-in-progress) with the given start of validity and value.
+pub fn update(start_validity: u64, value: Stuff) -> VersionEntry<Stuff> {
+    VersionEntry {
+        start_validity,
+        version: Version::Update(value),
+    }
+}
+
+/// Returns a delete marker with the given start of validity.
+pub fn delete_marker(start_validity: u64) -> VersionEntry<Stuff> {
+    VersionEntry {
+        start_validity,
+        version: Version::Delete,
+    }
 }

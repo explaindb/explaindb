@@ -22,7 +22,7 @@
 [package]
 name = "explaindb"
 version = "0.1.0"
-description = "The store core of ExplainDB in Rust: predicates and a versioned key-value store."
+description = "The store core of ExplainDB in Rust: predicates, a versioned key-value store and an MVCC store."
 edition = "2024"
 # Keep equal to the channel in rust-toolchain.toml and the image tag of the rust_test job in .gitlab-ci.yml.
 rust-version = "1.98.1"

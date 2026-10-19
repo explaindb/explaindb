@@ -21,4 +21,5 @@
 
 //! Stores (Python: the package `system/stores/`).
 
+pub mod mvcc;
 pub mod versioned_key_value_store;

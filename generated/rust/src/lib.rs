@@ -19,16 +19,25 @@
 //
 //
 
-//! The store core of ExplainDB in Rust: WHERE-clause predicates and a versioned key-value store.
+//! The store core of ExplainDB in Rust: WHERE-clause predicates, a versioned key-value store and a transactional
+//! (MVCC) store.
 
 pub mod error;
+pub mod indexes;
 pub mod query_processing;
 pub mod stores;
 
 pub use error::StoreError;
+pub use indexes::indexes::DictionaryIndex;
 pub use query_processing::predicates::{
     Attributes, Clause, Disjunction, FalseClause, Operator, Scalar, ScalarRef, TrueClause,
     WhereClause,
+};
+pub use stores::mvcc::{
+    JournalEntry, MvccState, ReadClause, Snapshot, TdEntry, TransactionalKeyValueStore,
+    TransactionalStore, abort_transaction_default, begin_transaction_default,
+    commit_transaction_default, delete_object_default, read_objects_default, update_object_default,
+    validate_transaction_default,
 };
 pub use stores::versioned_key_value_store::{
     KvStoreEntry, Version, VersionEntry, VersionedKeyValueStore, VersionedStore,

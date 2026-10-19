@@ -1,4 +1,4 @@
-// Code generated from system/stores/VersionedKeyValueStore.py. DO NOT EDIT.
+// Code generated from system/stores/VersionedKeyValueStore.py, system/stores/MVCC.py, system/indexes/indexes.py. DO NOT EDIT.
 //
 //    This is ExplainDB, educational database systems materials.
 //
@@ -23,10 +23,11 @@
 
 use std::fmt;
 
-/// An error of a store operation. Each variant carries the object id it is about.
+/// An error of a store operation. Each variant carries what it is about: an object id, a transaction id, a message
+/// or the key (and value) of an index.
 ///
-/// The Python stores raise `KeyError` in these cases. Rust panics on the programming errors that Python checks
-/// with `assert`.
+/// The Python stores raise an exception in these cases (`KeyError`, `RuntimeError` or
+/// `TransactionAbortedException`). Rust panics on the programming errors that Python checks with `assert`.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum StoreError {
     /// The object id is already in the store (Python: `KeyError` in `put`).
@@ -38,11 +39,31 @@ pub enum StoreError {
     /// `get` crashes here (`AttributeError` or `IndexError`); the key still counts for `put` and `size`, as in
     /// Python.
     NotVisible(String),
+    /// The transaction id is not in the transaction dictionary (Python: `KeyError` in `read_objects` and
+    /// `update_object`, and in validation for a transaction that committed meanwhile and was aborted afterwards).
+    TransactionNotFound(u64),
+    /// The transaction has committed already and cannot read or write any more (Python: `RuntimeError`).
+    AlreadyCommitted(u64),
+    /// The store aborted the transaction because of a conflict with another transaction; the message says why
+    /// (Python: `TransactionAbortedException`).
+    TransactionAborted(String),
+    /// The committed versions of the object are not ordered by the start of their validity (Python:
+    /// `RuntimeError` in `_get_visible_object_version`).
+    VersionsNotOrdered(String),
+    /// The key is not in the index (Python: `KeyError` of `PythonDictionaryIndex`).
+    IndexKeyNotFound(String),
+    /// The value is not stored for the key in the index (Python: `KeyError` of `PythonDictionaryIndex.delete`).
+    IndexValueNotFound {
+        /// The key, as text.
+        key: String,
+        /// The value, as text.
+        value: String,
+    },
 }
 
 impl fmt::Display for StoreError {
-    /// Writes the messages of the Python stores for `KeyExists` and `KeyNotFound`; `NotVisible` has no Python
-    /// counterpart.
+    /// Writes the messages of the Python stores; `NotVisible` has no Python counterpart, and the message of
+    /// `VersionsNotOrdered` also names the object.
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             StoreError::KeyExists(object_id) => {
@@ -53,6 +74,21 @@ impl fmt::Display for StoreError {
             }
             StoreError::NotVisible(object_id) => {
                 write!(f, "object {object_id} has no committed value in the store")
+            }
+            StoreError::TransactionNotFound(ta_id) => {
+                write!(f, "transaction {ta_id} not found in the system")
+            }
+            StoreError::AlreadyCommitted(ta_id) => {
+                write!(f, "transaction {ta_id} committed already")
+            }
+            StoreError::TransactionAborted(message) => write!(f, "{message}"),
+            StoreError::VersionsNotOrdered(object_id) => write!(
+                f,
+                "committed versions of object {object_id} are not ordered by their validity start"
+            ),
+            StoreError::IndexKeyNotFound(key) => write!(f, "Key {key} not found"),
+            StoreError::IndexValueNotFound { key, value } => {
+                write!(f, "Value {value} not found for key {key}")
             }
         }
     }
