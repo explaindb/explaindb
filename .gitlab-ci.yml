@@ -17,12 +17,13 @@ stages:
   - test
   - deploy
 
-# Scheduled pipelines (the nightly run on main) run only serializability_nightly
-# and dependency_audit; every other job extends this template to stay out of
-# them. A job that needs its own `rules` cannot use this template (its rules
-# would replace the template's); it starts its rules with the `schedule ...
-# when: never` rule instead, as `docs_build` and `pages` do.
-# system/tests/repo/test_ci_config.py fails for a job that does neither.
+# Scheduled pipelines (the nightly run on main) run only
+# serializability_nightly, dependency_audit and generated_rust_check; every
+# other job extends this template to stay out of them. A job that needs its own
+# `rules` cannot use this template (its rules would replace the template's); it
+# starts its rules with the `schedule ... when: never` rule instead, as
+# `docs_build` and `pages` do. system/tests/repo/test_ci_config.py fails for a
+# job that does neither.
 .not_in_scheduled_pipelines:
   rules:
     - if: $CI_PIPELINE_SOURCE == 'schedule'
@@ -54,7 +55,8 @@ stages:
 # conservative: it only skips when *every* changed file is Markdown, and it never
 # skips on the default branch -- anything else leaves DOCS_ONLY=false. The
 # top-level README.md does not count as docs-only: a unit test
-# (system/tests/repo/test_readme_notebooks.py) checks its notebook table.
+# (system/tests/repo/test_readme_notebooks.py) checks its notebook table. Neither
+# does generated/rust/README.md: rust_test runs its code example as a test.
 detect-docs-only:
   stage: prepare
   extends: .not_in_scheduled_pipelines
@@ -72,9 +74,10 @@ detect-docs-only:
         echo "Changed files vs $BASE:"
         printf '%s\n' "$CHANGED"
         # docs-only: at least one change, no changed file is a non-.md file, and
-        # README.md is not among them (its notebook table is tested)
+        # neither README.md (its notebook table is tested) nor
+        # generated/rust/README.md (its code example is tested) is among them
         if [ -n "$CHANGED" ] && ! printf '%s\n' "$CHANGED" | grep -qvE '\.md$' \
-            && ! printf '%s\n' "$CHANGED" | grep -qx 'README.md'; then
+            && ! printf '%s\n' "$CHANGED" | grep -qxE 'README\.md|generated/rust/README\.md'; then
           DOCS_ONLY=true
         fi
       fi
@@ -466,6 +469,59 @@ py_test:
     paths:
       - htmlcov/*
 
+
+# Checks and tests the Rust port of the store core in generated/rust/ (see
+# docs/changes/011-rust-store-foundation): formatting, lints, doc comments
+# (missing ones and broken links fail the job) and unit tests. The official
+# Rust image, pinned by tag and digest (a checksum of the exact image); its
+# version must be the same as the channel in generated/rust/rust-toolchain.toml
+# and rust-version in generated/rust/Cargo.toml, so change all three together.
+# No cache and no coverage value: a coverage value here would be mixed into the
+# Python value GitLab shows for the pipeline. No `needs`: without it the job gets the
+# dotenv reports of all earlier-stage jobs, including DOCS_ONLY from
+# detect-docs-only; a `needs` list would have to name detect-docs-only.
+rust_test:
+  stage: test
+  extends: .not_in_scheduled_pipelines
+  tags:
+    - test
+  image: rust:1.98.1-slim-bookworm@sha256:ff521445a372125ed4f76e1453a1f8098f2d05332d1601d30db1c1f62757e730
+  script:
+    # Skip when the merge request only changes Markdown (see detect-docs-only).
+    - if [ "$DOCS_ONLY" = "true" ]; then echo "Only Markdown changed; skipping."; exit 0; fi
+    - cd generated/rust
+    # The image has the minimal profile without rustfmt and clippy. rustup
+    # downloads them from static.rust-lang.org and checks them against the
+    # hashes of the signed channel manifest.
+    - rustup component add rustfmt clippy
+    # Show the versions: a mismatch with rust-toolchain.toml would make rustup
+    # download a second toolchain.
+    - rustc --version
+    - cargo --version
+    - cargo fmt --check
+    # --locked: use exactly the versions in Cargo.lock, fail if it is out of date.
+    - cargo clippy --all-targets --locked -- -D warnings
+    - RUSTDOCFLAGS="-D warnings" cargo doc --no-deps --locked
+    - cargo test --locked
+  interruptible: true
+
+# Checks that the Rust code in generated/rust/ is up to date with the Python
+# code it is generated from and was not edited by hand (see
+# generated/rust/README.md and .ci/check_generated.py). It fails on main and in
+# the nightly pipeline; in a merge request it only warns (allow_failure), so a
+# Python change can be merged before its Rust image is regenerated. The script
+# needs only Python's standard library, so no uv sync.
+generated_rust_check:
+  stage: test
+  tags:
+    - test
+  rules:
+    - if: $CI_PIPELINE_SOURCE == 'merge_request_event'
+      allow_failure: true
+    - when: on_success
+  script:
+    - python3 .ci/check_generated.py
+  interruptible: true
 
 # Runs the larger schedule spaces of the serializability test of the MVCC store
 # (system/tests/stores/test_mvcc_serializability.py, NightlySerializabilityTest: three

@@ -146,6 +146,10 @@ code). It also fails if the merge request adds or changes a `.semgrepignore`, or
 that matches a `.gitignore`, as both would remove files from the scan. Suppressions are checked
 in Python files and notebooks only, not in other files Semgrep scans (e.g. YAML).
 
+Semgrep has no rule set for Rust enabled, and its suppressions are not checked in `.rs` files:
+the Rust code in [`generated/rust/`](generated/rust) is hardly scanned. This gap is accepted for now (see
+[`docs/changes/011-rust-store-foundation`](docs/changes/011-rust-store-foundation/DECISION.md)).
+
 To run the check locally, scan the changes that are not yet on `main`, then the notebooks you
 changed:
 
@@ -177,8 +181,8 @@ and how the transactions end. The regular test job runs every schedule of two sh
 
 The larger spaces (three transactions, voluntary aborts, longer transactions) take about half an
 hour locally (about two hours on CI). They run in the job `serializability_nightly` of the nightly
-scheduled pipeline on main; in a merge request the job can be started by hand. Only this job and
-`dependency_audit` run in scheduled pipelines: every new CI job must extend
+scheduled pipeline on main; in a merge request the job can be started by hand. Only this job,
+`dependency_audit` and `generated_rust_check` run in scheduled pipelines: every new CI job must extend
 `.not_in_scheduled_pipelines` (or start its own rules with the same `schedule`/`never` rule), which
 `system/tests/repo/test_ci_config.py` checks. A job meant for scheduled pipelines is added to `SCHEDULED_JOBS`
 in that test instead. To run the larger spaces locally:
@@ -269,3 +273,60 @@ the interface documentation.
 | Non-trivial dunder | Short description of the logic |
 | Trivial dunder | None |
 | Module | One-line purpose |
+
+## Rust code
+
+The Rust port of the store core in [`generated/rust/`](generated/rust) is **generated** from the
+Python code in `system/` and never edited by hand: change the Python code, then generate the Rust
+code again (see [`generated/rust/README.md`](generated/rust/README.md#generated-code-change-the-python-not-this-folder)).
+Every generated file names its Python sources in its first line (`// Code generated from ...
+DO NOT EDIT.`; only `Cargo.lock`, written by Cargo, and the manifest have none), and its folders
+mirror `system/`. After regenerating, record the new hashes with
+`python3 .ci/check_generated.py --update`. The CI job `generated_rust_check` runs the check without
+`--update` and reports Rust files that are out of date or were edited by hand; the job fails on main
+and in the nightly pipeline and only warns in a merge request. A dependency or Rust version update
+is the one change made directly in `Cargo.toml`, `Cargo.lock` and `rust-toolchain.toml`; record it
+with `python3 .ci/check_generated.py --update-dependencies`, which rewrites only the entries of these
+three files (`--update` would also record out-of-date or hand-edited Rust files as current). A later regeneration
+keeps the versions in these files.
+
+The generated code follows the same rules as the Python code, written the Rust way. The CI job
+`rust_test` fails if one of these checks fails (run them in `generated/rust/`):
+
+```sh
+cargo fmt --check
+cargo clippy --all-targets --locked -- -D warnings
+RUSTDOCFLAGS="-D warnings" cargo doc --no-deps --locked
+cargo test --locked
+```
+
+- **License header:** every `.rs` file starts, after its "Code generated" line, with the text of
+  [`LICENSE header.txt`](LICENSE%20header.txt), with `//` instead of `#`.
+- **Doc comments:** every item, private ones included, has a `///` doc comment, and every file a
+  one-line `//!` module doc comment; the compiler rejects missing ones on public items, clippy
+  (`missing_docs_in_private_items`) on private ones. Doc comments are Markdown,
+  so instead of `@param` / `@return`, name the arguments in the text and use these sections:
+
+  | Python docstring | Rust doc comment |
+  | --- | --- |
+  | `@param x: ...` | name `x` in the text |
+  | `@return: ...` | say what the method returns in the text |
+  | raises an exception | section `# Errors`, one line per error |
+  | `assert` | section `# Panics` |
+  | ``See :meth:`Index.put`.`` | ``See [`VersionedStore::put`].`` |
+
+  clippy rejects a public function that returns a `Result`, or that calls e.g. `panic!`, `assert!`,
+  `unwrap` or `expect` directly, without these sections; document other panics (e.g. of a
+  called function) by hand. The contract lives on the trait; an implementation references it
+  and states only its delta, as described in [Docstring conventions](#docstring-conventions).
+- **Python names:** a Rust item whose name differs from the Python item it ports names it,
+  e.g. "(Python: `WHERE_Clause`)", and every deviation from the Python behaviour is stated in its doc comment
+  and listed in [`generated/rust/README.md`](generated/rust/README.md#deviations-from-python).
+- **Tests:** one file per Python test file, at the mirrored place, e.g. `tests/stores/test_stores_basics.rs` for
+  `system/tests/stores/test_stores_basics.py`, with the same test names in snake_case; each test folder in `tests/`
+  has a `main.rs` that includes its test files (`tests/common/` only holds the shared `mod.rs`). The table in
+  [`generated/rust/README.md`](generated/rust/README.md#which-python-test-became-which-rust-test) lists each Python
+  test and its Rust counterpart.
+- **Rust version:** the image tag of the job `rust_test`, the channel in
+  [`generated/rust/rust-toolchain.toml`](generated/rust/rust-toolchain.toml) and `rust-version` in
+  [`generated/rust/Cargo.toml`](generated/rust/Cargo.toml) name the same version; change all three together.

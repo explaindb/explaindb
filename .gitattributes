@@ -1,0 +1,8 @@
+# The Rust code in generated/rust/ is generated from the Python code in system/ and never edited by hand (see
+# generated/rust/README.md): GitLab folds its files in merge request diffs, GitHub marks them as generated. The files
+# that control the build and its dependencies stay unfolded, so reviewers see changes to them. Line endings stay LF,
+# as in the Rust code the generator writes.
+generated/rust/** gitlab-generated linguist-generated text eol=lf
+generated/rust/Cargo.toml -gitlab-generated -linguist-generated
+generated/rust/Cargo.lock -gitlab-generated -linguist-generated
+generated/rust/rust-toolchain.toml -gitlab-generated -linguist-generated

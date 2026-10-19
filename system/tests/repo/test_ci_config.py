@@ -48,7 +48,7 @@ RESERVED_KEYS: frozenset[str] = frozenset(
 
 # the jobs that run in scheduled pipelines (the nightly run on main):
 SCHEDULED_JOBS: frozenset[str] = frozenset(
-    {"serializability_nightly", "dependency_audit"}
+    {"serializability_nightly", "dependency_audit", "generated_rust_check"}
 )
 
 # the rule that keeps a job out of scheduled pipelines; it must come first, as GitLab applies the first matching rule:

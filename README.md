@@ -97,6 +97,11 @@ A small DBMS written for reading, not for speed. Interfaces in
 [`DBMS.py`](system/DBMS.py) ties these parts together: it manages stores, prepared queries and query
 optimization. Unit tests for all of this live in [`system/tests/`](system/tests).
 
+An AI-generated port of the store core to Rust, in progress, lives in [`generated/rust/`](generated/rust): a language
+model generates it from the Python code (change the Python, then regenerate), with the Python names where Rust's
+naming rules allow and Rust versions of the Python tests of the ported parts; see
+[`generated/rust/README.md`](generated/rust/README.md).
+
 ## Setting Up the Environment with uv
 
 This repository uses [uv](https://docs.astral.sh/uv/) to manage its Python version and dependencies.

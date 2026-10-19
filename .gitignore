@@ -21,3 +21,6 @@ docs/api/modules.rst
 
 # uv-managed virtual environment
 .venv/
+
+# Rust build output
+/generated/rust/target/
