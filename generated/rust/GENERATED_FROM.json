@@ -7,14 +7,28 @@
       "path": "Cargo.lock"
     },
     {
-      "sha256": "sha256:af1e1a871059b2cf",
+      "sha256": "sha256:ce39f2cbb9cc5470",
       "sources": [],
       "path": "Cargo.toml"
     },
     {
-      "sha256": "sha256:b52249a1e28a007d",
+      "sha256": "sha256:00f2e7d6c9ce0e4a",
       "sources": [],
       "path": "README.md"
+    },
+    {
+      "sha256": "sha256:df3cf9e6a437df91",
+      "sources": [
+        {
+          "sha256": "sha256:e50771ebc704b9f6",
+          "path": "system/benchmarks/workloads.py"
+        },
+        {
+          "sha256": "sha256:03d299b9e165468b",
+          "path": "system/tests/benchmarks/test_store_benchmark.py"
+        }
+      ],
+      "path": "examples/benchmarks/workloads.rs"
     },
     {
       "sha256": "sha256:e3ef2c7ad58ae133",

@@ -124,3 +124,7 @@ folder `rust/`:
 
 **Note 2026-10-15:** *Sanitizing* above says that rejecting empty names is stricter than Python. It is not: Python's
 `"".isalpha()` and `"".isalnum()` are `False`, so Python rejects empty names too. Only the ASCII-only rule differs.
+
+**Note 2026-10-16:** The benchmarks came before the indexed store, as 015, and compare Python with Rust using
+struct values only (user decision); the value enum and closure predicates are deferred to a later benchmark merge
+request (see docs/changes/015-store-benchmarks).

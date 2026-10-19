@@ -100,7 +100,8 @@ optimization. Unit tests for all of this live in [`system/tests/`](system/tests)
 An AI-generated port of the store core to Rust, in progress, lives in [`generated/rust/`](generated/rust): a language
 model generates it from the Python code (change the Python, then regenerate), with the Python names where Rust's
 naming rules allow and Rust versions of the Python tests of the ported parts; see
-[`generated/rust/README.md`](generated/rust/README.md).
+[`generated/rust/README.md`](generated/rust/README.md), which also explains the benchmarks that compare both stores
+([`benchmarks/`](benchmarks)).
 
 ## Setting Up the Environment with uv
 

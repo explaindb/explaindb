@@ -45,7 +45,7 @@ The port is built in steps (see
 | audit | blocking `cargo audit` of the Rust dependencies in CI | done |
 | 1b | MVCC store (`TransactionalKeyValueStore`) with journal, both validation methods | done |
 | 2 | indexed MVCC store, serializability test | planned |
-| 3 | benchmarks: Python against Rust | planned |
+| 3 | benchmarks: Python against Rust | workloads and results done; HTML report planned |
 
 The notebooks and the query optimizer stay Python only.
 
@@ -91,6 +91,47 @@ All methods of the store except `new`, e.g. `put`, `get`, `delete` and `bulkload
 `VersionedStore`. Rust only finds them if the trait is imported (`use explaindb::VersionedStore;`); without it, the
 compiler reports that the method does not exist. The same holds for `evaluate` and the trait `Clause`.
 
+## Benchmarks
+
+The same seven workloads run on the Python store and on this Rust store (see
+[`docs/changes/015-store-benchmarks`](../../docs/changes/015-store-benchmarks/DECISION.md)):
+
+| Workload | What is timed |
+|---|---|
+| `bulkload` | loading n objects, per object |
+| `get` | one non-transactional `get` of every object, per get |
+| `read` | 100 `read_objects` with `a == 42` in one transaction, per read; each read scans all n objects; the first object with `a == 42` is object 434, so with n = 100 the reads return nothing |
+| `update_commit` | 1 000 transactions of one update and a commit, per transaction |
+| `read_only` | 1 000 transactions reading `a < 100`, per transaction |
+| `read_write_disjoint` | 1 000 transactions reading one object and updating it, without conflicts, per transaction |
+| `read_write_contention` | 500 pairs of transactions where the second fails validation, per transaction (committed or aborted) |
+
+The first four run with n = 100, 1 000 and 10 000 objects and validation method 2; the last three with n = 1 000
+and both validation methods. Run all of them from the repository root, on an otherwise idle machine on mains power
+(about three minutes; `--quick` for a short trial):
+
+```sh
+uv run python -m system.benchmarks.run
+```
+
+It builds [`examples/benchmarks/workloads.rs`](examples/benchmarks/workloads.rs) in release mode, runs every workload
+in its own process with [`system/benchmarks/workloads.py`](../../system/benchmarks/workloads.py) and with the Rust
+program, and stops if the two did different work: both report a fingerprint of each run (commits, aborts, objects read,
+final transaction counter, committed versions, and a weighted sum over the objects' values). It writes
+[`benchmarks/results.json`](../../benchmarks/results.json) with the machine, the Rust and Python versions and the git
+commit. One workload alone:
+
+```sh
+# arguments: workload, method, objects, operations, repetitions
+(cd generated/rust && cargo run --release --example workloads -- read 2 1000 100 3)
+uv run python -m system.benchmarks.workloads read 2 1000 100 3
+```
+
+The comparison measures the two implementations of the same algorithm, not the languages alone: Python also pays
+for pydantic version and journal objects, deep copies on writes and the generator of `get`, and runs with its
+garbage collector switched off while timing; Rust pays for copies of the objects and ids it returns from
+`read_objects` and of the values it puts into the journal on updates.
+
 ## Where to find what
 
 | Python | Rust |
@@ -100,6 +141,7 @@ compiler reports that the method does not exist. The same holds for `evaluate` a
 | [`system/stores/MVCC.py`](../../system/stores/MVCC.py) | [`src/stores/mvcc.rs`](src/stores/mvcc.rs) |
 | [`system/indexes/indexes.py`](../../system/indexes/indexes.py) (`PythonDictionaryIndex`) | [`src/indexes/indexes.rs`](src/indexes/indexes.rs) (`DictionaryIndex`) |
 | exceptions raised by the stores (`KeyError`, `RuntimeError`, `TransactionAbortedException`) | [`src/error.rs`](src/error.rs) |
+| [`system/benchmarks/workloads.py`](../../system/benchmarks/workloads.py) (benchmark workloads) and its tests [`system/tests/benchmarks/test_store_benchmark.py`](../../system/tests/benchmarks/test_store_benchmark.py) | [`examples/benchmarks/workloads.rs`](examples/benchmarks/workloads.rs) |
 | [`system/tests/query_processing/test_query_processing.py`](../../system/tests/query_processing/test_query_processing.py) | [`tests/query_processing/test_query_processing.rs`](tests/query_processing/test_query_processing.rs) |
 | [`system/tests/stores/test_stores_basics.py`](../../system/tests/stores/test_stores_basics.py) | [`tests/stores/test_stores_basics.rs`](tests/stores/test_stores_basics.rs) |
 | [`system/tests/stores/test_store_anomalies.py`](../../system/tests/stores/test_store_anomalies.py) | [`tests/stores/test_store_anomalies.rs`](tests/stores/test_store_anomalies.rs) |
@@ -182,6 +224,7 @@ includes the test files of that folder and the shared `tests/common/mod.rs`.
 | (no Python test file) | `tests/stores/mvcc.rs`: Rust-only tests of the MVCC store (`system/stores/MVCC.py`, with `StoreWithoutValidation` of `system/playground/mvcc_playground.py`): the errors and panics of each operation, the read set without duplicates, stores that override `abort_transaction` or `validate_transaction`, what tells the two validation methods apart, and the behaviour of validation method 1 |
 | `test_indexing.py::test_indexing_basics_with_duplicates` | `test_indexing.rs::test_indexing_basics_with_duplicates`; the other tests of `test_indexing.py` (B-trees, radix tries, ...) are not ported; those of the indexed transactional store follow in step 2 |
 | `test_DBMS.py` (uses the versioned store) | not ported: the DBMS is not part of the port |
+| `test_store_benchmark.py` (tests of the benchmarks) | the tests at the end of `examples/benchmarks/workloads.rs`: the same fingerprints of the same small runs, plus the Rust program's own argument parsing and the fingerprints of the runs the runner measures, with 1 000 objects and 100 reads or 1 000 transactions (`fingerprints_of_realistic_runs`, Rust only, too slow for the Python tests); the runner (`system/benchmarks/run.py`) is tested in Python only |
 
 The other tests in the Rust files have no Python counterpart; they check the behaviour of each operator, the errors,
 several of the deviations listed above and further edge cases of the stores, the index and the predicates.

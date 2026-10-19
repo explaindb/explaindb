@@ -45,3 +45,9 @@ unsafe_code = "forbid"
 missing_docs_in_private_items = "deny"
 missing_errors_doc = "deny"
 missing_panics_doc = "deny"
+
+# The benchmark workloads (see docs/changes/015-store-benchmarks); `cargo test` also runs their tests.
+[[example]]
+name = "workloads"
+path = "examples/benchmarks/workloads.rs"
+test = true
