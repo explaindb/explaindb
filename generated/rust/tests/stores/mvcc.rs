@@ -21,17 +21,17 @@
 
 //! Rust-specific tests of the transactional (MVCC) store: the exact errors and panics of each operation, the
 //! deduplication of the read set, stores that override `abort_transaction` or `validate_transaction`, the
-//! differences between the two validation methods and the behaviour of validation method 1. They have no Python
-//! counterpart; the ported Python tests are in `test_store_anomalies.rs`.
+//! differences between the two validation methods, the behaviour of validation method 1 and the settings of the
+//! isolation level. They have no Python counterpart; the ported Python tests are in `test_store_anomalies.rs`.
 
 use std::cell::Cell;
 use std::rc::Rc;
 
 use crate::common::{CountingWhereClause, Stuff, update};
 use explaindb::{
-    Clause, JournalEntry, KvStoreEntry, MvccState, ReadClause, Snapshot, StoreError,
-    TransactionalKeyValueStore, TransactionalStore, Validation, VersionedStore, WhereClause,
-    abort_transaction_default, checksum,
+    Clause, IsolationLevel, JournalEntry, KvStoreEntry, MvccState, ReadClause, Snapshot,
+    StoreError, TransactionalKeyValueStore, TransactionalStore, Validation, VersionedStore,
+    WhereClause, abort_transaction_default, checksum,
 };
 use indexmap::IndexMap;
 
@@ -134,6 +134,55 @@ where
 #[test]
 fn committed_transaction_is_reported_before_other_errors() {
     check_committed_transaction_is_reported_before_other_errors::<TransactionalKeyValueStore<Stuff>>(
+    );
+}
+
+/// Under snapshot isolation, a [`TransactionalKeyValueStore`] reports [`StoreError::AlreadyCommitted`] for a committed
+/// transaction t_1 before it checks whether another transaction committed the object after t_1 began; so the update
+/// or delete does not abort t_1.
+///
+/// ```text
+/// t_1                                 t_2
+/// begin
+///                                     begin
+///                                     update A
+///                                     commit
+/// commit
+/// update A -> AlreadyCommitted
+/// delete A -> AlreadyCommitted
+/// ```
+#[test]
+fn committed_transaction_is_reported_before_snapshot_isolation_abort() {
+    let mut store: TransactionalKeyValueStore<Stuff> =
+        TransactionalKeyValueStore::with_isolation_level(
+            Validation::WriteSets,
+            IsolationLevel::SnapshotIsolation,
+        )
+        .unwrap();
+    store.put("A", Stuff { a: 1, b: 0 }).unwrap();
+    let t_1: u64 = store.begin_transaction();
+    let t_2: u64 = store.begin_transaction();
+    store.update_object("A", Stuff { a: 1, b: 2 }, t_2).unwrap();
+    store.commit_transaction(t_2).unwrap();
+    store.commit_transaction(t_1).unwrap();
+
+    assert_eq!(
+        store.update_object("A", Stuff { a: 1, b: 1 }, t_1),
+        Err(StoreError::AlreadyCommitted(t_1))
+    );
+    assert_eq!(
+        store.delete_object("A", t_1),
+        Err(StoreError::AlreadyCommitted(t_1))
+    );
+
+    // t_1 was not aborted:
+    assert!(store.state().td.contains_key(&t_1));
+    assert_eq!(
+        store.state().journal.get(&t_1).unwrap().last(),
+        Some(&JournalEntry::Commit {
+            ta_id: t_1,
+            commit_timestamp: 4
+        })
     );
 }
 
@@ -382,6 +431,28 @@ fn commit_of_unknown_transaction_panics() {
 fn abort_of_unknown_transaction_panics() {
     let mut store: TransactionalKeyValueStore<Stuff> = store_with_a_and_b();
     store.abort_transaction(42);
+}
+
+/// `validate_transaction` of a serializable [`TransactionalKeyValueStore`] stops the program for an unknown
+/// transaction (Python: `KeyError`).
+#[test]
+#[should_panic(expected = "transaction 42 not found in the system")]
+fn validation_of_unknown_transaction_panics() {
+    let store: TransactionalKeyValueStore<Stuff> = store_with_a_and_b();
+    let _ = store.validate_transaction(42, 43);
+}
+
+/// Under snapshot isolation, `validate_transaction` of a [`TransactionalKeyValueStore`] returns `true` for an unknown
+/// transaction: it returns before it looks the transaction up, as Python does.
+#[test]
+fn validation_of_unknown_transaction_passes_under_snapshot_isolation() {
+    let store: TransactionalKeyValueStore<Stuff> =
+        TransactionalKeyValueStore::with_isolation_level(
+            Validation::WriteSets,
+            IsolationLevel::SnapshotIsolation,
+        )
+        .unwrap();
+    assert_eq!(store.validate_transaction(42, 43), Ok(true));
 }
 
 /// Committing a transaction that wrote an object a second time stops the program (Python crashes, too): the second
@@ -685,6 +756,102 @@ fn conflicting_delete_calls_overridden_abort() {
     assert!(!store.state().td.contains_key(&t_2));
 }
 
+/// Returns a [`CountingAbortStore`] under snapshot isolation with the objects A = (1, 0) and B = (2, 0), and the
+/// ids of the transactions t_1 and t_2 of this schedule, in which A changed after t_1 began:
+///
+/// ```text
+/// t_1                                 t_2
+/// begin
+///                                     begin
+///                                     update A
+///                                     commit
+/// ```
+fn snapshot_isolation_store_after_commit_of_a() -> (CountingAbortStore<Stuff>, u64, u64) {
+    let mut store: CountingAbortStore<Stuff> = CountingAbortStore {
+        store: TransactionalKeyValueStore::with_isolation_level(
+            Validation::WriteSets,
+            IsolationLevel::SnapshotIsolation,
+        )
+        .unwrap(),
+        aborts: 0,
+    };
+    store.put("A", Stuff { a: 1, b: 0 }).unwrap();
+    store.put("B", Stuff { a: 2, b: 0 }).unwrap();
+    let t_1: u64 = store.begin_transaction();
+    let t_2: u64 = store.begin_transaction();
+    store.update_object("A", Stuff { a: 1, b: 2 }, t_2).unwrap();
+    store.commit_transaction(t_2).unwrap();
+    (store, t_1, t_2)
+}
+
+/// Under snapshot isolation, an update of an object that another transaction committed after the writer began calls
+/// the overridden `abort_transaction` once, which aborts the writer and removes its earlier work-in-progress
+/// version.
+///
+/// ```text
+/// t_1                                 t_2
+/// begin
+///                                     begin
+///                                     update A
+///                                     commit
+/// update B
+/// update A -> aborted
+/// ```
+#[test]
+fn snapshot_isolation_update_calls_overridden_abort() {
+    let (mut store, t_1, _): (CountingAbortStore<Stuff>, u64, u64) =
+        snapshot_isolation_store_after_commit_of_a();
+    store.update_object("B", Stuff { a: 2, b: 1 }, t_1).unwrap();
+
+    assert_eq!(
+        store.update_object("A", Stuff { a: 1, b: 1 }, t_1),
+        Err(StoreError::TransactionAborted(
+            "transaction 1 aborted under snapshot isolation: another transaction changed object A and committed \
+             after transaction 1 began"
+                .to_string()
+        ))
+    );
+
+    assert_eq!(store.aborts, 1);
+    assert!(!store.state().td.contains_key(&t_1));
+    assert_eq!(store.key_value_store()["A"].wip, None);
+    assert_eq!(store.key_value_store()["B"].wip, None);
+}
+
+/// Under snapshot isolation, a delete of an object that another transaction committed after the writer began calls
+/// the overridden `abort_transaction` once, which aborts the writer and removes its earlier work-in-progress
+/// version.
+///
+/// ```text
+/// t_1                                 t_2
+/// begin
+///                                     begin
+///                                     update A
+///                                     commit
+/// update B
+/// delete A -> aborted
+/// ```
+#[test]
+fn snapshot_isolation_delete_calls_overridden_abort() {
+    let (mut store, t_1, _): (CountingAbortStore<Stuff>, u64, u64) =
+        snapshot_isolation_store_after_commit_of_a();
+    store.update_object("B", Stuff { a: 2, b: 1 }, t_1).unwrap();
+
+    assert_eq!(
+        store.delete_object("A", t_1),
+        Err(StoreError::TransactionAborted(
+            "transaction 1 aborted under snapshot isolation: another transaction changed object A and committed \
+             after transaction 1 began"
+                .to_string()
+        ))
+    );
+
+    assert_eq!(store.aborts, 1);
+    assert!(!store.state().td.contains_key(&t_1));
+    assert_eq!(store.key_value_store()["A"].wip, None);
+    assert_eq!(store.key_value_store()["B"].wip, None);
+}
+
 /// A commit whose validation fails calls the overridden `abort_transaction` once, which aborts the transaction and
 /// removes its work-in-progress version.
 ///
@@ -726,11 +893,28 @@ fn failed_validation_calls_overridden_abort() {
     assert_eq!(store.key_value_store()["B"].wip, None);
 }
 
-/// A store whose validation always passes and that otherwise behaves like a [`TransactionalKeyValueStore`] (Python:
-/// `StoreWithoutValidation` in `system/playground/mvcc_playground.py`, used by
-/// `system/tests/stores/test_mvcc_serializability.py`).
+/// A store that never validates, so anomalies such as write skew happen (Python: `StoreWithoutValidation` in
+/// `system/playground/mvcc_playground.py`).
 ///
-/// It overrides `validate_transaction`; `commit_transaction` calls the override through the trait.
+/// Each transaction reads the snapshot of its begin plus its own writes. A write is stopped only while another
+/// transaction holds an uncommitted version of the same object (see `update_object_default`). This is weaker than
+/// snapshot isolation ([`IsolationLevel::SnapshotIsolation`]), which also stops a write to an object that another
+/// transaction committed after the writer's begin:
+///
+/// ```text
+/// T1                          T2
+/// begin
+///                             begin
+/// read x
+///                             read x
+/// update x
+/// commit
+///                             update x -> passes here, aborts under snapshot isolation
+///                             commit   -> T1's update is lost
+/// ```
+///
+/// Write skew happens under both, as the two transactions write different objects. The store overrides
+/// `validate_transaction`; `commit_transaction` calls the override through the trait.
 #[derive(Debug)]
 struct StoreWithoutValidation<V> {
     /// The store that does the actual work.
@@ -1278,4 +1462,87 @@ fn default_validation_is_method_2_and_with_validation_sets_it() {
         MvccState::<Stuff>::with_validation(Validation::BruteForce).validation,
         Validation::BruteForce
     );
+}
+
+/// The default isolation level is serializable, as in Python, and the stores created without a level use it,
+/// whatever their validation method.
+#[test]
+fn default_isolation_level_is_serializable() {
+    assert_eq!(IsolationLevel::default(), IsolationLevel::Serializable);
+    assert_eq!(
+        TransactionalKeyValueStore::<Stuff>::new()
+            .state
+            .isolation_level,
+        IsolationLevel::Serializable
+    );
+    assert_eq!(
+        TransactionalKeyValueStore::<Stuff>::default()
+            .state
+            .isolation_level,
+        IsolationLevel::Serializable
+    );
+    assert_eq!(
+        TransactionalKeyValueStore::<Stuff>::with_validation(Validation::BruteForce)
+            .state
+            .isolation_level,
+        IsolationLevel::Serializable
+    );
+    assert_eq!(
+        MvccState::<Stuff>::new().isolation_level,
+        IsolationLevel::Serializable
+    );
+    assert_eq!(
+        MvccState::<Stuff>::with_validation(Validation::BruteForce).isolation_level,
+        IsolationLevel::Serializable
+    );
+}
+
+/// `with_isolation_level` of the store and of [`MvccState`] accepts the three valid combinations of validation method
+/// and isolation level and sets both.
+#[test]
+fn with_isolation_level_accepts_valid_combinations_and_sets_both() {
+    for (validation, isolation_level) in [
+        (Validation::BruteForce, IsolationLevel::Serializable),
+        (Validation::WriteSets, IsolationLevel::Serializable),
+        (Validation::WriteSets, IsolationLevel::SnapshotIsolation),
+    ] {
+        let case: String = format!("{validation:?}, {isolation_level:?}");
+        let store: TransactionalKeyValueStore<Stuff> =
+            TransactionalKeyValueStore::with_isolation_level(validation, isolation_level)
+                .unwrap_or_else(|error| panic!("{case}: rejected with {error}"));
+        assert_eq!(store.state.validation, validation, "{case}");
+        assert_eq!(store.state.isolation_level, isolation_level, "{case}");
+
+        let state: MvccState<Stuff> = MvccState::with_isolation_level(validation, isolation_level)
+            .unwrap_or_else(|error| panic!("{case}: rejected with {error}"));
+        assert_eq!(state.validation, validation, "{case}");
+        assert_eq!(state.isolation_level, isolation_level, "{case}");
+    }
+}
+
+/// `with_isolation_level` of the store and of [`MvccState`] rejects snapshot isolation with validation method 1 with
+/// [`StoreError::InvalidConfiguration`], whose text is the message only.
+#[test]
+fn snapshot_isolation_with_method_1_is_invalid_configuration() {
+    let message: &str = "snapshot isolation does not validate reads, so Validation::BruteForce requires \
+                         IsolationLevel::Serializable";
+    let expected: StoreError = StoreError::InvalidConfiguration(message.to_string());
+
+    assert_eq!(
+        TransactionalKeyValueStore::<Stuff>::with_isolation_level(
+            Validation::BruteForce,
+            IsolationLevel::SnapshotIsolation
+        )
+        .err(),
+        Some(expected.clone())
+    );
+    assert_eq!(
+        MvccState::<Stuff>::with_isolation_level(
+            Validation::BruteForce,
+            IsolationLevel::SnapshotIsolation
+        )
+        .err(),
+        Some(expected.clone())
+    );
+    assert_eq!(expected.to_string(), message);
 }

@@ -19,7 +19,7 @@
 //
 //
 
-//! Tests for the isolation of the transactional stores and the anomalies they avoid (Python:
+//! Tests for the isolation of the transactional stores and the anomalies they avoid or allow (Python:
 //! `system/tests/stores/test_store_anomalies.py`).
 
 use std::cell::Cell;
@@ -27,8 +27,9 @@ use std::rc::Rc;
 
 use crate::common::{Account, CountingWhereClause, Stuff, create_fake_data, update};
 use explaindb::{
-    Clause, JournalEntry, KvStoreEntry, ReadClause, StoreError, TransactionalKeyValueStore,
-    TransactionalStore, TrueClause, Validation, Version, VersionEntry, WhereClause,
+    Clause, IsolationLevel, JournalEntry, KvStoreEntry, ReadClause, StoreError,
+    TransactionalKeyValueStore, TransactionalStore, TrueClause, Validation, Version, VersionEntry,
+    VersionedStore, WhereClause,
 };
 
 /// Asserts that `result` is the error of an aborted transaction; on failure, the message shows what was returned.
@@ -46,10 +47,23 @@ fn sorted<V>(mut result: Vec<(String, V)>) -> Vec<(String, V)> {
     result
 }
 
-/// Checks that a transaction of the store `S` can update several objects several times: each update replaces the
-/// work-in-progress version of the object written by this transaction, and the write set holds each object once.
-/// After the commit, each object has two committed versions and no work-in-progress version, and the write set is
-/// kept.
+/// Checks that a transaction of the store `S` that updates the same objects several times holds one
+/// work-in-progress version per object and each object once in its write set; its commit adds one committed version
+/// per object.
+///
+/// The store is bulk-loaded with 100 generated objects "0" to "99" (see `create_fake_data`). The transaction updates
+/// five of them in three rounds, each time to its committed version with b increased by 4242:
+///
+/// ```text
+/// TA
+/// begin
+/// update "42", "11", "0", "7", "99"     (round 1)
+/// update "42", "11", "0", "7", "99"     (round 2)
+/// update "42", "11", "0", "7", "99"     (round 3)
+/// commit
+/// ```
+///
+/// After the commit, each object has two committed versions and no work-in-progress version.
 ///
 /// Python also checks that the store holds a copy of the object; in Rust the store owns the object it is given.
 fn check_update_multiple_objects_in_ta<S>()
@@ -122,18 +136,17 @@ fn test_update_multiple_objects_in_ta() {
     check_update_multiple_objects_in_ta::<TransactionalKeyValueStore<Stuff>>();
 }
 
-/// Checks that a transaction of the store `S` reads its own change of an object, not a version that another
-/// transaction committed after it began (snapshot isolation from the point of view of a single transaction).
-///
-/// The test adds the committed version of the other transaction directly to the store:
+/// Checks that a transaction of the store `S` that updated an object keeps reading its own work-in-progress version,
+/// even after a newer committed version appears; the test adds that version directly to the store, as if another
+/// transaction had committed it.
 ///
 /// ```text
-/// t_i                                 other transaction
+/// TA 1                                another TA (simulated)
 /// begin
-/// read a == 4243 -> sees (4243, 0)
-/// update 4242 to (4243, 4243)
-///                                     commits (45, 45) for 4242
-/// read a == 4243 -> sees (4243, 4243)
+/// read a == 4243 -> sees "4242" = (4243, 0)
+/// update "4242" to (4243, 4243)
+///                                     committed version "4242" = (45, 45)
+/// read a == 4243 -> sees "4242" = (4243, 4243)
 /// ```
 fn check_store_snapshot_isolation_ta_self_modification<S>()
 where
@@ -260,25 +273,24 @@ fn test_snapshot_isolation_read_correct_version() {
     check_snapshot_isolation_read_correct_version::<TransactionalKeyValueStore<Stuff>>();
 }
 
-/// Checks that a transaction of the store `S` keeps reading the version of its snapshot while another transaction
-/// changes the object, both before and after that transaction commits (repeatable reads). The reader then updates
-/// the object and fails validation at its commit, as the other transaction changed an object it read. A
-/// transaction that begins afterwards sees the change.
+/// Checks that a transaction of the store `S` keeps seeing its snapshot while another transaction updates and
+/// commits the object it read; when the first transaction then writes and tries to commit, validation aborts it. A
+/// transaction that begins after that commit sees the new version.
 ///
 /// ```text
-/// t_1                                 t_2
+/// TA 1                                TA 2                                TA 3
 /// begin
 ///                                     begin
-/// read a == 7 -> sees (7, 0)
-///                                     update 4242 to (7, 8)
-/// read a == 7 -> sees (7, 0)
+/// read a == 7 -> sees "4242" = (7, 0)
+///                                     update "4242" to (7, 8)
+/// read a == 7 -> sees "4242" = (7, 0)
 ///                                     commit
-/// read a == 7 -> sees (7, 0)
-/// update 4242 to (7, 4534)
+/// read a == 7 -> sees "4242" = (7, 0)
+/// update "4242" to (7, 4534)
 /// commit -> aborted
+///                                                                         begin
+///                                                                         read a == 7 -> sees "4242" = (7, 8)
 /// ```
-///
-/// A third transaction that begins after this reads (7, 8).
 fn check_read_write_conflict<S>()
 where
     S: TransactionalStore<Value = Stuff> + Default,
@@ -364,20 +376,21 @@ fn test_read_write_conflict() {
     check_read_write_conflict::<TransactionalKeyValueStore<Stuff>>();
 }
 
-/// Checks that the store `S` avoids the write skew anomaly: two transactions read the same two objects X and Y,
-/// each updates a different one, and the second commit fails because the first transaction changed an object the
-/// second one read. The aborted transaction leaves no version in the store and is removed from the transaction
-/// dictionary.
+/// Checks that two transactions of the store `S` that read the same two objects and each update a different one
+/// cannot both commit (write skew): the second commit fails validation. Unlike Python, the test also checks that the
+/// aborted transaction leaves no version in the store and is removed from the transaction dictionary.
 ///
 /// ```text
-/// t_1                                 t_2
+/// TA 1                                TA 2
 /// begin
 ///                                     begin
-/// read X (a == 1), read Y (a == 2)
-///                                     read X (a == 1), read Y (a == 2)
-/// update X
-///                                     update Y
-/// commit
+/// read a == 1 -> sees X = (1, 0)
+/// read a == 2 -> sees Y = (2, 0)
+///                                     read a == 1 -> sees X = (1, 0)
+///                                     read a == 2 -> sees Y = (2, 0)
+/// update X to (1, 100)
+///                                     update Y to (2, 200)
+/// commit -> succeeds
 ///                                     commit -> aborted
 /// ```
 ///
@@ -447,21 +460,23 @@ fn test_write_skew_anomaly_with_method_2() {
     check_write_skew_anomaly::<TransactionalKeyValueStore<Stuff>>(Validation::WriteSets);
 }
 
-/// Checks a delete in a transaction of the store `S`: it adds a delete marker of the transaction as
-/// work-in-progress version and leaves the committed version untouched; the commit makes the marker a committed
-/// version. A committed transaction can neither read, delete nor update any more
-/// ([`StoreError::AlreadyCommitted`]), and a transaction that begins afterwards does not see the object.
+/// Checks that in the store `S` a committed delete hides the object from transactions that begin later, and that a
+/// committed transaction can no longer read or write.
 ///
 /// ```text
-/// t_1                                 t_2
+/// TA 1                                TA 2
 /// begin
-/// read a == 4243 -> sees (4243, 0)
-/// delete 4042
+/// read a == 4243 -> sees "4042" = (4243, 0)
+/// delete "4042"
 /// commit
-/// read, delete, update -> fail
+/// read a == 4243 -> fails
+/// delete "4042" -> fails
+/// update "4042" to (4243, 0) -> fails
 ///                                     begin
 ///                                     read a == 4243 -> sees nothing
 /// ```
+///
+/// Each call of TA 1 after its commit returns [`StoreError::AlreadyCommitted`] (Python: raises a `RuntimeError`).
 fn check_delete_semantics<S>()
 where
     S: TransactionalStore<Value = Stuff> + Default,
@@ -540,15 +555,15 @@ fn test_delete_semantics() {
     check_delete_semantics::<TransactionalKeyValueStore<Stuff>>();
 }
 
-/// Checks that the store `S` allows only one writer per object: a transaction that updates an object on which
-/// another transaction holds a work-in-progress version is aborted.
+/// Checks that a transaction of the store `S` that updates an object for which another running transaction holds a
+/// work-in-progress version is aborted: there is only one writer per object at a time.
 ///
 /// ```text
-/// t_1                                 t_2
+/// TA 1                                TA 2
 /// begin
 ///                                     begin
-/// update 4242
-///                                     update 4242 -> aborted
+/// update "4242" to (1, 1)
+///                                     update "4242" to (1, 2) -> aborted
 /// ```
 fn check_write_write_conflict<S>()
 where
@@ -576,19 +591,19 @@ fn test_write_write_conflict() {
 }
 
 /// Checks that the store `S` aborts a transaction that deletes an object on which another transaction holds a
-/// work-in-progress version, both if the first writer updates and if it deletes the object.
+/// work-in-progress version.
 ///
 /// ```text
-/// t_1                                 t_2
+/// TA 1                                TA 2
 /// begin
 ///                                     begin
-/// update or delete 4242
-///                                     delete 4242 -> aborted
+/// update or delete "4242"
+///                                     delete "4242" -> aborted
 /// commit -> succeeds
 /// ```
 ///
-/// t_2 is removed from the transaction dictionary and its journal holds only `Begin` and `Abort`; the
-/// work-in-progress version of t_1 is untouched.
+/// TA 2 is removed from the transaction dictionary and its journal holds only `Begin` and `Abort`; the
+/// work-in-progress version of TA 1 is untouched. Checked for a first writer that updates and one that deletes.
 fn check_write_write_conflict_on_delete<S>()
 where
     S: TransactionalStore<Value = Stuff> + Default,
@@ -652,8 +667,21 @@ fn test_write_write_conflict_on_delete() {
     check_write_write_conflict_on_delete::<TransactionalKeyValueStore<Stuff>>();
 }
 
-/// Checks that a transaction of the store `S` can change the same object several times and always reads its
-/// latest change: two updates, then a delete, after which a read no longer returns the object.
+/// Checks that a transaction of the store `S` that updates an object twice and then deletes it always reads its own
+/// latest change.
+///
+/// ```text
+/// TA 1
+/// begin
+/// update "4242" to (1, 1)
+/// read a == 1 -> sees "4242" = (1, 1)
+/// update "4242" to (1, 2)
+/// read a == 1 -> sees "4242" = (1, 2)
+/// delete "4242"
+/// read a == 1 -> sees nothing
+/// ```
+///
+/// Before TA 1 begins, the store holds "4242" = (1, 0).
 fn check_double_update_from_same_transaction<S>()
 where
     S: TransactionalStore<Value = Stuff> + Default,
@@ -698,19 +726,20 @@ fn test_double_update_from_same_transaction() {
     check_double_update_from_same_transaction::<TransactionalKeyValueStore<Stuff>>();
 }
 
-/// Checks that, with validation method 1, the checksum of a read of the store `S` covers the committed snapshot
-/// only, not the transaction's own changes: t_1 changes object 1 so that it no longer matches its read, reads again
-/// and sees nothing, but both reads keep the checksum of the committed version (1, 1). Nothing changed that version,
-/// so t_1 commits.
+/// Checks that, with validation method 1, a transaction of the store `S` commits although its own update made an
+/// object it read no longer match the read: the checksum of a read is computed over the committed snapshot, without
+/// the transaction's own changes.
 ///
 /// ```text
-/// t_1
+/// t1
 /// begin
-/// read a == 1 -> sees 1 = (1, 1)
-/// update 1 to (2, 2)
+/// read a == 1 -> sees "1" = (1, 1)
+/// update "1" to (2, 2)
 /// read a == 1 -> sees nothing
 /// commit -> succeeds
 /// ```
+///
+/// Unlike Python, the test also checks that both reads keep the checksum of the committed version (1, 1).
 fn check_checksums_on_self_updates<S>()
 where
     S: TransactionalStore<Value = Stuff> + Default,
@@ -761,19 +790,19 @@ fn test_checksums_on_self_updates() {
     check_checksums_on_self_updates::<TransactionalKeyValueStore<Stuff>>();
 }
 
-/// Checks a read of all objects in the store `S` (with a [`TrueClause`]): the reader sees both objects of its
-/// snapshot. If another transaction committed a change of an object meanwhile, the reader fails validation at its
-/// commit, as its read could depend on that change; if the other transaction is still running, the reader commits.
+/// Checks that a transaction of the store `S` that reads all objects with a [`TrueClause`] and then writes fails
+/// validation if another transaction committed a change to one of them meanwhile, and commits if the other
+/// transaction did not commit.
 ///
 /// ```text
 /// t1                                  t2
 /// begin
 ///                                     begin
-///                                     update 1
-///                                     commit (or keeps running)
-/// read all -> sees 1 and 2
-/// update 2
-/// commit -> aborted (or committed)
+///                                     update "1" to (11, 11)
+///                                     commit (only if t2 commits)
+/// read all -> sees "1" and "2"
+/// update "2" to (22, 22)
+/// commit -> aborted if t2 committed, else succeeds
 /// ```
 ///
 /// Python runs this test with both validation methods; it runs here once per method.
@@ -923,8 +952,14 @@ fn test_read_skips_object_inserted_by_uncommitted_concurrent_ta() {
     >();
 }
 
-/// Checks that a transaction of the store `S` sees the object it inserted itself, next to the objects that existed
-/// before: t inserts C and reads everything, and sees A and C with their values.
+/// Checks that a transaction of the store `S` sees the object it inserted itself, next to the pre-existing objects.
+///
+/// ```text
+/// t
+/// begin
+/// insert C = (2, 0)
+/// read all -> sees A = (1, 0) and C = (2, 0)
+/// ```
 fn check_read_own_insert<S>()
 where
     S: TransactionalStore<Value = Stuff> + Default,
@@ -953,9 +988,22 @@ fn test_read_own_insert() {
     check_read_own_insert::<TransactionalKeyValueStore<Stuff>>();
 }
 
-/// Checks that an aborted insert in the store `S` leaves no visible object behind, and that the object id can be
-/// inserted again later: t inserts C and aborts, so t2 sees only A; t3 inserts C again and commits, so t4 sees A and
-/// C with the value of t3.
+/// Checks that an aborted insert in the store `S` leaves no visible object behind, and that the key can be inserted
+/// again later.
+///
+/// ```text
+/// t                       t2                      t3                      t4
+/// begin
+/// insert C = (2, 0)
+/// abort
+///                         begin
+///                         read all -> sees only A = (1, 0)
+///                                                 begin
+///                                                 insert C = (3, 0)
+///                                                 commit
+///                                                                         begin
+///                                                                         read all -> sees A = (1, 0) and C = (3, 0)
+/// ```
 fn check_aborted_insert_is_invisible_and_key_can_be_reinserted<S>()
 where
     S: TransactionalStore<Value = Stuff> + Default,
@@ -1362,6 +1410,77 @@ fn test_validation_ignores_concurrent_write_outside_read_predicate_with_method_2
     >(Validation::WriteSets);
 }
 
+/// Checks that a read-only transaction of the store `S` always commits, even if another transaction committed a
+/// change of an object it read.
+///
+/// ```text
+/// t_i                                 t_j
+/// begin
+///                                     begin
+/// read a == 42 -> sees A = (42, 0)
+///                                     update A to (7, 0)
+///                                     commit
+/// read a == 42 -> still sees A = (42, 0)
+/// commit -> succeeds
+/// ```
+///
+/// t_i writes nothing, so it is validated against its own snapshot, in which nothing changed. The same schedule
+/// with a write of t_i aborts, see [`check_validation_detects_lost_update_on_read_object`]. Python runs this test
+/// with both validation methods; it runs here once per method.
+fn check_read_only_transaction_commits_despite_concurrent_change_of_read_object<S>(
+    validation: Validation,
+) where
+    S: TransactionalStore<Value = Stuff> + Default,
+{
+    let mut store: S = S::default();
+    store.state_mut().validation = validation;
+    store.put("A", Stuff { a: 42, b: 0 }).unwrap();
+
+    let t_i: u64 = store.begin_transaction();
+    let t_j: u64 = store.begin_transaction();
+
+    // t_i reads A:
+    let result: Vec<(String, Stuff)> = store
+        .read_objects(t_i, Some(Rc::new(WhereClause::new("a", "==", 42))), true)
+        .unwrap();
+    assert_eq!(result, [("A".to_string(), Stuff { a: 42, b: 0 })]);
+
+    // t_j changes A, so that it no longer matches the read of t_i, and commits:
+    store.update_object("A", Stuff { a: 7, b: 0 }, t_j).unwrap();
+    store.commit_transaction(t_j).unwrap();
+
+    // snapshot isolation: t_i still sees the old version of A:
+    let result_reread: Vec<(String, Stuff)> = store
+        .read_objects(t_i, Some(Rc::new(WhereClause::new("a", "==", 42))), true)
+        .unwrap();
+    assert_eq!(result_reread, result);
+
+    // t_i wrote nothing, so it must commit:
+    assert_eq!(store.commit_transaction(t_i), Ok(()));
+    assert_eq!(
+        store.state().committed_transactions_trace.last(),
+        Some(&t_i)
+    );
+}
+
+/// A read-only transaction of a [`TransactionalKeyValueStore`] with validation method 1 commits despite a concurrent
+/// change of an object it read, see [`check_read_only_transaction_commits_despite_concurrent_change_of_read_object`].
+#[test]
+fn test_read_only_transaction_commits_despite_concurrent_change_of_read_object_with_method_1() {
+    check_read_only_transaction_commits_despite_concurrent_change_of_read_object::<
+        TransactionalKeyValueStore<Stuff>,
+    >(Validation::BruteForce);
+}
+
+/// A read-only transaction of a [`TransactionalKeyValueStore`] with validation method 2 commits despite a concurrent
+/// change of an object it read, see [`check_read_only_transaction_commits_despite_concurrent_change_of_read_object`].
+#[test]
+fn test_read_only_transaction_commits_despite_concurrent_change_of_read_object_with_method_2() {
+    check_read_only_transaction_commits_despite_concurrent_change_of_read_object::<
+        TransactionalKeyValueStore<Stuff>,
+    >(Validation::WriteSets);
+}
+
 /// Checks that a transaction of the store `S` is aborted at its commit if a concurrent transaction changed an
 /// object it read: of two transactions that each read one object and write the other, the second to commit is
 /// aborted, as the changed object A is detected.
@@ -1378,7 +1497,8 @@ fn test_validation_ignores_concurrent_write_outside_read_predicate_with_method_2
 /// commit -> aborted
 /// ```
 ///
-/// Python runs this test with both validation methods; it runs here once per method.
+/// Python runs this test with both store classes and both validation methods; it runs here once per method, and the
+/// indexed store follows in step 2 of the port.
 fn check_validation_detects_write_skew_on_objects_with_equal_hash<S>(validation: Validation)
 where
     S: TransactionalStore<Value = Stuff> + Default,
@@ -1453,7 +1573,8 @@ fn test_validation_detects_write_skew_on_objects_with_equal_hash_with_method_2()
 /// commit -> aborted
 /// ```
 ///
-/// Python runs this test with both validation methods; it runs here once per method.
+/// Python runs this test with both store classes and both validation methods; it runs here once per method, and the
+/// indexed store follows in step 2 of the port.
 fn check_validation_detects_swapped_values_of_read_objects<S>(validation: Validation)
 where
     S: TransactionalStore<Value = Stuff> + Default,
@@ -1516,7 +1637,8 @@ fn test_validation_detects_swapped_values_of_read_objects_with_method_2() {
 /// commit -> succeeds
 /// ```
 ///
-/// Python runs this test with both validation methods; it runs here once per method.
+/// Python runs this test with both store classes and both validation methods; it runs here once per method, and the
+/// indexed store follows in step 2 of the port.
 fn check_validation_accepts_unhashable_objects<S>(validation: Validation)
 where
     S: TransactionalStore<Value = Account> + Default,
@@ -1577,7 +1699,8 @@ fn test_validation_accepts_unhashable_objects_with_method_2() {
 /// commit -> aborted
 /// ```
 ///
-/// Python runs this test with both validation methods; it runs here once per method.
+/// Python runs this test with both store classes and both validation methods; it runs here once per method, and the
+/// indexed store follows in step 2 of the port.
 fn check_validation_detects_conflict_on_unhashable_objects<S>(validation: Validation)
 where
     S: TransactionalStore<Value = Account> + Default,
@@ -1637,11 +1760,12 @@ fn test_validation_detects_conflict_on_unhashable_objects_with_method_2() {
 /// ```text
 /// t_i
 /// begin
-/// update A from (42, 0) to (42, 1)
+/// update A to (42, 1)
 /// read a == 42 -> sees A = (42, 1)
 /// ```
 ///
-/// Python runs this test with both validation methods; it runs here once per method.
+/// Before t_i begins, the store holds A = (42, 0) and B = (7, 0). Python runs this test with both store classes and
+/// both validation methods; it runs here once per method, and the indexed store follows in step 2 of the port.
 fn check_read_objects_evaluates_where_clause_twice_only_for_method_1<S>(validation: Validation)
 where
     S: TransactionalStore<Value = Stuff> + Default,
@@ -1714,4 +1838,364 @@ fn test_read_objects_evaluates_where_clause_twice_only_for_method_1_with_method_
     check_read_objects_evaluates_where_clause_twice_only_for_method_1::<
         TransactionalKeyValueStore<Stuff>,
     >(Validation::WriteSets);
+}
+
+/// How a transaction writes an object in the isolation level tests, see [`write`] (Python: the type `WriteKind`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum WriteKind {
+    /// Inserts a new object with `update_object`.
+    Insert,
+    /// Updates an existing object with `update_object`.
+    Update,
+    /// Deletes an existing object with `delete_object`.
+    Delete,
+}
+
+/// Returns the value Stuff(1, `ta_id`) that [`write`] writes for transaction `ta_id`.
+fn value_of(ta_id: u64) -> Stuff {
+    Stuff {
+        a: 1,
+        b: i64::try_from(ta_id).expect("transaction ids of the tests are small"),
+    }
+}
+
+/// Lets transaction `ta_id` write object `object_id` in `store` and returns the result of the write (Python:
+/// `_write`).
+///
+/// [`WriteKind::Insert`] and [`WriteKind::Update`] call `update_object` with the value Stuff(1, `ta_id`), see
+/// [`value_of`], which differs from the value Stuff(1, 0) the tests put into the store and from the value of every
+/// other transaction; [`WriteKind::Delete`] calls `delete_object`.
+fn write<S>(kind: WriteKind, store: &mut S, object_id: &str, ta_id: u64) -> Result<(), StoreError>
+where
+    S: TransactionalStore<Value = Stuff>,
+{
+    match kind {
+        WriteKind::Delete => store.delete_object(object_id, ta_id),
+        WriteKind::Insert | WriteKind::Update => {
+            store.update_object(object_id, value_of(ta_id), ta_id)
+        }
+    }
+}
+
+/// Under snapshot isolation, a transaction that writes an object another transaction changed and committed after
+/// the writer began is aborted at once, even if it never read the object.
+///
+/// ```text
+/// t_i                                 t_j
+/// begin
+///                                     begin
+///                                     update, delete or insert x
+///                                     commit
+/// update, delete or insert x -> aborted
+/// ```
+///
+/// t_i is removed from the transaction dictionary, its journal holds only `Begin` and `Abort`, and x has no
+/// work-in-progress version. Checked for every combination of t_j updating or deleting x and t_i updating or
+/// deleting x, and for t_j and t_i inserting the same new key. Python also runs the update and delete combinations
+/// on the indexed store, to check that it forwards the isolation level; that variant follows with the indexed store
+/// in step 2 of the port.
+#[test]
+fn test_snapshot_isolation_level_aborts_write_to_object_committed_after_begin() {
+    let write_kinds: [WriteKind; 2] = [WriteKind::Update, WriteKind::Delete];
+    let mut variants: Vec<(WriteKind, WriteKind)> = Vec::new();
+    for write_j in write_kinds {
+        for write_i in write_kinds {
+            variants.push((write_j, write_i));
+        }
+    }
+    variants.push((WriteKind::Insert, WriteKind::Insert));
+
+    for (write_j, write_i) in variants {
+        let case: String = format!("write_j = {write_j:?}, write_i = {write_i:?}");
+        let mut store: TransactionalKeyValueStore<Stuff> =
+            TransactionalKeyValueStore::with_isolation_level(
+                Validation::WriteSets,
+                IsolationLevel::SnapshotIsolation,
+            )
+            .unwrap();
+        let object_id: &str = "x";
+        if write_j != WriteKind::Insert {
+            store.put(object_id, Stuff { a: 1, b: 0 }).unwrap();
+        }
+
+        let t_i: u64 = store.begin_transaction();
+        let t_j: u64 = store.begin_transaction();
+
+        // t_j writes x and commits after t_i began:
+        write(write_j, &mut store, object_id, t_j).unwrap();
+        store.commit_transaction(t_j).unwrap();
+
+        // t_i writes x: aborted at the write by the snapshot isolation rule, not only at its commit:
+        let result: Result<(), StoreError> = write(write_i, &mut store, object_id, t_i);
+        assert!(
+            matches!(
+                &result,
+                Err(StoreError::TransactionAborted(message))
+                    if message.contains("aborted under snapshot isolation")
+            ),
+            "{case}: t_i must be aborted under snapshot isolation, got {result:?}"
+        );
+
+        // t_i is gone from the transaction dictionary:
+        assert!(!store.state().td.contains_key(&t_i), "{case}");
+
+        // t_i wrote nothing to the journal except its Begin and Abort entries:
+        assert_eq!(
+            store.state().journal.get(&t_i).unwrap(),
+            [
+                JournalEntry::Begin { ta_id: t_i },
+                JournalEntry::Abort { ta_id: t_i },
+            ],
+            "{case}"
+        );
+
+        // t_i left no wip entry on x:
+        assert_eq!(store.key_value_store()[object_id].wip, None, "{case}");
+    }
+}
+
+/// Under serializable, a transaction that writes an object another transaction changed and committed after the
+/// writer began commits if it never read the object (blind write).
+///
+/// ```text
+/// t_i                                 t_j
+/// begin
+///                                     begin
+///                                     update or delete x
+///                                     commit
+/// update or delete x
+/// commit -> succeeds
+/// ```
+///
+/// The result is the same as if t_j had run completely before t_i. Under snapshot isolation, t_i is aborted at its
+/// write, see [`test_snapshot_isolation_level_aborts_write_to_object_committed_after_begin`]; with a read of x
+/// before the commit of t_j, t_i is aborted under serializable as well, see
+/// [`check_validation_detects_lost_update_on_read_object`]. An update after a committed delete inserts the object
+/// again. Checked for every combination of t_j updating or deleting x and t_i updating or deleting x.
+#[test]
+fn test_serializable_level_commits_blind_write_after_concurrent_commit() {
+    let write_kinds: [WriteKind; 2] = [WriteKind::Update, WriteKind::Delete];
+    for write_j in write_kinds {
+        for write_i in write_kinds {
+            let case: String = format!("write_j = {write_j:?}, write_i = {write_i:?}");
+            let mut store: TransactionalKeyValueStore<Stuff> =
+                TransactionalKeyValueStore::with_isolation_level(
+                    Validation::WriteSets,
+                    IsolationLevel::Serializable,
+                )
+                .unwrap();
+            let object_id: &str = "x";
+            store.put(object_id, Stuff { a: 1, b: 0 }).unwrap();
+
+            let t_i: u64 = store.begin_transaction();
+            let t_j: u64 = store.begin_transaction();
+
+            // t_j writes x and commits after t_i began:
+            write(write_j, &mut store, object_id, t_j).unwrap();
+            store.commit_transaction(t_j).unwrap();
+
+            // t_i writes x without having read it and commits:
+            assert_eq!(write(write_i, &mut store, object_id, t_i), Ok(()), "{case}");
+            assert_eq!(store.commit_transaction(t_i), Ok(()), "{case}");
+            assert_eq!(
+                store.state().committed_transactions_trace.last(),
+                Some(&t_i),
+                "{case}"
+            );
+
+            // the version of t_i is the newest committed version of x:
+            let newest: &VersionEntry<Stuff> = store.key_value_store()[object_id]
+                .committed
+                .last()
+                .expect("x has committed versions");
+            assert_eq!(
+                Some(newest.start_validity),
+                store.state().td[&t_i].committed_timestamp,
+                "{case}"
+            );
+            let expected_version: Version<Stuff> = match write_i {
+                WriteKind::Delete => Version::Delete,
+                WriteKind::Insert | WriteKind::Update => Version::Update(value_of(t_i)),
+            };
+            assert_eq!(newest.version, expected_version, "{case}");
+        }
+    }
+}
+
+/// Under snapshot isolation, two transactions that read the same two objects and each update a different one both
+/// commit (write skew).
+///
+/// ```text
+/// t_i                                 t_j
+/// begin
+///                                     begin
+/// read all -> sees s = (1, 0), t = (2, 0)
+///                                     read all -> sees s = (1, 0), t = (2, 0)
+/// update s to (1, 1)
+/// commit -> succeeds
+///                                     update t to (2, 1)
+///                                     commit -> succeeds
+/// ```
+///
+/// Snapshot isolation looks only at the written object and does not validate reads at commit. Under serializable,
+/// the second commit is aborted, see [`check_write_skew_anomaly`].
+#[test]
+fn test_snapshot_isolation_level_allows_write_skew() {
+    let mut store: TransactionalKeyValueStore<Stuff> =
+        TransactionalKeyValueStore::with_isolation_level(
+            Validation::WriteSets,
+            IsolationLevel::SnapshotIsolation,
+        )
+        .unwrap();
+    store.put("s", Stuff { a: 1, b: 0 }).unwrap();
+    store.put("t", Stuff { a: 2, b: 0 }).unwrap();
+    let original: Vec<(String, Stuff)> = vec![
+        ("s".to_string(), Stuff { a: 1, b: 0 }),
+        ("t".to_string(), Stuff { a: 2, b: 0 }),
+    ];
+
+    let t_i: u64 = store.begin_transaction();
+    let t_j: u64 = store.begin_transaction();
+
+    // both transactions read s and t:
+    let result_i: Vec<(String, Stuff)> = store.read_objects(t_i, None, true).unwrap();
+    assert_eq!(sorted(result_i), original);
+    let result_j: Vec<(String, Stuff)> = store.read_objects(t_j, None, true).unwrap();
+    assert_eq!(sorted(result_j), original);
+
+    // t_i updates s and commits:
+    store.update_object("s", Stuff { a: 1, b: 1 }, t_i).unwrap();
+    store.commit_transaction(t_i).unwrap();
+
+    // t_j updates t and commits, although t_i changed s, which t_j read:
+    store.update_object("t", Stuff { a: 2, b: 1 }, t_j).unwrap();
+    assert_eq!(store.commit_transaction(t_j), Ok(()));
+    let trace: &Vec<u64> = &store.state().committed_transactions_trace;
+    assert_eq!(trace[trace.len() - 2..], [t_i, t_j]);
+
+    // a later transaction sees both changes:
+    let t_k: u64 = store.begin_transaction();
+    let result_k: Vec<(String, Stuff)> = store.read_objects(t_k, None, true).unwrap();
+    assert_eq!(
+        sorted(result_k),
+        [
+            ("s".to_string(), Stuff { a: 1, b: 1 }),
+            ("t".to_string(), Stuff { a: 2, b: 1 }),
+        ]
+    );
+}
+
+/// Under snapshot isolation, a transaction may write an object another transaction changed and committed before
+/// the writer began.
+///
+/// ```text
+/// t_i                                 t_j
+///                                     begin
+///                                     update x to (1, t_j)
+///                                     commit
+/// begin
+/// update x to (1, t_i)
+/// commit -> succeeds
+/// ```
+///
+/// Only commits after the begin of the writer count; commits before it are part of its snapshot.
+#[test]
+fn test_snapshot_isolation_level_allows_write_to_object_committed_before_begin() {
+    let mut store: TransactionalKeyValueStore<Stuff> =
+        TransactionalKeyValueStore::with_isolation_level(
+            Validation::WriteSets,
+            IsolationLevel::SnapshotIsolation,
+        )
+        .unwrap();
+    let object_id: &str = "x";
+    store.put(object_id, Stuff { a: 1, b: 0 }).unwrap();
+
+    // t_j updates x and commits before t_i begins:
+    let t_j: u64 = store.begin_transaction();
+    write(WriteKind::Update, &mut store, object_id, t_j).unwrap();
+    store.commit_transaction(t_j).unwrap();
+
+    // t_i updates x and commits:
+    let t_i: u64 = store.begin_transaction();
+    assert_eq!(write(WriteKind::Update, &mut store, object_id, t_i), Ok(()));
+    assert_eq!(store.commit_transaction(t_i), Ok(()));
+    assert_eq!(
+        store.state().committed_transactions_trace.last(),
+        Some(&t_i)
+    );
+    assert_eq!(
+        store.key_value_store()[object_id]
+            .committed
+            .last()
+            .map(|newest| &newest.version),
+        Some(&Version::Update(value_of(t_i)))
+    );
+}
+
+/// The store returns [`StoreError::InvalidConfiguration`] for snapshot isolation combined with validation method 1
+/// (snapshot isolation does not validate reads).
+///
+/// Python also rejects an unknown isolation level; that case cannot be written in Rust, as [`IsolationLevel`] has
+/// only the two levels.
+#[test]
+fn test_snapshot_isolation_level_rejects_invalid_configuration() {
+    let result: Result<TransactionalKeyValueStore<Stuff>, StoreError> =
+        TransactionalKeyValueStore::with_isolation_level(
+            Validation::BruteForce,
+            IsolationLevel::SnapshotIsolation,
+        );
+    let error: Option<StoreError> = result.err();
+    assert!(
+        matches!(
+            &error,
+            Some(StoreError::InvalidConfiguration(message)) if message.contains("Validation::BruteForce")
+        ),
+        "snapshot isolation with brute force validation must be rejected, got {error:?}"
+    );
+}
+
+/// Under snapshot isolation, a key whose insert was aborted can be inserted again and committed.
+///
+/// ```text
+/// t_i                                 t_j
+///                                     begin
+///                                     insert x = (1, t_j)
+///                                     abort
+/// begin
+/// insert x = (1, t_i)
+/// commit -> succeeds
+/// ```
+///
+/// After the aborted insert, x has an entry in the store but no committed version.
+#[test]
+fn test_snapshot_isolation_level_allows_reinsert_after_aborted_insert() {
+    let mut store: TransactionalKeyValueStore<Stuff> =
+        TransactionalKeyValueStore::with_isolation_level(
+            Validation::WriteSets,
+            IsolationLevel::SnapshotIsolation,
+        )
+        .unwrap();
+    let object_id: &str = "x";
+
+    // t_j inserts x and aborts:
+    let t_j: u64 = store.begin_transaction();
+    write(WriteKind::Insert, &mut store, object_id, t_j).unwrap();
+    store.abort_transaction(t_j);
+    assert_eq!(store.key_value_store()[object_id].committed, []);
+
+    // t_i inserts x again and commits:
+    let t_i: u64 = store.begin_transaction();
+    assert_eq!(write(WriteKind::Insert, &mut store, object_id, t_i), Ok(()));
+    assert_eq!(store.commit_transaction(t_i), Ok(()));
+    assert_eq!(
+        store.state().committed_transactions_trace.last(),
+        Some(&t_i)
+    );
+    assert_eq!(
+        store.key_value_store()[object_id]
+            .committed
+            .last()
+            .map(|newest| &newest.version),
+        Some(&Version::Update(value_of(t_i)))
+    );
 }

@@ -34,10 +34,10 @@ pub use query_processing::predicates::{
     WhereClause,
 };
 pub use stores::mvcc::{
-    JournalEntry, MvccState, ReadClause, Snapshot, TdEntry, TransactionalKeyValueStore,
-    TransactionalStore, Validation, abort_transaction_default, begin_transaction_default, checksum,
-    commit_transaction_default, delete_object_default, read_objects_default, update_object_default,
-    validate_transaction_default,
+    IsolationLevel, JournalEntry, MvccState, ReadClause, Snapshot, TdEntry,
+    TransactionalKeyValueStore, TransactionalStore, Validation, abort_transaction_default,
+    begin_transaction_default, checksum, commit_transaction_default, delete_object_default,
+    read_objects_default, update_object_default, validate_transaction_default,
 };
 pub use stores::versioned_key_value_store::{
     KvStoreEntry, Version, VersionEntry, VersionedKeyValueStore, VersionedStore,

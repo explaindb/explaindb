@@ -84,12 +84,21 @@ fn test_transactional_key_value_store() {
     assert_eq!(store.next_ta_id(), 2);
 }
 
-/// `begin_transaction` adds the transaction to the transaction dictionary with no reads, no writes, no commit
-/// timestamp and the number of transactions committed so far (0); committing it does not change that number, and a
-/// transaction that begins afterwards gets 1.
+/// `begin_transaction` adds the transaction to the transaction dictionary with no reads, no writes and no commit
+/// timestamp. It also stores the number of transactions that had committed when it began (0); this number does not
+/// change when the transaction itself commits while a second transaction runs, and a transaction that begins
+/// afterwards gets 1.
 ///
-/// Python stores the index of the last committed transaction in the trace instead, which is -1 before the first
-/// commit; Rust stores the length of the trace, i.e. the position after that index.
+/// ```text
+/// TA 1                                TA 2                                TA 3
+/// begin
+///                                     begin
+/// commit
+///                                                                         begin
+/// ```
+///
+/// TA 3 is Rust only. Python stores the index of the last committed transaction in the trace instead, which is -1
+/// before the first commit; Rust stores the length of the trace, i.e. the position after that index.
 #[test]
 fn test_begin_transaction() {
     let mut store: TransactionalKeyValueStore<Stuff> = TransactionalKeyValueStore::new();
@@ -116,9 +125,20 @@ fn test_begin_transaction() {
     );
 }
 
-/// Every step of a transaction appends one entry to the journal of that transaction: `Begin`, then `Commit` with
-/// its commit timestamp, or `Update` and `Delete` with the object id, and `Abort`. The journal has one key per
-/// transaction, so its size is the number of transactions begun.
+/// The journal holds one list of entries per transaction: `Begin` at the start, then `Update` and `Delete` for its
+/// writes, and `Commit` with the commit timestamp or `Abort` at the end. The journal has one key per transaction,
+/// so its size is the number of transactions begun.
+///
+/// ```text
+/// TA 1                                TA 2
+/// begin
+///                                     begin
+/// commit (timestamp 3)
+///                                     update "a" to "b"
+///                                     update "b" to "c"
+///                                     delete "b"
+///                                     abort
+/// ```
 #[test]
 fn test_journaling() {
     let mut store: TransactionalKeyValueStore<String> = TransactionalKeyValueStore::new();

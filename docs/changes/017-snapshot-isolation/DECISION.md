@@ -207,3 +207,6 @@ test helper were made precise. Stage files by explicit path (untracked `rust/` s
 
 Review of MR !155 (2026-10-19): the snapshot isolation check of `update_object` and `delete_object` moved into one
 private method, `_abort_if_committed_after_begin`, built on `_committed_after_begin`; behaviour unchanged.
+
+Rust port (2026-10-19): the parity in the Rust port, listed above as out of scope, is feature 019
+([docs/changes/019-regenerate-rust](../019-regenerate-rust/DECISION.md)).

@@ -26,13 +26,14 @@ use std::fmt;
 /// An error of a store operation. Each variant carries what it is about: an object id, a transaction id, a message
 /// or the key (and value) of an index.
 ///
-/// The Python stores raise an exception in these cases (`KeyError`, `RuntimeError` or
+/// The Python stores raise an exception in these cases (`KeyError`, `RuntimeError`, `ValueError` or
 /// `TransactionAbortedException`). Rust panics on the programming errors that Python checks with `assert`.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum StoreError {
     /// The object id is already in the store (Python: `KeyError` in `put`).
     KeyExists(String),
-    /// The object id is not in the store (Python: `KeyError` in `get` and `delete`).
+    /// The object id is not in the store (Python: `KeyError` in `get`, `delete`, `delete_object` and
+    /// `_get_visible_object_version`).
     KeyNotFound(String),
     /// The object id is in the store, but has no committed value: its last committed version is a delete marker, or
     /// it has no committed version at all, e.g. because its insert is not committed yet or was aborted. Python's
@@ -48,6 +49,9 @@ pub enum StoreError {
     /// The store aborted the transaction because of a conflict with another transaction; the message says why
     /// (Python: `TransactionAbortedException`).
     TransactionAborted(String),
+    /// The settings of a new store do not fit together; the message says why (Python: `ValueError` in
+    /// `TransactionalKeyValueStore.__init__`).
+    InvalidConfiguration(String),
     /// The committed versions of the object are not ordered by the start of their validity (Python:
     /// `RuntimeError` in `_get_visible_object_version`).
     VersionsNotOrdered(String),
@@ -63,8 +67,9 @@ pub enum StoreError {
 }
 
 impl fmt::Display for StoreError {
-    /// Writes the messages of the Python stores; `NotVisible` has no Python counterpart, and the message of
-    /// `VersionsNotOrdered` also names the object.
+    /// Writes the messages of the Python stores; `NotVisible` has no Python counterpart, the message of
+    /// `VersionsNotOrdered` also names the object, and the message of `InvalidConfiguration` names the Rust settings
+    /// (`Validation::BruteForce`, `IsolationLevel::Serializable`) instead of Python's parameters.
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             StoreError::KeyExists(object_id) => {
@@ -83,6 +88,7 @@ impl fmt::Display for StoreError {
                 write!(f, "transaction {ta_id} committed already")
             }
             StoreError::TransactionAborted(message) => write!(f, "{message}"),
+            StoreError::InvalidConfiguration(message) => write!(f, "{message}"),
             StoreError::VersionsNotOrdered(object_id) => write!(
                 f,
                 "committed versions of object {object_id} are not ordered by their validity start"

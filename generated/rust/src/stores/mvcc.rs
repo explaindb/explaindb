@@ -136,7 +136,7 @@ pub struct Snapshot<V> {
 }
 
 /// The method a transactional store uses to validate a transaction at its commit (Python: the flag
-/// `use_brute_force_validation`).
+/// `use_brute_force_validation`). It only applies to the isolation level serializable (see [`IsolationLevel`]).
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum Validation {
     /// Method 1, brute force: each read keeps a checksum of its result in the committed snapshot of the
@@ -147,6 +147,23 @@ pub enum Validation {
     /// (Python: `use_brute_force_validation=False`, the default).
     #[default]
     WriteSets,
+}
+
+/// The isolation level of a transactional store (Python: the type `IsolationLevel` and the parameter
+/// `isolation_level`). In both levels, a transaction reads the snapshot of its begin plus its own writes (snapshot
+/// read), and a transaction that writes an object which another transaction is still writing is aborted.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum IsolationLevel {
+    /// At its commit, the store checks whether a transaction that committed in the meantime changed something this
+    /// transaction read; if so, it is aborted (see [`Validation`]). The write skew anomaly is detected and avoided
+    /// (Python: `"serializable"`, the default).
+    #[default]
+    Serializable,
+    /// Reads are not checked. Instead, a transaction that writes an object is aborted at once if another
+    /// transaction changed that object and committed after the writer began. Together with the rule above, of two
+    /// concurrent transactions that write the same object, the later writer is aborted at once (first updater
+    /// wins). Lost updates cannot happen, but write skew can (Python: `"snapshot isolation"`).
+    SnapshotIsolation,
 }
 
 /// Returns the checksum of a read result: the SHA-256 digest of its `Debug` text, as lowercase hex (Python: the
@@ -187,15 +204,19 @@ pub struct MvccState<V> {
     /// that wrote something and kept a read from before the change, as such a read carries no checksum; changing
     /// it to method 2 causes no extra aborts.
     pub validation: Validation,
+    /// The isolation level. Changing it to snapshot isolation while transactions run stops validating their reads
+    /// at once; if validation method 1 was set by hand, snapshot isolation only computes checksums nobody uses.
+    pub isolation_level: IsolationLevel,
 }
 
 impl<V> MvccState<V> {
-    /// Creates the state of an empty store with validation method 2; the first transaction id is 1.
+    /// Creates the state of an empty serializable store with validation method 2; the first transaction id is 1.
     pub fn new() -> MvccState<V> {
         MvccState::with_validation(Validation::WriteSets)
     }
 
-    /// Creates the state of an empty store with the validation method `validation`; the first transaction id is 1.
+    /// Creates the state of an empty serializable store with the validation method `validation`; the first
+    /// transaction id is 1.
     pub fn with_validation(validation: Validation) -> MvccState<V> {
         MvccState {
             key_value_store: IndexMap::new(),
@@ -204,7 +225,35 @@ impl<V> MvccState<V> {
             td: BTreeMap::new(),
             committed_transactions_trace: Vec::new(),
             validation,
+            isolation_level: IsolationLevel::Serializable,
         }
+    }
+
+    /// Creates the state of an empty store with the validation method `validation` and the isolation level
+    /// `isolation_level`; the first transaction id is 1 (Python: the checks of `TransactionalKeyValueStore.__init__`).
+    ///
+    /// # Errors
+    ///
+    /// [`StoreError::InvalidConfiguration`] for snapshot isolation with validation method 1, as snapshot isolation
+    /// does not validate reads (Python: `ValueError`; Python's error for an unknown level cannot occur, as
+    /// [`IsolationLevel`] has only the two levels).
+    pub fn with_isolation_level(
+        validation: Validation,
+        isolation_level: IsolationLevel,
+    ) -> Result<MvccState<V>, StoreError> {
+        if isolation_level == IsolationLevel::SnapshotIsolation
+            && validation == Validation::BruteForce
+        {
+            return Err(StoreError::InvalidConfiguration(
+                "snapshot isolation does not validate reads, so Validation::BruteForce requires \
+                 IsolationLevel::Serializable"
+                    .to_string(),
+            ));
+        }
+        Ok(MvccState {
+            isolation_level,
+            ..MvccState::with_validation(validation)
+        })
     }
 
     /// Gets the version of object `object_id` visible at `timestamp` under snapshot isolation (Python:
@@ -366,12 +415,26 @@ fn selected<V>(where_clause: Option<&dyn Clause<V>>, object: Option<&V>) -> bool
     }
 }
 
-/// A fully transactional versioned key-value store: the operations of a transaction on any number of objects are
-/// serializable (Python: `TransactionalKeyValueStore`, formerly known as `MVCCStore`).
+/// A fully transactional versioned key-value store: a transaction may change any number of objects (Python:
+/// `TransactionalKeyValueStore`, formerly known as `MVCCStore`).
 ///
-/// Transactions read under snapshot isolation; at commit, a validation phase checks whether the reads of the
-/// committing transaction would still return the same, and aborts it on a conflict (see [`Validation`] for the two
-/// methods). This detects and avoids the write skew anomaly.
+/// The store supports two isolation levels, see [`IsolationLevel`]. In both, a transaction reads the snapshot of its
+/// begin plus its own writes (snapshot read; older comments in this file that say "under snapshot isolation" for
+/// reading, e.g. at [`MvccState::get_visible_object_version`], mean this snapshot read, which both levels use). In
+/// both, a transaction that writes an object which another transaction is still writing (not yet committed) is
+/// aborted. In addition:
+///
+/// - serializable (default): at its commit, a validation phase checks whether a transaction that committed in the
+///   meantime changed something this transaction read, and aborts it on a conflict (see [`Validation`] for the two
+///   methods). The write skew anomaly is detected and avoided.
+/// - snapshot isolation: reads are not checked. Instead, a transaction that writes an object is aborted at once if
+///   another transaction changed that object and committed after the writer began. Together with the rule above,
+///   of two concurrent transactions that write the same object, the later writer is aborted at once (first updater
+///   wins). Lost updates cannot happen, but write skew can.
+///
+/// Note: a blind write (one that does not read the object first) to an object that another transaction changed and
+/// committed since the writer began is aborted under snapshot isolation, but can commit under serializable. The
+/// tutorial page "MVCC & Versioned Stores" explains write skew and shows both schedules.
 ///
 /// Python's subclasses inherit the implementation; in Rust it lives in the default methods of this trait, and a
 /// store only gives access to its [`MvccState`], whose `key_value_store` must be the map that
@@ -389,8 +452,8 @@ fn selected<V>(where_clause: Option<&dyn Clause<V>>, object: Option<&V>) -> bool
 /// Python.
 ///
 /// The non-transactional [`VersionedStore::delete`] appends a delete marker valid from timestamp 0, as in Python;
-/// on an object with a committed version, later transactional reads then fail with
-/// [`StoreError::VersionsNotOrdered`] (a read checks every object of the store).
+/// on an object with a committed version, later transactional reads of that object's committed versions then fail
+/// with [`StoreError::VersionsNotOrdered`] (a read checks every object of the store).
 pub trait TransactionalStore: VersionedStore<Value: Clone + PartialEq + fmt::Debug> {
     /// Returns the state of the store.
     fn state(&self) -> &MvccState<Self::Value>;
@@ -626,14 +689,16 @@ pub fn read_objects_default<S: TransactionalStore + ?Sized>(
 /// Updates (or inserts) object `object_id` to `updated_object` in transaction `ta_id` (Python: `update_object`).
 ///
 /// Writes a [`JournalEntry::Update`], stores the object as the work-in-progress version of the object and adds the
-/// object id to the transaction's write set.
+/// object id to the transaction's write set. Under the isolation level snapshot isolation, also aborts the
+/// transaction if another transaction changed the object and committed after the transaction began.
 ///
 /// # Errors
 ///
 /// - [`StoreError::TransactionNotFound`] if the transaction is not in the transaction dictionary (Python:
 ///   `KeyError`);
 /// - [`StoreError::AlreadyCommitted`] if the transaction has committed (Python: `RuntimeError`);
-/// - [`StoreError::TransactionAborted`] if another transaction holds a work-in-progress version of the object; the
+/// - [`StoreError::TransactionAborted`] if another transaction holds a work-in-progress version of the object, or,
+///   under snapshot isolation, if another transaction committed the object after this transaction began; the
 ///   transaction is aborted first, through [`TransactionalStore::abort_transaction`].
 pub fn update_object_default<S: TransactionalStore + ?Sized>(
     store: &mut S,
@@ -657,6 +722,9 @@ pub fn update_object_default<S: TransactionalStore + ?Sized>(
             "another transaction is currently modifying object {object_id} already"
         )));
     }
+
+    // under snapshot isolation, no other transaction may have committed the object since ta_id began:
+    abort_if_committed_after_begin(store, object_id, ta_id)?;
 
     let state: &mut MvccState<S::Value> = store.state_mut();
 
@@ -701,13 +769,15 @@ pub fn update_object_default<S: TransactionalStore + ?Sized>(
 /// Deletes object `object_id` in transaction `ta_id` (Python: `delete_object`).
 ///
 /// Writes a [`JournalEntry::Delete`], adds a delete marker as the work-in-progress version of the object and adds
-/// the object id to the transaction's write set.
+/// the object id to the transaction's write set. Under the isolation level snapshot isolation, also aborts the
+/// transaction if another transaction changed the object and committed after the transaction began.
 ///
 /// # Errors
 ///
 /// - [`StoreError::AlreadyCommitted`] if the transaction has committed (Python: `RuntimeError`);
 /// - [`StoreError::KeyNotFound`] if the object id is not in the store (Python: `KeyError`);
-/// - [`StoreError::TransactionAborted`] if another transaction holds a work-in-progress version of the object; the
+/// - [`StoreError::TransactionAborted`] if another transaction holds a work-in-progress version of the object, or,
+///   under snapshot isolation, if another transaction committed the object after this transaction began; the
 ///   transaction is aborted first, through [`TransactionalStore::abort_transaction`].
 ///
 /// # Panics
@@ -736,6 +806,9 @@ pub fn delete_object_default<S: TransactionalStore + ?Sized>(
             "another transaction is currently modifying object {object_id} already"
         )));
     }
+
+    // under snapshot isolation, no other transaction may have committed the object since ta_id began:
+    abort_if_committed_after_begin(store, object_id, ta_id)?;
 
     let state: &mut MvccState<S::Value> = store.state_mut();
 
@@ -772,10 +845,52 @@ fn written_by_other_transaction<V>(state: &MvccState<V>, object_id: &str, ta_id:
         .is_some_and(|wip| wip.start_validity != ta_id)
 }
 
+/// Returns `true` if another transaction committed a version of object `object_id` after transaction `ta_id` began
+/// (Python: `_committed_after_begin`). Returns `false` if the object is not in the store or has no committed version.
+fn committed_after_begin<V>(state: &MvccState<V>, object_id: &str, ta_id: u64) -> bool {
+    state
+        .key_value_store
+        .get(object_id)
+        .and_then(|entry| entry.committed.last())
+        // transaction ids and commit timestamps come from the same counter (non-transactional writes use 0), so a
+        // larger timestamp means "committed after ta_id began":
+        .is_some_and(|newest| newest.start_validity > ta_id)
+}
+
+/// Under snapshot isolation, aborts transaction `ta_id` if another transaction committed object `object_id` after
+/// `ta_id` began (Python: `_abort_if_committed_after_begin`); does nothing under serializable.
+///
+/// Snapshot isolation does not validate reads, so it cannot tell whether `ta_id` read the object; to rule out lost
+/// updates, it aborts every write to an object committed after `ta_id` began, even a blind one.
+///
+/// # Errors
+///
+/// [`StoreError::TransactionAborted`] after aborting the transaction through
+/// [`TransactionalStore::abort_transaction`].
+fn abort_if_committed_after_begin<S: TransactionalStore + ?Sized>(
+    store: &mut S,
+    object_id: &str,
+    ta_id: u64,
+) -> Result<(), StoreError> {
+    let state: &MvccState<S::Value> = store.state();
+    if state.isolation_level == IsolationLevel::SnapshotIsolation
+        && committed_after_begin(state, object_id, ta_id)
+    {
+        store.abort_transaction(ta_id);
+        return Err(StoreError::TransactionAborted(format!(
+            "transaction {ta_id} aborted under snapshot isolation: another transaction changed object \
+             {object_id} and committed after transaction {ta_id} began"
+        )));
+    }
+    Ok(())
+}
+
 /// Validates transaction `ta_id` at `commit_timestamp` and returns `true` if there is no conflict (Python:
 /// `_validate_transaction`).
 ///
-/// A transaction that wrote nothing always passes. Otherwise, by the store's [`Validation`]:
+/// Under the isolation level snapshot isolation, always passes, as reads are not validated (conflicting writes are
+/// refused in `update_object` / `delete_object`). Otherwise, a transaction that wrote nothing always passes, and the
+/// others are validated by the store's [`Validation`]:
 ///
 /// - Method 1 (brute force): each read of `ta_id` is run again at `commit_timestamp`; if the checksum of its result
 ///   differs from the one kept at the read, the validation fails. Method 1 does not look at the write sets of other
@@ -799,7 +914,8 @@ fn written_by_other_transaction<V>(state: &MvccState<V>, object_id: &str, ta_id:
 ///
 /// # Panics
 ///
-/// - If the transaction `ta_id` is not in the transaction dictionary (Python raises a `KeyError`); through
+/// - If the transaction `ta_id` is not in the transaction dictionary under serializable (Python raises a
+///   `KeyError`; under snapshot isolation, both return `true` without looking it up); through
 ///   [`commit_transaction_default`], which checks the transaction first, this cannot happen.
 /// - If a where clause panics, e.g. a [`crate::WhereClause`] on an object without its attribute (Python:
 ///   `AttributeError`).
@@ -809,6 +925,12 @@ pub fn validate_transaction_default<S: TransactionalStore + ?Sized>(
     commit_timestamp: u64,
 ) -> Result<bool, StoreError> {
     let state: &MvccState<S::Value> = store.state();
+
+    // snapshot isolation does not validate reads (write skew can happen):
+    if state.isolation_level == IsolationLevel::SnapshotIsolation {
+        return Ok(true);
+    }
+
     let Some(td_entry) = state.td.get(&ta_id) else {
         missing_transaction(ta_id)
     };
@@ -1020,8 +1142,10 @@ pub fn abort_transaction_default<S: TransactionalStore + ?Sized>(store: &mut S, 
 /// The store that uses the default methods of [`TransactionalStore`]; it holds only its [`MvccState`] (Python:
 /// `TransactionalKeyValueStore`).
 ///
-/// Python's constructor parameter `use_brute_force_validation` is the [`Validation`] of
-/// [`TransactionalKeyValueStore::with_validation`]; `persistence_layer` is not ported, as it is not used.
+/// Python's constructor parameters `use_brute_force_validation` and `isolation_level` are the [`Validation`] and the
+/// [`IsolationLevel`] of [`TransactionalKeyValueStore::with_isolation_level`] (or the [`Validation`] of
+/// [`TransactionalKeyValueStore::with_validation`] for a serializable store); `persistence_layer` is not ported, as it
+/// is not used.
 #[derive(Debug)]
 pub struct TransactionalKeyValueStore<V> {
     /// The state of the store.
@@ -1029,16 +1153,30 @@ pub struct TransactionalKeyValueStore<V> {
 }
 
 impl<V> TransactionalKeyValueStore<V> {
-    /// Creates an empty store with validation method 2 (Python's default).
+    /// Creates an empty serializable store with validation method 2 (Python's defaults).
     pub fn new() -> TransactionalKeyValueStore<V> {
         TransactionalKeyValueStore::with_validation(Validation::WriteSets)
     }
 
-    /// Creates an empty store with the validation method `validation`.
+    /// Creates an empty serializable store with the validation method `validation`.
     pub fn with_validation(validation: Validation) -> TransactionalKeyValueStore<V> {
         TransactionalKeyValueStore {
             state: MvccState::with_validation(validation),
         }
+    }
+
+    /// Creates an empty store with the validation method `validation` and the isolation level `isolation_level`.
+    ///
+    /// # Errors
+    ///
+    /// See [`MvccState::with_isolation_level`].
+    pub fn with_isolation_level(
+        validation: Validation,
+        isolation_level: IsolationLevel,
+    ) -> Result<TransactionalKeyValueStore<V>, StoreError> {
+        Ok(TransactionalKeyValueStore {
+            state: MvccState::with_isolation_level(validation, isolation_level)?,
+        })
     }
 }
 

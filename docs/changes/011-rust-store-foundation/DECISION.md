@@ -128,3 +128,7 @@ folder `rust/`:
 **Note 2026-10-16:** The benchmarks came before the indexed store, as 015, and compare Python with Rust using
 struct values only (user decision); the value enum and closure predicates are deferred to a later benchmark merge
 request (see docs/changes/015-store-benchmarks).
+
+**Note 2026-10-19 (regeneration):** The regeneration at the end of the series is feature 019
+([docs/changes/019-regenerate-rust](../019-regenerate-rust/DECISION.md)): it ports the Python changes since ffab2e8,
+among them snapshot isolation (017), and records all hashes from the current Python.
