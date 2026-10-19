@@ -31,6 +31,9 @@ publish = false
 
 [dependencies]
 indexmap = "2.14"
+# Held at 0.11.0 until 0.11.1 (published 2026-10-12) is two weeks old
+# (see docs/changes/014-rust-brute-force-validation).
+sha2 = "=0.11.0"
 
 # Every item, private ones included, needs a doc comment, with the sections "# Errors" and "# Panics" where they
 # apply (see CONTRIBUTING.md). No unsafe code.

@@ -20,16 +20,18 @@
 //
 
 //! Rust-specific tests of the transactional (MVCC) store: the exact errors and panics of each operation, the
-//! deduplication of the read set, and stores that override `abort_transaction` or `validate_transaction`. They have
-//! no Python counterpart; the ported Python tests are in `test_store_anomalies.rs`.
+//! deduplication of the read set, stores that override `abort_transaction` or `validate_transaction`, the
+//! differences between the two validation methods and the behaviour of validation method 1. They have no Python
+//! counterpart; the ported Python tests are in `test_store_anomalies.rs`.
 
+use std::cell::Cell;
 use std::rc::Rc;
 
-use crate::common::{Stuff, update};
+use crate::common::{CountingWhereClause, Stuff, update};
 use explaindb::{
-    Clause, JournalEntry, KvStoreEntry, MvccState, ReadClause, StoreError,
-    TransactionalKeyValueStore, TransactionalStore, VersionedStore, WhereClause,
-    abort_transaction_default,
+    Clause, JournalEntry, KvStoreEntry, MvccState, ReadClause, Snapshot, StoreError,
+    TransactionalKeyValueStore, TransactionalStore, Validation, VersionedStore, WhereClause,
+    abort_transaction_default, checksum,
 };
 use indexmap::IndexMap;
 
@@ -286,9 +288,9 @@ fn commit_with_unordered_versions_fails_without_abort() {
 }
 
 /// Checks that `commit_transaction` of the store `S` returns [`StoreError::TransactionNotFound`] naming a
-/// transaction that committed while the committing transaction ran and was aborted afterwards: the validation needs
-/// its write set, which left the store with the abort (Python raises a `KeyError`). The committing transaction is
-/// not aborted.
+/// transaction that committed while the committing transaction ran and was aborted afterwards: validation method 2
+/// (the default) needs its write set, which left the store with the abort (Python raises a `KeyError`). The
+/// committing transaction is not aborted.
 ///
 /// ```text
 /// t_1                                 t_2
@@ -551,9 +553,9 @@ fn read_set_keeps_each_read_once() {
 #[test]
 fn read_clause_same_as_compares_clause_identity_and_checksum() {
     let where_clause: Rc<dyn Clause<Stuff>> = Rc::new(WhereClause::new("a", "==", 1));
-    let read = |where_clause: Option<&Rc<dyn Clause<Stuff>>>, checksum: Option<&str>| ReadClause {
+    let read = |where_clause: Option<&Rc<dyn Clause<Stuff>>>, digest: Option<&str>| ReadClause {
         where_clause: where_clause.map(Rc::clone),
-        checksum: checksum.map(str::to_string),
+        checksum: digest.map(str::to_string),
     };
 
     assert!(read(Some(&where_clause), Some("x")).same_as(&read(Some(&where_clause), Some("x"))));
@@ -824,4 +826,456 @@ fn commit_uses_overridden_validation() {
     assert_eq!(store.state().committed_transactions_trace, [t_1, t_2]);
     assert_eq!(store.get("X"), Ok(&Stuff { a: 1, b: 100 }));
     assert_eq!(store.get("Y"), Ok(&Stuff { a: 2, b: 200 }));
+}
+
+/// Checks that the commit of a transaction of the store `S` evaluates the where clauses of its reads once per
+/// visible object with validation method 1, which runs every read again, and never with method 2, as no transaction
+/// committed meanwhile, so there is no concurrent write to check the reads against.
+///
+/// ```text
+/// t_1
+/// begin
+/// read a == 1 -> sees A
+/// update B
+/// commit -> succeeds
+/// ```
+///
+/// t_1 updates B, as validation skips a transaction that wrote nothing.
+fn check_commit_evaluates_where_clauses_by_method<S>(validation: Validation)
+where
+    S: TransactionalStore<Value = Stuff> + Default,
+{
+    let mut store: S = store_with_a_and_b();
+    store.state_mut().validation = validation;
+    let counting: Rc<CountingWhereClause> = Rc::new(CountingWhereClause {
+        clause: WhereClause::new("a", "==", 1),
+        evaluations: Cell::new(0),
+    });
+    let t_1: u64 = store.begin_transaction();
+    assert_eq!(
+        store
+            .read_objects(t_1, Some(counting.clone()), true)
+            .unwrap(),
+        [("A".to_string(), Stuff { a: 1, b: 0 })]
+    );
+    store.update_object("B", Stuff { a: 2, b: 1 }, t_1).unwrap();
+
+    // count only the evaluations of the commit:
+    counting.evaluations.set(0);
+    assert_eq!(store.commit_transaction(t_1), Ok(()));
+
+    // method 1 reads A and B again; method 2 has nothing to check:
+    let expected_evaluations: usize = match validation {
+        Validation::BruteForce => 2,
+        Validation::WriteSets => 0,
+    };
+    assert_eq!(counting.evaluations.get(), expected_evaluations);
+}
+
+/// The commit of a [`TransactionalKeyValueStore`] with validation method 1 evaluates the where clause of a read once
+/// per visible object, see [`check_commit_evaluates_where_clauses_by_method`].
+#[test]
+fn commit_evaluates_where_clauses_by_method_with_method_1() {
+    check_commit_evaluates_where_clauses_by_method::<TransactionalKeyValueStore<Stuff>>(
+        Validation::BruteForce,
+    );
+}
+
+/// The commit of a [`TransactionalKeyValueStore`] with validation method 2 does not evaluate the where clause of a
+/// read if no transaction committed meanwhile, see [`check_commit_evaluates_where_clauses_by_method`].
+#[test]
+fn commit_evaluates_where_clauses_by_method_with_method_2() {
+    check_commit_evaluates_where_clauses_by_method::<TransactionalKeyValueStore<Stuff>>(
+        Validation::WriteSets,
+    );
+}
+
+/// Checks that, with validation method 1, a transaction of the store `S` that wrote nothing passes validation
+/// without evaluating any where clause, even though another transaction committed a change of the object it read:
+/// a transaction without writes skips the validation before method 1 would run its reads again. Run again, the read
+/// a == 42 would no longer see A, so method 1 would abort t_1.
+///
+/// ```text
+/// t_1                                 t_2
+/// begin
+/// read a == 42 -> sees A
+///                                     begin
+///                                     update A to (43, 0)
+///                                     commit
+/// commit -> succeeds
+/// ```
+fn check_read_only_transaction_skips_validation_with_method_1<S>()
+where
+    S: TransactionalStore<Value = Stuff> + Default,
+{
+    let mut store: S = S::default();
+    store.state_mut().validation = Validation::BruteForce;
+    store.put("A", Stuff { a: 42, b: 0 }).unwrap();
+    let counting: Rc<CountingWhereClause> = Rc::new(CountingWhereClause {
+        clause: WhereClause::new("a", "==", 42),
+        evaluations: Cell::new(0),
+    });
+
+    let t_1: u64 = store.begin_transaction();
+    assert_eq!(
+        store
+            .read_objects(t_1, Some(counting.clone()), true)
+            .unwrap(),
+        [("A".to_string(), Stuff { a: 42, b: 0 })]
+    );
+
+    let t_2: u64 = store.begin_transaction();
+    store
+        .update_object("A", Stuff { a: 43, b: 0 }, t_2)
+        .unwrap();
+    store.commit_transaction(t_2).unwrap();
+
+    // count only the evaluations of the commit:
+    counting.evaluations.set(0);
+    assert_eq!(store.commit_transaction(t_1), Ok(()));
+    assert_eq!(counting.evaluations.get(), 0);
+    assert_eq!(store.state().committed_transactions_trace, [t_2, t_1]);
+}
+
+/// A [`TransactionalKeyValueStore`] with validation method 1 commits a transaction that wrote nothing without
+/// running its reads again, see [`check_read_only_transaction_skips_validation_with_method_1`].
+#[test]
+fn read_only_transaction_skips_validation_with_method_1() {
+    check_read_only_transaction_skips_validation_with_method_1::<TransactionalKeyValueStore<Stuff>>(
+    );
+}
+
+/// With validation method 1, a [`TransactionalKeyValueStore`] checks every read of a transaction at its commit, not
+/// only the first or the last one: t_1 reads A, then B, then nothing, and writes; t_2 changes B and commits; the
+/// second read of t_1 no longer returns the same result, so t_1 is aborted.
+///
+/// ```text
+/// t_1                                 t_2
+/// begin
+/// read a == 1 -> sees A
+/// read a == 2 -> sees B
+/// read a == 3 -> sees nothing
+///                                     begin
+///                                     update B to (2, 2)
+///                                     commit
+/// update A
+/// commit -> aborted
+/// ```
+#[test]
+fn validation_checks_every_read_with_method_1() {
+    let mut store: TransactionalKeyValueStore<Stuff> = store_with_a_and_b();
+    store.state_mut().validation = Validation::BruteForce;
+    let t_1: u64 = store.begin_transaction();
+    assert_eq!(
+        store
+            .read_objects(t_1, Some(Rc::new(WhereClause::new("a", "==", 1))), true)
+            .unwrap(),
+        [("A".to_string(), Stuff { a: 1, b: 0 })]
+    );
+    assert_eq!(
+        store
+            .read_objects(t_1, Some(Rc::new(WhereClause::new("a", "==", 2))), true)
+            .unwrap(),
+        [("B".to_string(), Stuff { a: 2, b: 0 })]
+    );
+    assert_eq!(
+        store
+            .read_objects(t_1, Some(Rc::new(WhereClause::new("a", "==", 3))), true)
+            .unwrap(),
+        []
+    );
+
+    let t_2: u64 = store.begin_transaction();
+    store.update_object("B", Stuff { a: 2, b: 2 }, t_2).unwrap();
+    store.commit_transaction(t_2).unwrap();
+
+    store.update_object("A", Stuff { a: 1, b: 1 }, t_1).unwrap();
+    assert!(matches!(
+        store.commit_transaction(t_1),
+        Err(StoreError::TransactionAborted(_))
+    ));
+    assert_eq!(store.state().committed_transactions_trace, [t_2]);
+    assert_eq!(store.get("A"), Ok(&Stuff { a: 1, b: 0 }));
+}
+
+/// Checks the commit of a transaction t_1 of the store `S` that read A and wrote, while a transaction t_2 that
+/// changed B committed and was aborted afterwards. With validation method 2, the commit returns
+/// [`StoreError::TransactionNotFound`] naming t_2, as it needs the write set of t_2, which left the store with the
+/// abort; t_1 is neither committed nor aborted. Method 1 does not look at the write sets of other transactions: it
+/// runs the read of t_1 again, which still sees only A = (1, 0), so t_1 commits.
+///
+/// ```text
+/// t_1                                 t_2
+/// begin
+///                                     begin
+/// read a == 1 -> sees A
+/// update A
+///                                     update B
+///                                     commit
+///                                     abort
+/// commit -> succeeds (method 1)
+///           TransactionNotFound(t_2) (method 2)
+/// ```
+fn check_validation_against_aborted_committed_transaction_by_method<S>(validation: Validation)
+where
+    S: TransactionalStore<Value = Stuff> + Default,
+{
+    let mut store: S = store_with_a_and_b();
+    store.state_mut().validation = validation;
+    let t_1: u64 = store.begin_transaction();
+    let t_2: u64 = store.begin_transaction();
+    let where_clause: Rc<dyn Clause<Stuff>> = Rc::new(WhereClause::new("a", "==", 1));
+    assert_eq!(
+        store.read_objects(t_1, Some(where_clause), true).unwrap(),
+        [("A".to_string(), Stuff { a: 1, b: 0 })]
+    );
+    store.update_object("A", Stuff { a: 1, b: 1 }, t_1).unwrap();
+    store.update_object("B", Stuff { a: 2, b: 2 }, t_2).unwrap();
+    store.commit_transaction(t_2).unwrap();
+    store.abort_transaction(t_2);
+
+    match validation {
+        Validation::BruteForce => {
+            assert_eq!(store.commit_transaction(t_1), Ok(()));
+            assert_eq!(store.state().committed_transactions_trace, [t_2, t_1]);
+            assert_eq!(store.get("A"), Ok(&Stuff { a: 1, b: 1 }));
+        }
+        Validation::WriteSets => {
+            assert_eq!(
+                store.commit_transaction(t_1),
+                Err(StoreError::TransactionNotFound(t_2))
+            );
+            assert_eq!(store.state().td[&t_1].committed_timestamp, None);
+            assert_eq!(
+                store.key_value_store()["A"].wip,
+                Some(update(t_1, Stuff { a: 1, b: 1 }))
+            );
+        }
+    }
+}
+
+/// A [`TransactionalKeyValueStore`] with validation method 1 commits a transaction although a transaction that
+/// committed meanwhile was aborted, see [`check_validation_against_aborted_committed_transaction_by_method`].
+#[test]
+fn validation_against_aborted_committed_transaction_by_method_with_method_1() {
+    check_validation_against_aborted_committed_transaction_by_method::<
+        TransactionalKeyValueStore<Stuff>,
+    >(Validation::BruteForce);
+}
+
+/// A [`TransactionalKeyValueStore`] with validation method 2 reports a transaction that committed meanwhile and was
+/// aborted, see [`check_validation_against_aborted_committed_transaction_by_method`].
+#[test]
+fn validation_against_aborted_committed_transaction_by_method_with_method_2() {
+    check_validation_against_aborted_committed_transaction_by_method::<
+        TransactionalKeyValueStore<Stuff>,
+    >(Validation::WriteSets);
+}
+
+/// Checks the commit of a transaction t_1 of the store `S` that read A and wrote B, after a non-transactional `put`
+/// of a new object C that matches the read of t_1. With validation method 1, t_1 is aborted: its read, run again at
+/// the commit, also sees C, so the checksum differs. Method 2 commits t_1: `put` commits C with start of validity 0
+/// and puts it in no write set, and no transaction committed while t_1 ran, so there is nothing to check.
+///
+/// ```text
+/// t_1                                 non-transactional
+/// begin
+/// read a == 1 -> sees A
+/// update B
+///                                     put C = (1, 0)
+/// commit -> aborted (method 1)
+///           succeeds (method 2)
+/// ```
+fn check_put_after_read_by_method<S>(validation: Validation)
+where
+    S: TransactionalStore<Value = Stuff> + Default,
+{
+    let mut store: S = store_with_a_and_b();
+    store.state_mut().validation = validation;
+    let t_1: u64 = store.begin_transaction();
+    let where_clause: Rc<dyn Clause<Stuff>> = Rc::new(WhereClause::new("a", "==", 1));
+    assert_eq!(
+        store.read_objects(t_1, Some(where_clause), true).unwrap(),
+        [("A".to_string(), Stuff { a: 1, b: 0 })]
+    );
+    store.update_object("B", Stuff { a: 2, b: 1 }, t_1).unwrap();
+
+    store.put("C", Stuff { a: 1, b: 0 }).unwrap();
+
+    match validation {
+        Validation::BruteForce => {
+            let result: Result<(), StoreError> = store.commit_transaction(t_1);
+            assert!(
+                matches!(result, Err(StoreError::TransactionAborted(_))),
+                "t_1 must be aborted with validation method 1, got {result:?}"
+            );
+            assert!(!store.state().td.contains_key(&t_1));
+            assert_eq!(store.get("B"), Ok(&Stuff { a: 2, b: 0 }));
+        }
+        Validation::WriteSets => {
+            assert_eq!(store.commit_transaction(t_1), Ok(()));
+            assert_eq!(store.get("B"), Ok(&Stuff { a: 2, b: 1 }));
+        }
+    }
+}
+
+/// A [`TransactionalKeyValueStore`] with validation method 1 aborts a transaction after a non-transactional `put`
+/// of an object that matches its read, see [`check_put_after_read_by_method`].
+#[test]
+fn put_after_read_by_method_with_method_1() {
+    check_put_after_read_by_method::<TransactionalKeyValueStore<Stuff>>(Validation::BruteForce);
+}
+
+/// A [`TransactionalKeyValueStore`] with validation method 2 commits a transaction after a non-transactional `put`
+/// of an object that matches its read, see [`check_put_after_read_by_method`].
+#[test]
+fn put_after_read_by_method_with_method_2() {
+    check_put_after_read_by_method::<TransactionalKeyValueStore<Stuff>>(Validation::WriteSets);
+}
+
+/// `read_snapshot` of a [`TransactionalKeyValueStore`] returns a snapshot without a checksum with validation method
+/// 2, and with the [`checksum`] of its objects with method 1; a read that selects nothing has the checksum of the
+/// empty list.
+#[test]
+fn read_snapshot_has_checksum_only_with_method_1() {
+    let mut store: TransactionalKeyValueStore<Stuff> = store_with_a_and_b();
+    let expected_objects: Vec<(String, Stuff)> = vec![
+        ("A".to_string(), Stuff { a: 1, b: 0 }),
+        ("B".to_string(), Stuff { a: 2, b: 0 }),
+    ];
+    let nothing: WhereClause = WhereClause::new("a", "==", 42);
+
+    // method 2 (the default):
+    assert_eq!(
+        store.read_snapshot(1, None, false),
+        Ok(Snapshot {
+            objects: expected_objects.clone(),
+            checksum: None,
+        })
+    );
+
+    // method 1:
+    store.state_mut().validation = Validation::BruteForce;
+    assert_eq!(
+        store.read_snapshot(1, None, false),
+        Ok(Snapshot {
+            objects: expected_objects.clone(),
+            checksum: Some(checksum(&expected_objects)),
+        })
+    );
+    // the SHA-256 digest of the text "[]":
+    assert_eq!(
+        store.read_snapshot(1, Some(&nothing), false),
+        Ok(Snapshot {
+            objects: Vec::new(),
+            checksum: Some(
+                "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945".to_string()
+            ),
+        })
+    );
+}
+
+/// [`checksum`] is the SHA-256 digest of the `Debug` text of the objects, as lowercase hex: the empty list has the
+/// digest of the text `[]`, a list with one object the digest of its text, and a change of an object's content, with
+/// the same object id, changes the checksum. The expected digests were computed with Python's `hashlib.sha256`;
+/// they depend on the `Debug` text of the Rust version pinned in `rust-toolchain.toml`, so a Rust upgrade that
+/// changes that text makes this test fail although the store still works.
+#[test]
+fn checksum_is_sha256_of_debug_text() {
+    let empty: Vec<(String, Stuff)> = Vec::new();
+    assert_eq!(
+        checksum(&empty),
+        "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+    );
+    // the SHA-256 digest of the text [("A", Stuff { a: 42, b: 0 })]:
+    assert_eq!(
+        checksum(&[("A".to_string(), Stuff { a: 42, b: 0 })]),
+        "e53128abb9f72cfb7eb6f18d8bc50cdded266d1eafe28f1941b1f2172195b7a6"
+    );
+    assert_ne!(
+        checksum(&[("A".to_string(), Stuff { a: 1, b: 0 })]),
+        checksum(&[("A".to_string(), Stuff { a: 1, b: 1 })])
+    );
+}
+
+/// With validation method 1, `read_objects` of a [`TransactionalKeyValueStore`] keeps a read once if the same clause
+/// object reads the same committed objects again, but keeps it a second time, with another checksum, once the
+/// committed objects it selects changed. Here the change is a non-transactional `put` of a new matching object C,
+/// which is committed with start of validity 0 and so is visible to t_1.
+///
+/// ```text
+/// t_1                                 non-transactional
+/// begin
+/// read a == 1 -> sees A
+/// read a == 1 -> sees A
+///                                     put C = (1, 0)
+/// read a == 1 -> sees A and C
+/// ```
+#[test]
+fn read_set_keeps_same_clause_with_other_checksum_with_method_1() {
+    let mut store: TransactionalKeyValueStore<Stuff> = store_with_a_and_b();
+    store.state_mut().validation = Validation::BruteForce;
+    let where_clause: Rc<dyn Clause<Stuff>> = Rc::new(WhereClause::new("a", "==", 1));
+    let t_1: u64 = store.begin_transaction();
+
+    // the same clause object twice on the same objects:
+    for _ in 0..2 {
+        store
+            .read_objects(t_1, Some(Rc::clone(&where_clause)), true)
+            .unwrap();
+    }
+    assert_eq!(store.state().td[&t_1].read_clauses.len(), 1);
+
+    // the same clause object once more after C was added:
+    store.put("C", Stuff { a: 1, b: 0 }).unwrap();
+    assert_eq!(
+        store
+            .read_objects(t_1, Some(Rc::clone(&where_clause)), true)
+            .unwrap(),
+        [
+            ("A".to_string(), Stuff { a: 1, b: 0 }),
+            ("C".to_string(), Stuff { a: 1, b: 0 }),
+        ]
+    );
+    let read_clauses: &Vec<ReadClause<Stuff>> = &store.state().td[&t_1].read_clauses;
+    assert_eq!(read_clauses.len(), 2);
+    assert_eq!(
+        read_clauses[0].checksum,
+        Some(checksum(&[("A".to_string(), Stuff { a: 1, b: 0 })]))
+    );
+    assert_eq!(
+        read_clauses[1].checksum,
+        Some(checksum(&[
+            ("A".to_string(), Stuff { a: 1, b: 0 }),
+            ("C".to_string(), Stuff { a: 1, b: 0 }),
+        ]))
+    );
+}
+
+/// The default validation method is method 2, as in Python, and the stores created without a method use it;
+/// `with_validation` sets the given method.
+#[test]
+fn default_validation_is_method_2_and_with_validation_sets_it() {
+    assert_eq!(Validation::default(), Validation::WriteSets);
+    assert_eq!(
+        TransactionalKeyValueStore::<Stuff>::new().state.validation,
+        Validation::WriteSets
+    );
+    assert_eq!(
+        TransactionalKeyValueStore::<Stuff>::default()
+            .state
+            .validation,
+        Validation::WriteSets
+    );
+    assert_eq!(MvccState::<Stuff>::new().validation, Validation::WriteSets);
+    assert_eq!(
+        TransactionalKeyValueStore::<Stuff>::with_validation(Validation::BruteForce)
+            .state
+            .validation,
+        Validation::BruteForce
+    );
+    assert_eq!(
+        MvccState::<Stuff>::with_validation(Validation::BruteForce).validation,
+        Validation::BruteForce
+    );
 }

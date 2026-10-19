@@ -27,7 +27,9 @@
 // reported as unused.
 #![allow(dead_code)]
 
-use explaindb::{Attributes, ScalarRef, Version, VersionEntry};
+use std::cell::Cell;
+
+use explaindb::{Attributes, Clause, ScalarRef, Version, VersionEntry, WhereClause};
 
 /// A test object with two integer attributes (Python: the frozen dataclass `Stuff`, which is hashable).
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
@@ -88,6 +90,23 @@ impl Attributes for Account {
             "b" => Some(ScalarRef::Int(self.b)),
             _ => None,
         }
+    }
+}
+
+/// A where clause that counts how often it is evaluated (Python: `CountingWHERE_Clause`).
+#[derive(Debug)]
+pub struct CountingWhereClause {
+    /// The where clause that does the actual evaluation.
+    pub clause: WhereClause,
+    /// The number of evaluations so far; a [`Cell`], as [`Clause::evaluate`] takes `&self`.
+    pub evaluations: Cell<usize>,
+}
+
+impl Clause<Stuff> for CountingWhereClause {
+    /// See [`Clause::evaluate`]. Also increments the evaluation counter.
+    fn evaluate(&self, object: &Stuff) -> bool {
+        self.evaluations.set(self.evaluations.get() + 1);
+        Clause::<Stuff>::evaluate(&self.clause, object)
     }
 }
 

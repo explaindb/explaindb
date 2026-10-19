@@ -24,9 +24,11 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
+use std::fmt::Write;
 use std::rc::Rc;
 
 use indexmap::IndexMap;
+use sha2::{Digest, Sha256};
 
 use crate::error::StoreError;
 use crate::indexes::indexes::DictionaryIndex;
@@ -79,7 +81,8 @@ pub enum JournalEntry<V> {
 pub struct ReadClause<V> {
     /// The where clause of the read; `None` reads all objects.
     pub where_clause: Option<Rc<dyn Clause<V>>>,
-    /// The checksum of the read's result, for validation method 1; always `None` here, as only method 2 is ported.
+    /// The checksum of the read's result in the committed snapshot of the transaction (without its own changes);
+    /// `None` unless validation method 1 is used.
     pub checksum: Option<String>,
 }
 
@@ -128,8 +131,40 @@ pub struct TdEntry<V> {
 pub struct Snapshot<V> {
     /// The `(object_id, object)` pairs, in the order of the store.
     pub objects: Vec<(String, V)>,
-    /// The checksum of the objects, for validation method 1; always `None` here, as only method 2 is ported.
+    /// The checksum of the objects; `None` unless validation method 1 is used.
     pub checksum: Option<String>,
+}
+
+/// The method a transactional store uses to validate a transaction at its commit (Python: the flag
+/// `use_brute_force_validation`).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum Validation {
+    /// Method 1, brute force: each read keeps a checksum of its result in the committed snapshot of the
+    /// transaction; at commit, every read is run again at the commit timestamp and its checksum compared (Python:
+    /// `use_brute_force_validation=True`).
+    BruteForce,
+    /// Method 2: the objects written by the transactions that committed meanwhile are checked against the reads
+    /// (Python: `use_brute_force_validation=False`, the default).
+    #[default]
+    WriteSets,
+}
+
+/// Returns the checksum of a read result: the SHA-256 digest of its `Debug` text, as lowercase hex (Python: the
+/// SHA-256 digest of its `repr`).
+///
+/// The checksum changes whenever the text changes. So the `Debug` text of a value must show its full content: a
+/// value type whose `Debug` hides fields (e.g. with `finish_non_exhaustive`) can hide a change, and validation
+/// method 1 would then pass where it should abort. Equal content with different text (e.g. `-0.0` and `0.0`, or
+/// a `HashMap` printed in another order) only causes unnecessary aborts. `Debug` output may differ between Rust
+/// versions, which does not matter, as checksums are only compared within one process.
+pub fn checksum<V: fmt::Debug>(objects: &[(String, V)]) -> String {
+    // the 32 bytes of the SHA-256 digest:
+    let digest = Sha256::digest(format!("{objects:?}").as_bytes());
+    let mut hex: String = String::with_capacity(2 * digest.len());
+    for byte in digest.iter() {
+        write!(hex, "{byte:02x}").expect("writing to a String does not fail");
+    }
+    hex
 }
 
 /// The state of a transactional store: the versions of all objects, the journal, the transaction dictionary and
@@ -148,17 +183,27 @@ pub struct MvccState<V> {
     pub td: BTreeMap<u64, TdEntry<V>>,
     /// The ids of the committed transactions, in the order they committed.
     pub committed_transactions_trace: Vec<u64>,
+    /// The validation method. Changing it to method 1 while transactions run makes method 1 abort those of them
+    /// that wrote something and kept a read from before the change, as such a read carries no checksum; changing
+    /// it to method 2 causes no extra aborts.
+    pub validation: Validation,
 }
 
 impl<V> MvccState<V> {
-    /// Creates the state of an empty store; the first transaction id is 1.
+    /// Creates the state of an empty store with validation method 2; the first transaction id is 1.
     pub fn new() -> MvccState<V> {
+        MvccState::with_validation(Validation::WriteSets)
+    }
+
+    /// Creates the state of an empty store with the validation method `validation`; the first transaction id is 1.
+    pub fn with_validation(validation: Validation) -> MvccState<V> {
         MvccState {
             key_value_store: IndexMap::new(),
             journal: DictionaryIndex::new(),
             ta_id: 1,
             td: BTreeMap::new(),
             committed_transactions_trace: Vec::new(),
+            validation,
         }
     }
 
@@ -239,8 +284,8 @@ impl<V> MvccState<V> {
     /// Returns all `(object_id, object)` pairs visible at `timestamp` that match `where_clause` (all objects if it
     /// is `None`), in the order of the store (Python: `_read_snapshot` and `_read_objects_iterable`).
     ///
-    /// The where clause is evaluated once per visible object. The checksum is `None`: validation method 1, which
-    /// needs it, is not ported yet.
+    /// The where clause is evaluated once per visible object. With validation method 1, the snapshot also carries
+    /// the [`checksum`] of the objects; with method 2, its checksum is `None`.
     ///
     /// # Errors
     ///
@@ -257,7 +302,7 @@ impl<V> MvccState<V> {
         ignore_wip: bool,
     ) -> Result<Snapshot<V>, StoreError>
     where
-        V: Clone,
+        V: Clone + fmt::Debug,
     {
         let mut objects: Vec<(String, V)> = Vec::new();
         for object_id in self.key_value_store.keys() {
@@ -268,9 +313,14 @@ impl<V> MvccState<V> {
                 objects.push((object_id.clone(), object.clone()));
             }
         }
+        // a checksum only for validation method 1, which needs it:
+        let objects_checksum: Option<String> = match self.validation {
+            Validation::BruteForce => Some(checksum(&objects)),
+            Validation::WriteSets => None,
+        };
         Ok(Snapshot {
             objects,
-            checksum: None,
+            checksum: objects_checksum,
         })
     }
 
@@ -319,9 +369,9 @@ fn selected<V>(where_clause: Option<&dyn Clause<V>>, object: Option<&V>) -> bool
 /// A fully transactional versioned key-value store: the operations of a transaction on any number of objects are
 /// serializable (Python: `TransactionalKeyValueStore`, formerly known as `MVCCStore`).
 ///
-/// Transactions read under snapshot isolation; at commit, a validation phase checks the reads of the committing
-/// transaction against the writes of the transactions that committed while it ran, and aborts it on a conflict.
-/// This detects and avoids the write skew anomaly.
+/// Transactions read under snapshot isolation; at commit, a validation phase checks whether the reads of the
+/// committing transaction would still return the same, and aborts it on a conflict (see [`Validation`] for the two
+/// methods). This detects and avoids the write skew anomaly.
 ///
 /// Python's subclasses inherit the implementation; in Rust it lives in the default methods of this trait, and a
 /// store only gives access to its [`MvccState`], whose `key_value_store` must be the map that
@@ -516,6 +566,10 @@ pub fn begin_transaction_default<S: TransactionalStore + ?Sized>(store: &mut S) 
 /// `where_clause`, as owned copies, and adds the read to the transaction's reads unless `collect_read_clause` is
 /// `false` (Python: `read_objects`).
 ///
+/// With validation method 1, the read also gets a checksum, computed over the committed snapshot of `ta_id`
+/// (without its own changes) by a first read; so the where clause is evaluated once per visible object in each of
+/// the two reads, as in Python.
+///
 /// # Errors
 ///
 /// - [`StoreError::TransactionNotFound`] if the transaction is not in the transaction dictionary (Python:
@@ -542,6 +596,17 @@ pub fn read_objects_default<S: TransactionalStore + ?Sized>(
         return Err(StoreError::AlreadyCommitted(ta_id));
     }
 
+    // only validation method 1 uses a checksum; it is computed over the committed snapshot, i.e. without the wip
+    // entries of transaction ta_id:
+    let read_checksum: Option<String> = match state.validation {
+        Validation::BruteForce => {
+            store
+                .read_snapshot(ta_id, where_clause.as_deref(), true)?
+                .checksum
+        }
+        Validation::WriteSets => None,
+    };
+
     // the returned list includes the wip entries of transaction ta_id:
     let snapshot: Snapshot<S::Value> =
         store.read_snapshot(ta_id, where_clause.as_deref(), false)?;
@@ -551,7 +616,7 @@ pub fn read_objects_default<S: TransactionalStore + ?Sized>(
             ta_id,
             ReadClause {
                 where_clause,
-                checksum: None,
+                checksum: read_checksum,
             },
         );
     }
@@ -707,24 +772,30 @@ fn written_by_other_transaction<V>(state: &MvccState<V>, object_id: &str, ta_id:
         .is_some_and(|wip| wip.start_validity != ta_id)
 }
 
-/// Validates transaction `ta_id` against all transactions that committed after it began, and returns `true` if
-/// there is no conflict (Python: `_validate_transaction`).
+/// Validates transaction `ta_id` at `commit_timestamp` and returns `true` if there is no conflict (Python:
+/// `_validate_transaction`).
 ///
-/// A transaction that wrote nothing always passes. Otherwise this is validation method 2: the write sets of the
-/// transactions that committed meanwhile are combined; for each object of the combined write set and each read of
-/// `ta_id`, the version of the object in the snapshot of `ta_id` (without its own changes) is compared with the
-/// version at `commit_timestamp`; if they differ and either is selected by the read's where clause, the
-/// validation fails.
+/// A transaction that wrote nothing always passes. Otherwise, by the store's [`Validation`]:
 ///
-/// "Our variation of precision locking tests discrete writes (updates, deletions, and insertions of records) of
-/// recently committed transactions against predicate-oriented reads of the transaction that is being validated"
-/// [Neumann et al., Fast Serializable Multi-Version Concurrency Control for Main-Memory Database Systems].
+/// - Method 1 (brute force): each read of `ta_id` is run again at `commit_timestamp`; if the checksum of its result
+///   differs from the one kept at the read, the validation fails. Method 1 does not look at the write sets of other
+///   transactions.
+/// - Method 2 (write sets): the write sets of the transactions that committed meanwhile are combined; for each
+///   object of the combined write set and each read of `ta_id`, the version of the object in the snapshot of `ta_id`
+///   (without its own changes) is compared with the version at `commit_timestamp`; if they differ and either is
+///   selected by the read's where clause, the validation fails.
+///
+/// Method 2 follows the paper: "Our variation of precision locking tests discrete writes (updates, deletions, and
+/// insertions of records) of recently committed transactions against predicate-oriented reads of the transaction
+/// that is being validated" [Neumann et al., Fast Serializable Multi-Version Concurrency Control for Main-Memory
+/// Database Systems].
 ///
 /// # Errors
 ///
-/// - [`StoreError::TransactionNotFound`] for a transaction that committed meanwhile and was aborted afterwards, so
-///   that it is no longer in the transaction dictionary (Python: `KeyError`);
-/// - the errors of [`TransactionalStore::get_visible_object_version`].
+/// - method 1: the errors of [`TransactionalStore::read_snapshot`];
+/// - method 2: [`StoreError::TransactionNotFound`] for a transaction that committed meanwhile and was aborted
+///   afterwards, so that it is no longer in the transaction dictionary (Python: `KeyError`), and the errors of
+///   [`TransactionalStore::get_visible_object_version`].
 ///
 /// # Panics
 ///
@@ -747,6 +818,36 @@ pub fn validate_transaction_default<S: TransactionalStore + ?Sized>(
         return Ok(true);
     }
 
+    if state.validation == Validation::BruteForce {
+        // method 1 (brute force): run each read of ta_id again, against the current committed state of the store
+        // rather than the snapshot of ta_id, and compare the checksums. Equal checksums mean the read returns the
+        // same objects with the same contents as before. Comparing only the object ids would not do, as the
+        // contents may have changed.
+        //
+        // Per object, compared to what ta_id read (the cases of Python's comment):
+        // 1.     not modified by another transaction meanwhile: no conflict;
+        // 2a.    modified, but selected neither before nor now: no conflict, ta_id never saw it;
+        // 2b.i.  modified, selected before and now: conflict if its content changed (unchanged content gives the
+        //        same checksum and passes);
+        // 2b.ii. modified, selected before but not now (updated or deleted): conflict;
+        // 2c.    modified, not selected before but now: conflict (phantom or non-repeatable read).
+        // Every conflict changes the checksum: an object appears, disappears or changes its content in the result.
+        for read_clause in &td_entry.read_clauses {
+            // ignore_wip is false, as in Python (its default): at a new commit timestamp, no work-in-progress
+            // version can be visible anyway
+            let now: Snapshot<S::Value> = store.read_snapshot(
+                commit_timestamp,
+                read_clause.where_clause.as_deref(),
+                false,
+            )?;
+            if now.checksum != read_clause.checksum {
+                return Ok(false);
+            }
+        }
+        return Ok(true);
+    }
+
+    // method 2 (write sets):
     // 1. combine the write sets of all transactions that committed after ta_id began (a committed transaction
     // that was aborted afterwards is no longer in the dictionary: Python raises a KeyError there):
     let mut combined_write_set: BTreeSet<&String> = BTreeSet::new();
@@ -919,8 +1020,8 @@ pub fn abort_transaction_default<S: TransactionalStore + ?Sized>(store: &mut S, 
 /// The store that uses the default methods of [`TransactionalStore`]; it holds only its [`MvccState`] (Python:
 /// `TransactionalKeyValueStore`).
 ///
-/// Python's constructor parameters `use_brute_force_validation` and `persistence_layer` are not ported:
-/// validation method 1 follows later, and the persistence layer is not used.
+/// Python's constructor parameter `use_brute_force_validation` is the [`Validation`] of
+/// [`TransactionalKeyValueStore::with_validation`]; `persistence_layer` is not ported, as it is not used.
 #[derive(Debug)]
 pub struct TransactionalKeyValueStore<V> {
     /// The state of the store.
@@ -928,10 +1029,15 @@ pub struct TransactionalKeyValueStore<V> {
 }
 
 impl<V> TransactionalKeyValueStore<V> {
-    /// Creates an empty store.
+    /// Creates an empty store with validation method 2 (Python's default).
     pub fn new() -> TransactionalKeyValueStore<V> {
+        TransactionalKeyValueStore::with_validation(Validation::WriteSets)
+    }
+
+    /// Creates an empty store with the validation method `validation`.
+    pub fn with_validation(validation: Validation) -> TransactionalKeyValueStore<V> {
         TransactionalKeyValueStore {
-            state: MvccState::new(),
+            state: MvccState::with_validation(validation),
         }
     }
 }

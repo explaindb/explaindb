@@ -43,7 +43,7 @@ The port is built in steps (see
 |---|---|---|
 | 1a | WHERE-clause predicates, versioned key-value store | done |
 | audit | blocking `cargo audit` of the Rust dependencies in CI | done |
-| 1b | MVCC store (`TransactionalKeyValueStore`) with journal | validation method 2 done; method 1 planned |
+| 1b | MVCC store (`TransactionalKeyValueStore`) with journal, both validation methods | done |
 | 2 | indexed MVCC store, serializability test | planned |
 | 3 | benchmarks: Python against Rust | planned |
 
@@ -104,7 +104,7 @@ compiler reports that the method does not exist. The same holds for `evaluate` a
 | [`system/tests/stores/test_stores_basics.py`](../../system/tests/stores/test_stores_basics.py) | [`tests/stores/test_stores_basics.rs`](tests/stores/test_stores_basics.rs) |
 | [`system/tests/stores/test_store_anomalies.py`](../../system/tests/stores/test_store_anomalies.py) | [`tests/stores/test_store_anomalies.rs`](tests/stores/test_store_anomalies.rs) |
 | [`system/tests/indexes/test_indexing.py`](../../system/tests/indexes/test_indexing.py) (`test_indexing_basics_with_duplicates` only) | [`tests/indexes/test_indexing.rs`](tests/indexes/test_indexing.rs) |
-| (no Python test file; tests of [`system/stores/MVCC.py`](../../system/stores/MVCC.py), with `StoreWithoutValidation` of [`system/playground/mvcc_playground.py`](../../system/playground/mvcc_playground.py)) | [`tests/stores/mvcc.rs`](tests/stores/mvcc.rs): error paths, the read set without duplicates and overriding of the MVCC store |
+| (no Python test file; tests of [`system/stores/MVCC.py`](../../system/stores/MVCC.py), with `StoreWithoutValidation` of [`system/playground/mvcc_playground.py`](../../system/playground/mvcc_playground.py)) | [`tests/stores/mvcc.rs`](tests/stores/mvcc.rs): error paths, the read set without duplicates, overriding of the MVCC store, what tells the two validation methods apart and the behaviour of method 1 |
 | [`system/tests/abstract_unit_test.py`](../../system/tests/abstract_unit_test.py), `Named` (stands in for the `Stuff` with a string attribute in [`test_query_processing.py`](../../system/tests/query_processing/test_query_processing.py)) and the value type `Account` of [`test_store_anomalies.py`](../../system/tests/stores/test_store_anomalies.py) | [`tests/common/mod.rs`](tests/common/mod.rs) |
 
 Cargo builds one test program per folder in `tests/` that has a `main.rs` (e.g. `tests/stores/main.rs`); it
@@ -127,6 +127,8 @@ includes the test files of that folder and the shared `tests/common/mod.rs`.
 | subclasses of `TransactionalKeyValueStore` override methods and call `super()` | a store overrides a method of the trait `TransactionalStore` and calls the free function `*_default` of the same name | Rust has no `super()` |
 | `TDEntry.last_committed_TA_index_in_TA_trace` (starts at -1) | `TdEntry::committed_transactions_at_begin`, the length of the trace (one more) | an unsigned index cannot be -1 |
 | read clauses in a `set` of `HashableDict` | a `Vec<ReadClause>` without duplicates (same clause object and checksum) | clause objects (`Rc<dyn Clause>`) have no hash; Python's clauses compare by identity |
+| `use_brute_force_validation=True` / `False` | `Validation::BruteForce` / `Validation::WriteSets` (method 1 / method 2), set with `with_validation` | an enum names the two methods |
+| checksum: SHA-256 of `repr` of the read result | [`checksum`](src/stores/mvcc.rs): SHA-256 of the `Debug` text of the read result (crate `sha2`) | Rust has no `repr`; the `Debug` text of a derived `Debug` shows all fields |
 | `raise TransactionAbortedException` | the transaction is aborted and the method returns `Err(StoreError::TransactionAborted)` | errors are values in Rust |
 
 ## Deviations from Python
@@ -144,8 +146,8 @@ includes the test files of that folder and the shared `tests/common/mod.rs`.
 - Python's unused parameters `persistence_layer` (of the store) and `_object` (of `delete`) are dropped.
 - Integers are `i64`; Python's have no size limit. Python also accepts `True` as an integer constant; Rust does not.
 - `show` and `show_transaction_dictionary` print all levels; Python's `pprint` stops at depth 3.
-- Validation returns `Err(StoreError::TransactionNotFound)` for a transaction that committed meanwhile and was
-  aborted afterwards; Python raises a `KeyError` there.
+- Validation method 2 returns `Err(StoreError::TransactionNotFound)` for a transaction that committed meanwhile and
+  was aborted afterwards; Python raises a `KeyError` there.
 - `read_objects` returns copies of the objects; Python returns the stored objects themselves.
 - `DictionaryIndex` has no `flush` without a key (in Python it raises a `KeyError`); dropping a key takes time
   proportional to the number of keys after it, as it keeps their order like Python's dict. Its `delete` needs the
@@ -154,9 +156,12 @@ includes the test files of that folder and the shared `tests/common/mod.rs`.
 - `validate_transaction` panics for an unknown transaction; Python raises a `KeyError`.
 - The error for committed versions out of order also names the object.
 - The journal field `nev_value` of Python's `Update` is called `new_value`.
-- The transactional store has validation method 2 only for now; method 1 (`use_brute_force_validation`) follows.
 - The transactional store has the isolation level `"serializable"` only; Python's `isolation_level` with the level
   `"snapshot isolation"` follows in a regeneration at the end of the series.
+- Validation method 1 hashes the `Debug` text of a read result instead of Python's `repr`, so the checksums differ
+  from Python's and cannot be compared across languages. Python's default `repr` of an object shows its memory
+  address, so Python treats an equal but new object as changed and aborts; Rust's `Debug` text shows only the
+  content.
 
 ## Which Python test became which Rust test
 
@@ -169,12 +174,12 @@ includes the test files of that folder and the shared `tests/common/mod.rs`.
 | `test_stores_basics.py::test_begin_transaction` | `test_stores_basics.rs::test_begin_transaction`, checking the length of the trace (0) where Python checks the index -1 |
 | `test_stores_basics.py::test_journaling` | `test_stores_basics.rs::test_journaling` |
 | `test_stores_basics.py::test_IndexedTransactionalKeyValueStore_basics` | step 2 |
-| `test_store_anomalies.py`: all tests not listed below | `test_store_anomalies.rs`, same names in snake case; with validation method 2 only, also where Python loops over both methods; the indexed store follows in step 2 |
+| `test_store_anomalies.py`: all tests not listed below | `test_store_anomalies.rs`, same names in snake case; a test that Python runs with both validation methods runs once per method (`..._with_method_1`, `..._with_method_2`); the indexed store follows in step 2 |
 | `test_store_anomalies.py::test_validation_detects_write_skew_on_objects_with_equal_hash` | ported without its precondition on CPython's `hash()` |
 | `test_store_anomalies.py::test_validation_accepts_unhashable_objects`, `..._detects_conflict_on_unhashable_objects` | ported with the value type `Account`, which has no `Hash`, unlike `Stuff` |
-| `test_store_anomalies.py::test_checksums_on_self_updates` | follows with validation method 1 |
+| `test_store_anomalies.py::test_checksums_on_self_updates` | `test_store_anomalies.rs::test_checksums_on_self_updates` (method 1 only, as in Python) |
 | `test_store_anomalies.py::test_read_only_transaction_commits_despite_concurrent_change_of_read_object` and the tests of the isolation levels (`test_snapshot_isolation_level_*`, `test_serializable_level_*`) | follow in a regeneration at the end of the series |
-| (no Python test file) | `tests/stores/mvcc.rs`: Rust-only tests of the MVCC store (`system/stores/MVCC.py`, with `StoreWithoutValidation` of `system/playground/mvcc_playground.py`): the errors and panics of each operation, the read set without duplicates, and stores that override `abort_transaction` or `validate_transaction` |
+| (no Python test file) | `tests/stores/mvcc.rs`: Rust-only tests of the MVCC store (`system/stores/MVCC.py`, with `StoreWithoutValidation` of `system/playground/mvcc_playground.py`): the errors and panics of each operation, the read set without duplicates, stores that override `abort_transaction` or `validate_transaction`, what tells the two validation methods apart, and the behaviour of validation method 1 |
 | `test_indexing.py::test_indexing_basics_with_duplicates` | `test_indexing.rs::test_indexing_basics_with_duplicates`; the other tests of `test_indexing.py` (B-trees, radix tries, ...) are not ported; those of the indexed transactional store follow in step 2 |
 | `test_DBMS.py` (uses the versioned store) | not ported: the DBMS is not part of the port |
 

@@ -25,10 +25,10 @@
 use std::cell::Cell;
 use std::rc::Rc;
 
-use crate::common::{Account, Stuff, create_fake_data, update};
+use crate::common::{Account, CountingWhereClause, Stuff, create_fake_data, update};
 use explaindb::{
     Clause, JournalEntry, KvStoreEntry, ReadClause, StoreError, TransactionalKeyValueStore,
-    TransactionalStore, TrueClause, Version, VersionEntry, WhereClause,
+    TransactionalStore, TrueClause, Validation, Version, VersionEntry, WhereClause,
 };
 
 /// Asserts that `result` is the error of an aborted transaction; on failure, the message shows what was returned.
@@ -381,12 +381,13 @@ fn test_read_write_conflict() {
 ///                                     commit -> aborted
 /// ```
 ///
-/// Python also runs this test with validation method 1, which is not ported yet; this test uses method 2.
-fn check_write_skew_anomaly<S>()
+/// Python runs this test with both validation methods; it runs here once per method.
+fn check_write_skew_anomaly<S>(validation: Validation)
 where
     S: TransactionalStore<Value = Stuff> + Default,
 {
     let mut store: S = S::default();
+    store.state_mut().validation = validation;
 
     // create two data items X and Y:
     store.put("X", Stuff { a: 1, b: 0 }).unwrap();
@@ -432,10 +433,18 @@ where
     assert_eq!(store.get("X"), Ok(&Stuff { a: 1, b: 100 }));
 }
 
-/// A [`TransactionalKeyValueStore`] avoids the write skew anomaly, see [`check_write_skew_anomaly`].
+/// A [`TransactionalKeyValueStore`] with validation method 1 avoids the write skew anomaly, see
+/// [`check_write_skew_anomaly`].
 #[test]
-fn test_write_skew_anomaly() {
-    check_write_skew_anomaly::<TransactionalKeyValueStore<Stuff>>();
+fn test_write_skew_anomaly_with_method_1() {
+    check_write_skew_anomaly::<TransactionalKeyValueStore<Stuff>>(Validation::BruteForce);
+}
+
+/// A [`TransactionalKeyValueStore`] with validation method 2 avoids the write skew anomaly, see
+/// [`check_write_skew_anomaly`].
+#[test]
+fn test_write_skew_anomaly_with_method_2() {
+    check_write_skew_anomaly::<TransactionalKeyValueStore<Stuff>>(Validation::WriteSets);
 }
 
 /// Checks a delete in a transaction of the store `S`: it adds a delete marker of the transaction as
@@ -689,6 +698,69 @@ fn test_double_update_from_same_transaction() {
     check_double_update_from_same_transaction::<TransactionalKeyValueStore<Stuff>>();
 }
 
+/// Checks that, with validation method 1, the checksum of a read of the store `S` covers the committed snapshot
+/// only, not the transaction's own changes: t_1 changes object 1 so that it no longer matches its read, reads again
+/// and sees nothing, but both reads keep the checksum of the committed version (1, 1). Nothing changed that version,
+/// so t_1 commits.
+///
+/// ```text
+/// t_1
+/// begin
+/// read a == 1 -> sees 1 = (1, 1)
+/// update 1 to (2, 2)
+/// read a == 1 -> sees nothing
+/// commit -> succeeds
+/// ```
+fn check_checksums_on_self_updates<S>()
+where
+    S: TransactionalStore<Value = Stuff> + Default,
+{
+    let mut store: S = S::default();
+    store.state_mut().validation = Validation::BruteForce;
+    store.put("1", Stuff { a: 1, b: 1 }).unwrap();
+
+    let t_1: u64 = store.begin_transaction();
+
+    // read the object:
+    let ret1: Vec<(String, Stuff)> = store
+        .read_objects(t_1, Some(Rc::new(WhereClause::new("a", "==", 1))), true)
+        .unwrap();
+    assert_eq!(ret1, [("1".to_string(), Stuff { a: 1, b: 1 })]);
+
+    // modify the object such that it does not match the read clause anymore:
+    store.update_object("1", Stuff { a: 2, b: 2 }, t_1).unwrap();
+
+    // issue the read again (with a new clause object, so both reads are kept):
+    let ret2: Vec<(String, Stuff)> = store
+        .read_objects(t_1, Some(Rc::new(WhereClause::new("a", "==", 1))), true)
+        .unwrap();
+    assert_eq!(ret2, []);
+
+    // both reads keep the checksum of the committed snapshot, the SHA-256 digest of the text
+    // `[("1", Stuff { a: 1, b: 1 })]` (computed with Python's hashlib; it depends on the `Debug` text of the Rust
+    // version pinned in `rust-toolchain.toml`):
+    let committed_snapshot_checksum: Option<String> =
+        Some("cf730cf46a392bd7bf758753886a295d92ebfb9f297fda89cb54560857a2cd7e".to_string());
+    let read_clauses: &Vec<ReadClause<Stuff>> = &store.state().td[&t_1].read_clauses;
+    assert_eq!(read_clauses.len(), 2);
+    assert_eq!(read_clauses[0].checksum, committed_snapshot_checksum);
+    assert_eq!(read_clauses[1].checksum, committed_snapshot_checksum);
+
+    // the commit succeeds, as the checksums cover only the committed snapshot:
+    assert_eq!(store.commit_transaction(t_1), Ok(()));
+    assert_eq!(
+        store.state().committed_transactions_trace.last(),
+        Some(&t_1)
+    );
+}
+
+/// A [`TransactionalKeyValueStore`] with validation method 1 computes checksums without the transaction's own
+/// changes, see [`check_checksums_on_self_updates`].
+#[test]
+fn test_checksums_on_self_updates() {
+    check_checksums_on_self_updates::<TransactionalKeyValueStore<Stuff>>();
+}
+
 /// Checks a read of all objects in the store `S` (with a [`TrueClause`]): the reader sees both objects of its
 /// snapshot. If another transaction committed a change of an object meanwhile, the reader fails validation at its
 /// commit, as its read could depend on that change; if the other transaction is still running, the reader commits.
@@ -704,13 +776,14 @@ fn test_double_update_from_same_transaction() {
 /// commit -> aborted (or committed)
 /// ```
 ///
-/// Python also runs this test with validation method 1, which is not ported yet; this test uses method 2.
-fn check_read_all<S>()
+/// Python runs this test with both validation methods; it runs here once per method.
+fn check_read_all<S>(validation: Validation)
 where
     S: TransactionalStore<Value = Stuff> + Default,
 {
     for t2_commits in [true, false] {
         let mut store: S = S::default();
+        store.state_mut().validation = validation;
         store.put("1", Stuff { a: 1, b: 1 }).unwrap();
         store.put("2", Stuff { a: 2, b: 2 }).unwrap();
 
@@ -753,10 +826,18 @@ where
     }
 }
 
-/// A read of all objects in a [`TransactionalKeyValueStore`] is validated, see [`check_read_all`].
+/// A read of all objects in a [`TransactionalKeyValueStore`] with validation method 1 is validated, see
+/// [`check_read_all`].
 #[test]
-fn test_read_all() {
-    check_read_all::<TransactionalKeyValueStore<Stuff>>();
+fn test_read_all_with_method_1() {
+    check_read_all::<TransactionalKeyValueStore<Stuff>>(Validation::BruteForce);
+}
+
+/// A read of all objects in a [`TransactionalKeyValueStore`] with validation method 2 is validated, see
+/// [`check_read_all`].
+#[test]
+fn test_read_all_with_method_2() {
+    check_read_all::<TransactionalKeyValueStore<Stuff>>(Validation::WriteSets);
 }
 
 /// Checks that a reader of the store `S` does not see an object that another transaction inserted and committed
@@ -980,12 +1061,13 @@ fn test_get_visible_object_version_returns_none_if_object_not_in_snapshot() {
 /// ```
 ///
 /// Validation compares against the version t_i read, (42, 0), not against the work-in-progress version of t_i.
-/// Python also runs this test with validation method 1, which is not ported yet; this test uses method 2.
-fn check_validation_detects_lost_update_on_read_object<S>()
+/// Python runs this test with both validation methods; it runs here once per method.
+fn check_validation_detects_lost_update_on_read_object<S>(validation: Validation)
 where
     S: TransactionalStore<Value = Stuff> + Default,
 {
     let mut store: S = S::default();
+    store.state_mut().validation = validation;
     store.put("A", Stuff { a: 42, b: 0 }).unwrap();
 
     let t_i: u64 = store.begin_transaction();
@@ -1007,11 +1089,22 @@ where
     assert_aborted(store.commit_transaction(t_i));
 }
 
-/// A [`TransactionalKeyValueStore`] detects a lost update, see
+/// A [`TransactionalKeyValueStore`] with validation method 1 detects a lost update, see
 /// [`check_validation_detects_lost_update_on_read_object`].
 #[test]
-fn test_validation_detects_lost_update_on_read_object() {
-    check_validation_detects_lost_update_on_read_object::<TransactionalKeyValueStore<Stuff>>();
+fn test_validation_detects_lost_update_on_read_object_with_method_1() {
+    check_validation_detects_lost_update_on_read_object::<TransactionalKeyValueStore<Stuff>>(
+        Validation::BruteForce,
+    );
+}
+
+/// A [`TransactionalKeyValueStore`] with validation method 2 detects a lost update, see
+/// [`check_validation_detects_lost_update_on_read_object`].
+#[test]
+fn test_validation_detects_lost_update_on_read_object_with_method_2() {
+    check_validation_detects_lost_update_on_read_object::<TransactionalKeyValueStore<Stuff>>(
+        Validation::WriteSets,
+    );
 }
 
 /// Checks that a transaction of the store `S` is aborted at its commit if another transaction committed an insert
@@ -1028,12 +1121,13 @@ fn test_validation_detects_lost_update_on_read_object() {
 /// commit -> aborted
 /// ```
 ///
-/// Python also runs this test with validation method 1, which is not ported yet; this test uses method 2.
-fn check_validation_detects_phantom_insert<S>()
+/// Python runs this test with both validation methods; it runs here once per method.
+fn check_validation_detects_phantom_insert<S>(validation: Validation)
 where
     S: TransactionalStore<Value = Stuff> + Default,
 {
     let mut store: S = S::default();
+    store.state_mut().validation = validation;
     store.put("A", Stuff { a: 1, b: 0 }).unwrap();
 
     let t_i: u64 = store.begin_transaction();
@@ -1057,10 +1151,22 @@ where
     assert_aborted(store.commit_transaction(t_i));
 }
 
-/// A [`TransactionalKeyValueStore`] detects a phantom insert, see [`check_validation_detects_phantom_insert`].
+/// A [`TransactionalKeyValueStore`] with validation method 1 detects a phantom insert, see
+/// [`check_validation_detects_phantom_insert`].
 #[test]
-fn test_validation_detects_phantom_insert() {
-    check_validation_detects_phantom_insert::<TransactionalKeyValueStore<Stuff>>();
+fn test_validation_detects_phantom_insert_with_method_1() {
+    check_validation_detects_phantom_insert::<TransactionalKeyValueStore<Stuff>>(
+        Validation::BruteForce,
+    );
+}
+
+/// A [`TransactionalKeyValueStore`] with validation method 2 detects a phantom insert, see
+/// [`check_validation_detects_phantom_insert`].
+#[test]
+fn test_validation_detects_phantom_insert_with_method_2() {
+    check_validation_detects_phantom_insert::<TransactionalKeyValueStore<Stuff>>(
+        Validation::WriteSets,
+    );
 }
 
 /// Checks that a transaction of the store `S` is aborted at its commit if another transaction committed the delete
@@ -1077,12 +1183,13 @@ fn test_validation_detects_phantom_insert() {
 /// commit -> aborted
 /// ```
 ///
-/// Python also runs this test with validation method 1, which is not ported yet; this test uses method 2.
-fn check_validation_detects_concurrent_delete_of_read_object<S>()
+/// Python runs this test with both validation methods; it runs here once per method.
+fn check_validation_detects_concurrent_delete_of_read_object<S>(validation: Validation)
 where
     S: TransactionalStore<Value = Stuff> + Default,
 {
     let mut store: S = S::default();
+    store.state_mut().validation = validation;
     store.put("A", Stuff { a: 42, b: 0 }).unwrap();
     store.put("B", Stuff { a: 0, b: 0 }).unwrap();
 
@@ -1105,11 +1212,21 @@ where
     assert_aborted(store.commit_transaction(t_i));
 }
 
-/// A [`TransactionalKeyValueStore`] detects the concurrent delete of a read object, see
+/// A [`TransactionalKeyValueStore`] with validation method 1 detects the concurrent delete of a read object, see
 /// [`check_validation_detects_concurrent_delete_of_read_object`].
 #[test]
-fn test_validation_detects_concurrent_delete_of_read_object() {
+fn test_validation_detects_concurrent_delete_of_read_object_with_method_1() {
     check_validation_detects_concurrent_delete_of_read_object::<TransactionalKeyValueStore<Stuff>>(
+        Validation::BruteForce,
+    );
+}
+
+/// A [`TransactionalKeyValueStore`] with validation method 2 detects the concurrent delete of a read object, see
+/// [`check_validation_detects_concurrent_delete_of_read_object`].
+#[test]
+fn test_validation_detects_concurrent_delete_of_read_object_with_method_2() {
+    check_validation_detects_concurrent_delete_of_read_object::<TransactionalKeyValueStore<Stuff>>(
+        Validation::WriteSets,
     );
 }
 
@@ -1128,12 +1245,13 @@ fn test_validation_detects_concurrent_delete_of_read_object() {
 /// commit -> aborted
 /// ```
 ///
-/// Python also runs this test with validation method 1, which is not ported yet; this test uses method 2.
-fn check_validation_detects_change_after_read_without_predicate<S>()
+/// Python runs this test with both validation methods; it runs here once per method.
+fn check_validation_detects_change_after_read_without_predicate<S>(validation: Validation)
 where
     S: TransactionalStore<Value = Stuff> + Default,
 {
     let mut store: S = S::default();
+    store.state_mut().validation = validation;
     store.put("A", Stuff { a: 1, b: 0 }).unwrap();
     store.put("B", Stuff { a: 1, b: 0 }).unwrap();
 
@@ -1160,11 +1278,21 @@ where
     assert_aborted(store.commit_transaction(t_i));
 }
 
-/// A [`TransactionalKeyValueStore`] validates a read without a where clause, see
+/// A [`TransactionalKeyValueStore`] with validation method 1 validates a read without a where clause, see
 /// [`check_validation_detects_change_after_read_without_predicate`].
 #[test]
-fn test_validation_detects_change_after_read_without_predicate() {
+fn test_validation_detects_change_after_read_without_predicate_with_method_1() {
     check_validation_detects_change_after_read_without_predicate::<TransactionalKeyValueStore<Stuff>>(
+        Validation::BruteForce,
+    );
+}
+
+/// A [`TransactionalKeyValueStore`] with validation method 2 validates a read without a where clause, see
+/// [`check_validation_detects_change_after_read_without_predicate`].
+#[test]
+fn test_validation_detects_change_after_read_without_predicate_with_method_2() {
+    check_validation_detects_change_after_read_without_predicate::<TransactionalKeyValueStore<Stuff>>(
+        Validation::WriteSets,
     );
 }
 
@@ -1182,12 +1310,13 @@ fn test_validation_detects_change_after_read_without_predicate() {
 /// commit -> succeeds
 /// ```
 ///
-/// Python also runs this test with validation method 1, which is not ported yet; this test uses method 2.
-fn check_validation_ignores_concurrent_write_outside_read_predicate<S>()
+/// Python runs this test with both validation methods; it runs here once per method.
+fn check_validation_ignores_concurrent_write_outside_read_predicate<S>(validation: Validation)
 where
     S: TransactionalStore<Value = Stuff> + Default,
 {
     let mut store: S = S::default();
+    store.state_mut().validation = validation;
     store.put("A", Stuff { a: 42, b: 0 }).unwrap();
     store.put("X", Stuff { a: 1, b: 0 }).unwrap();
 
@@ -1215,13 +1344,22 @@ where
     );
 }
 
-/// A [`TransactionalKeyValueStore`] ignores a concurrent write outside the reads, see
+/// A [`TransactionalKeyValueStore`] with validation method 1 ignores a concurrent write outside the reads, see
 /// [`check_validation_ignores_concurrent_write_outside_read_predicate`].
 #[test]
-fn test_validation_ignores_concurrent_write_outside_read_predicate() {
+fn test_validation_ignores_concurrent_write_outside_read_predicate_with_method_1() {
     check_validation_ignores_concurrent_write_outside_read_predicate::<
         TransactionalKeyValueStore<Stuff>,
-    >();
+    >(Validation::BruteForce);
+}
+
+/// A [`TransactionalKeyValueStore`] with validation method 2 ignores a concurrent write outside the reads, see
+/// [`check_validation_ignores_concurrent_write_outside_read_predicate`].
+#[test]
+fn test_validation_ignores_concurrent_write_outside_read_predicate_with_method_2() {
+    check_validation_ignores_concurrent_write_outside_read_predicate::<
+        TransactionalKeyValueStore<Stuff>,
+    >(Validation::WriteSets);
 }
 
 /// Checks that a transaction of the store `S` is aborted at its commit if a concurrent transaction changed an
@@ -1240,12 +1378,13 @@ fn test_validation_ignores_concurrent_write_outside_read_predicate() {
 /// commit -> aborted
 /// ```
 ///
-/// Python also runs this test with validation method 1, which is not ported yet; this test uses method 2.
-fn check_validation_detects_write_skew_on_objects_with_equal_hash<S>()
+/// Python runs this test with both validation methods; it runs here once per method.
+fn check_validation_detects_write_skew_on_objects_with_equal_hash<S>(validation: Validation)
 where
     S: TransactionalStore<Value = Stuff> + Default,
 {
     let mut store: S = S::default();
+    store.state_mut().validation = validation;
     store.put("A", Stuff { a: -1, b: 0 }).unwrap();
     store.put("B", Stuff { a: 0, b: 0 }).unwrap();
 
@@ -1276,14 +1415,26 @@ where
     assert_aborted(store.commit_transaction(t_i));
 }
 
-/// A [`TransactionalKeyValueStore`] detects this write skew, see
+/// A [`TransactionalKeyValueStore`] with validation method 1 detects this write skew, see
 /// [`check_validation_detects_write_skew_on_objects_with_equal_hash`]. The name comes from Python, where both
-/// versions of A, (-1, 0) and (-2, 0), have the same CPython hash; Rust's validation uses no hashes.
+/// versions of A, (-1, 0) and (-2, 0), have the same CPython `hash()`. Rust's validation does not use the value's
+/// `Hash`: method 1 hashes the `Debug` text of the read result with SHA-256, which differs for the two versions.
 #[test]
-fn test_validation_detects_write_skew_on_objects_with_equal_hash() {
+fn test_validation_detects_write_skew_on_objects_with_equal_hash_with_method_1() {
     check_validation_detects_write_skew_on_objects_with_equal_hash::<
         TransactionalKeyValueStore<Stuff>,
-    >();
+    >(Validation::BruteForce);
+}
+
+/// A [`TransactionalKeyValueStore`] with validation method 2 detects this write skew, see
+/// [`check_validation_detects_write_skew_on_objects_with_equal_hash`]. The name comes from Python, where both
+/// versions of A, (-1, 0) and (-2, 0), have the same CPython `hash()`. Rust's validation does not use the value's
+/// `Hash`: method 2 compares the two versions with `==`.
+#[test]
+fn test_validation_detects_write_skew_on_objects_with_equal_hash_with_method_2() {
+    check_validation_detects_write_skew_on_objects_with_equal_hash::<
+        TransactionalKeyValueStore<Stuff>,
+    >(Validation::WriteSets);
 }
 
 /// Checks that a transaction of the store `S` is aborted at its commit if a concurrent transaction swapped the
@@ -1302,12 +1453,13 @@ fn test_validation_detects_write_skew_on_objects_with_equal_hash() {
 /// commit -> aborted
 /// ```
 ///
-/// Python also runs this test with validation method 1, which is not ported yet; this test uses method 2.
-fn check_validation_detects_swapped_values_of_read_objects<S>()
+/// Python runs this test with both validation methods; it runs here once per method.
+fn check_validation_detects_swapped_values_of_read_objects<S>(validation: Validation)
 where
     S: TransactionalStore<Value = Stuff> + Default,
 {
     let mut store: S = S::default();
+    store.state_mut().validation = validation;
     store.put("x", Stuff { a: 1, b: 0 }).unwrap();
     store.put("z", Stuff { a: 0, b: 0 }).unwrap();
 
@@ -1335,11 +1487,22 @@ where
     assert_aborted(store.commit_transaction(t_i));
 }
 
-/// A [`TransactionalKeyValueStore`] detects swapped values, see
+/// A [`TransactionalKeyValueStore`] with validation method 1 detects swapped values, see
 /// [`check_validation_detects_swapped_values_of_read_objects`].
 #[test]
-fn test_validation_detects_swapped_values_of_read_objects() {
-    check_validation_detects_swapped_values_of_read_objects::<TransactionalKeyValueStore<Stuff>>();
+fn test_validation_detects_swapped_values_of_read_objects_with_method_1() {
+    check_validation_detects_swapped_values_of_read_objects::<TransactionalKeyValueStore<Stuff>>(
+        Validation::BruteForce,
+    );
+}
+
+/// A [`TransactionalKeyValueStore`] with validation method 2 detects swapped values, see
+/// [`check_validation_detects_swapped_values_of_read_objects`].
+#[test]
+fn test_validation_detects_swapped_values_of_read_objects_with_method_2() {
+    check_validation_detects_swapped_values_of_read_objects::<TransactionalKeyValueStore<Stuff>>(
+        Validation::WriteSets,
+    );
 }
 
 /// Checks that a transaction of the store `S` can read, update and commit objects of a type without `Hash`
@@ -1353,12 +1516,13 @@ fn test_validation_detects_swapped_values_of_read_objects() {
 /// commit -> succeeds
 /// ```
 ///
-/// Python also runs this test with validation method 1, which is not ported yet; this test uses method 2.
-fn check_validation_accepts_unhashable_objects<S>()
+/// Python runs this test with both validation methods; it runs here once per method.
+fn check_validation_accepts_unhashable_objects<S>(validation: Validation)
 where
     S: TransactionalStore<Value = Account> + Default,
 {
     let mut store: S = S::default();
+    store.state_mut().validation = validation;
     store.put("A", Account { a: 1, b: 0 }).unwrap();
 
     let t_i: u64 = store.begin_transaction();
@@ -1380,11 +1544,22 @@ where
     );
 }
 
-/// A [`TransactionalKeyValueStore`] works with values without `Hash`, see
+/// A [`TransactionalKeyValueStore`] with validation method 1 works with values without `Hash`, see
 /// [`check_validation_accepts_unhashable_objects`].
 #[test]
-fn test_validation_accepts_unhashable_objects() {
-    check_validation_accepts_unhashable_objects::<TransactionalKeyValueStore<Account>>();
+fn test_validation_accepts_unhashable_objects_with_method_1() {
+    check_validation_accepts_unhashable_objects::<TransactionalKeyValueStore<Account>>(
+        Validation::BruteForce,
+    );
+}
+
+/// A [`TransactionalKeyValueStore`] with validation method 2 works with values without `Hash`, see
+/// [`check_validation_accepts_unhashable_objects`].
+#[test]
+fn test_validation_accepts_unhashable_objects_with_method_2() {
+    check_validation_accepts_unhashable_objects::<TransactionalKeyValueStore<Account>>(
+        Validation::WriteSets,
+    );
 }
 
 /// Checks that a transaction of the store `S` is aborted at its commit if a concurrent transaction committed a
@@ -1402,12 +1577,13 @@ fn test_validation_accepts_unhashable_objects() {
 /// commit -> aborted
 /// ```
 ///
-/// Python also runs this test with validation method 1, which is not ported yet; this test uses method 2.
-fn check_validation_detects_conflict_on_unhashable_objects<S>()
+/// Python runs this test with both validation methods; it runs here once per method.
+fn check_validation_detects_conflict_on_unhashable_objects<S>(validation: Validation)
 where
     S: TransactionalStore<Value = Account> + Default,
 {
     let mut store: S = S::default();
+    store.state_mut().validation = validation;
     store.put("A", Account { a: 1, b: 0 }).unwrap();
     store.put("B", Account { a: 2, b: 0 }).unwrap();
 
@@ -1434,42 +1610,44 @@ where
     assert_aborted(store.commit_transaction(t_i));
 }
 
-/// A [`TransactionalKeyValueStore`] detects a conflict on values without `Hash`, see
+/// A [`TransactionalKeyValueStore`] with validation method 1 detects a conflict on values without `Hash`, see
 /// [`check_validation_detects_conflict_on_unhashable_objects`].
 #[test]
-fn test_validation_detects_conflict_on_unhashable_objects() {
+fn test_validation_detects_conflict_on_unhashable_objects_with_method_1() {
     check_validation_detects_conflict_on_unhashable_objects::<TransactionalKeyValueStore<Account>>(
+        Validation::BruteForce,
     );
 }
 
-/// A where clause that counts how often it is evaluated (Python: `CountingWHERE_Clause`).
-#[derive(Debug)]
-struct CountingWhereClause {
-    /// The where clause that does the actual evaluation.
-    clause: WhereClause,
-    /// The number of evaluations so far; a [`Cell`], as [`Clause::evaluate`] takes `&self`.
-    evaluations: Cell<usize>,
-}
-
-impl Clause<Stuff> for CountingWhereClause {
-    /// See [`Clause::evaluate`]. Also increments the evaluation counter.
-    fn evaluate(&self, object: &Stuff) -> bool {
-        self.evaluations.set(self.evaluations.get() + 1);
-        Clause::<Stuff>::evaluate(&self.clause, object)
-    }
+/// A [`TransactionalKeyValueStore`] with validation method 2 detects a conflict on values without `Hash`, see
+/// [`check_validation_detects_conflict_on_unhashable_objects`].
+#[test]
+fn test_validation_detects_conflict_on_unhashable_objects_with_method_2() {
+    check_validation_detects_conflict_on_unhashable_objects::<TransactionalKeyValueStore<Account>>(
+        Validation::WriteSets,
+    );
 }
 
 /// Checks that `read_objects` of the store `S` evaluates the where clause once per object with validation method
-/// 2, and that the result contains the transaction's own change. The read is kept in the transaction's reads with
-/// the same clause object and without a checksum.
+/// 2, and twice per object with method 1, which evaluates it a second time on the committed snapshot to compute the
+/// checksum. The result contains the transaction's own change. The read is kept in the transaction's reads with the
+/// same clause object; with method 1, it carries the checksum of the committed snapshot, i.e. of the version of A
+/// before the change of t_i; with method 2, it carries no checksum.
 ///
-/// Python also runs this test with validation method 1, which is not ported yet; this test uses method 2. Method 1
-/// evaluates the clause a second time on the committed snapshot to compute the checksum.
-fn check_read_objects_evaluates_where_clause_twice_only_for_method_1<S>()
+/// ```text
+/// t_i
+/// begin
+/// update A from (42, 0) to (42, 1)
+/// read a == 42 -> sees A = (42, 1)
+/// ```
+///
+/// Python runs this test with both validation methods; it runs here once per method.
+fn check_read_objects_evaluates_where_clause_twice_only_for_method_1<S>(validation: Validation)
 where
     S: TransactionalStore<Value = Stuff> + Default,
 {
     let mut store: S = S::default();
+    store.state_mut().validation = validation;
     store.put("A", Stuff { a: 42, b: 0 }).unwrap();
     // B does not match the where clause, it is evaluated nevertheless:
     store.put("B", Stuff { a: 7, b: 0 }).unwrap();
@@ -1490,11 +1668,26 @@ where
         .unwrap();
 
     // check the counter before any commit, as the validation in commit evaluates the clause again: two objects,
-    // evaluated once each
-    assert_eq!(counting.evaluations.get(), 2);
+    // evaluated twice (method 1) or once (method 2) each
+    let expected_evaluations: usize = match validation {
+        Validation::BruteForce => 4,
+        Validation::WriteSets => 2,
+    };
+    assert_eq!(counting.evaluations.get(), expected_evaluations);
     assert_eq!(result, [("A".to_string(), Stuff { a: 42, b: 1 })]);
 
-    // the read is kept with the same clause object and no checksum:
+    // method 1 keeps the checksum of the committed version of A: the SHA-256 digest, as lowercase hex, of the
+    // `Debug` text of the result, i.e. of the text
+    //     [("A", Stuff { a: 42, b: 0 })]
+    // method 2 keeps no checksum:
+    let expected_checksum: Option<String> = match validation {
+        Validation::BruteForce => {
+            Some("e53128abb9f72cfb7eb6f18d8bc50cdded266d1eafe28f1941b1f2172195b7a6".to_string())
+        }
+        Validation::WriteSets => None,
+    };
+
+    // the read is kept with the same clause object and the expected checksum:
     let read_clauses: &Vec<ReadClause<Stuff>> = &store.state().td[&t_i].read_clauses;
     assert_eq!(read_clauses.len(), 1);
     let kept_clause: &Rc<dyn Clause<Stuff>> = read_clauses[0]
@@ -1502,14 +1695,23 @@ where
         .as_ref()
         .expect("the read has a where clause");
     assert!(Rc::ptr_eq(kept_clause, &where_clause));
-    assert_eq!(read_clauses[0].checksum, None);
+    assert_eq!(read_clauses[0].checksum, expected_checksum);
 }
 
-/// `read_objects` of a [`TransactionalKeyValueStore`] evaluates the where clause once per object, see
-/// [`check_read_objects_evaluates_where_clause_twice_only_for_method_1`].
+/// `read_objects` of a [`TransactionalKeyValueStore`] with validation method 1 evaluates the where clause twice per
+/// object and keeps a checksum, see [`check_read_objects_evaluates_where_clause_twice_only_for_method_1`].
 #[test]
-fn test_read_objects_evaluates_where_clause_twice_only_for_method_1() {
+fn test_read_objects_evaluates_where_clause_twice_only_for_method_1_with_method_1() {
     check_read_objects_evaluates_where_clause_twice_only_for_method_1::<
         TransactionalKeyValueStore<Stuff>,
-    >();
+    >(Validation::BruteForce);
+}
+
+/// `read_objects` of a [`TransactionalKeyValueStore`] with validation method 2 evaluates the where clause once per
+/// object and keeps no checksum, see [`check_read_objects_evaluates_where_clause_twice_only_for_method_1`].
+#[test]
+fn test_read_objects_evaluates_where_clause_twice_only_for_method_1_with_method_2() {
+    check_read_objects_evaluates_where_clause_twice_only_for_method_1::<
+        TransactionalKeyValueStore<Stuff>,
+    >(Validation::WriteSets);
 }

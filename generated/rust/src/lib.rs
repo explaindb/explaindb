@@ -35,7 +35,7 @@ pub use query_processing::predicates::{
 };
 pub use stores::mvcc::{
     JournalEntry, MvccState, ReadClause, Snapshot, TdEntry, TransactionalKeyValueStore,
-    TransactionalStore, abort_transaction_default, begin_transaction_default,
+    TransactionalStore, Validation, abort_transaction_default, begin_transaction_default, checksum,
     commit_transaction_default, delete_object_default, read_objects_default, update_object_default,
     validate_transaction_default,
 };

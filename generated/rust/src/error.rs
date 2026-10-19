@@ -40,7 +40,8 @@ pub enum StoreError {
     /// Python.
     NotVisible(String),
     /// The transaction id is not in the transaction dictionary (Python: `KeyError` in `read_objects` and
-    /// `update_object`, and in validation for a transaction that committed meanwhile and was aborted afterwards).
+    /// `update_object`, and in validation method 2 for a transaction that committed meanwhile and was aborted
+    /// afterwards).
     TransactionNotFound(u64),
     /// The transaction has committed already and cannot read or write any more (Python: `RuntimeError`).
     AlreadyCommitted(u64),
