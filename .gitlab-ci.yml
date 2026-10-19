@@ -17,13 +17,14 @@ stages:
   - test
   - deploy
 
-# Scheduled pipelines (the nightly run on main) run only
-# serializability_nightly, dependency_audit and generated_rust_check; every
-# other job extends this template to stay out of them. A job that needs its own
+# Scheduled pipelines (the nightly run on main) run only serializability_nightly,
+# dependency_audit, rust_dependency_audit and generated_rust_check; every other
+# job extends this template to stay out of them. A job that needs its own
 # `rules` cannot use this template (its rules would replace the template's); it
 # starts its rules with the `schedule ... when: never` rule instead, as
 # `docs_build` and `pages` do. system/tests/repo/test_ci_config.py fails for a
-# job that does neither.
+# job that does neither. A new job meant for the nightly pipeline is added to
+# SCHEDULED_JOBS in that test instead.
 .not_in_scheduled_pipelines:
   rules:
     - if: $CI_PIPELINE_SOURCE == 'schedule'
@@ -180,6 +181,77 @@ dependency_audit:
     # audited; --desc prints what each vulnerability is; --progress-spinner off
     # keeps the CI log readable.
     - uv tool run --exclude-newer 2026-10-01T00:00:00Z pip-audit==2.10.1 --strict --no-deps --disable-pip --progress-spinner off --desc -r /tmp/audit-requirements.txt
+  interruptible: true
+
+# The Rust counterpart of dependency_audit: fails the pipeline if a crate pinned
+# in generated/rust/Cargo.lock has a known vulnerability (RustSec advisory
+# database), see docs/changes/012-rust-dependency-audit. Same policy: a hard
+# failure that blocks merging, one retry, also in the nightly scheduled
+# pipeline. Advisories that a crate is unmaintained or unsound are only shown as
+# warnings. Yanked crates are not checked (--no-yanked): that check reads the
+# crates.io index through cargo, which this image does not have. To accept an
+# advisory that has no fix yet (or a false positive), append `--ignore <ID>`
+# (e.g. `--ignore RUSTSEC-2024-0001`) to the cargo-audit command and put a YAML
+# comment above it giving the reason and the date; remove it once a fix exists.
+# Besides --no-yanked, --file with the lockfile and --ignore, only -D/--deny
+# <kind> is allowed: other options, such as --target-os, --url, --db or
+# --no-fetch, can hide advisories, and test_ci_config.py fails on them.
+# How to fix a finding: CONTRIBUTING.md, section Dependencies > Security audit.
+#
+# cargo-audit only reads the lockfile, so no Rust toolchain is needed: the job
+# downloads the prebuilt cargo-audit for x86_64 Linux (the runners are amd64,
+# another name for x86_64) and checks the SHA-256 of the archive before
+# unpacking it, on every run. It runs cargo-audit in /tmp with an empty
+# CARGO_HOME, so no audit.toml from the checkout can change what is checked. If
+# the advisory database can no longer be read (a parse error), raise the
+# cargo-audit version. Raise the image, CARGO_AUDIT_VERSION and
+# CARGO_AUDIT_SHA256 together, at least once per semester, like pip-audit.
+rust_dependency_audit:
+  stage: test
+  tags:
+    - test
+  # A small image with curl, pinned by tag and digest (a checksum of the exact
+  # image). The image starts curl by default; the empty entrypoint [""] makes
+  # GitLab run the script lines below in a shell instead.
+  image:
+    name: curlimages/curl:8.22.0@sha256:58adaa4e8dca9c988bae2aba4ab3434a0bb2da16bbe3f92dec39ec7785166777
+    entrypoint: [""]
+  variables:
+    # Keep the version in the local command of CONTRIBUTING.md (Security audit) equal.
+    CARGO_AUDIT_VERSION: "0.22.2"
+    # SHA-256 of cargo-audit-x86_64-unknown-linux-musl-v0.22.2.tgz; equals the
+    # digest GitHub lists for this release asset.
+    CARGO_AUDIT_SHA256: "7fb9497f8594b389e5fce5ef9b92db08432996895b2e0c5a0167a69ed445c428"
+    # An empty directory: cargo-audit reads no audit.toml from it and keeps its
+    # advisory database there, fetched fresh on every run.
+    CARGO_HOME: /tmp/cargo-home
+  # A network hiccup (downloading cargo-audit or the advisory database) fails
+  # the script just like a finding; one retry absorbs it. A real finding simply
+  # fails twice.
+  retry:
+    max: 1
+    when:
+      - script_failure
+  script:
+    # Skip when the merge request only changes Markdown (see detect-docs-only).
+    - if [ "$DOCS_ONLY" = "true" ]; then echo "Only Markdown changed; skipping."; exit 0; fi
+    # Ignored advisories belong in this job, visible in the log, not in a config
+    # file that a local `cargo audit` would read. -L also catches a symbolic link
+    # whose target does not exist.
+    - for f in .cargo/audit.toml generated/rust/.cargo/audit.toml; do if [ -e "$f" ] || [ -L "$f" ]; then echo "$f would change what cargo-audit checks. Add --ignore to the rust_dependency_audit job instead."; exit 1; fi; done
+    # The downloaded cargo-audit runs only on x86_64.
+    - if [ "$(uname -m)" != "x86_64" ]; then echo "cargo-audit is pinned for x86_64; this runner is $(uname -m)."; exit 1; fi
+    # -f fails on an HTTP error, -L follows GitHub's redirect to its download
+    # host; --proto and --proto-redir allow HTTPS only, also after the redirect;
+    # --tlsv1.2 refuses older TLS versions.
+    - curl -sSfL --proto '=https' --proto-redir '=https' --tlsv1.2 -o /tmp/cargo-audit.tgz "https://github.com/rustsec/rustsec/releases/download/cargo-audit%2Fv${CARGO_AUDIT_VERSION}/cargo-audit-x86_64-unknown-linux-musl-v${CARGO_AUDIT_VERSION}.tgz"
+    # Check the archive before anything in it is unpacked or run.
+    - echo "$CARGO_AUDIT_SHA256  /tmp/cargo-audit.tgz" | sha256sum -c -
+    - tar -xzf /tmp/cargo-audit.tgz -C /tmp
+    # Run outside the checkout, so no .cargo/audit.toml in it is read.
+    - cd /tmp
+    - ./cargo-audit-x86_64-unknown-linux-musl-v${CARGO_AUDIT_VERSION}/cargo-audit --version
+    - ./cargo-audit-x86_64-unknown-linux-musl-v${CARGO_AUDIT_VERSION}/cargo-audit audit --no-yanked --file "$CI_PROJECT_DIR/generated/rust/Cargo.lock"
   interruptible: true
 
 # Script lines shared by the jobs that compare a merge request with its target

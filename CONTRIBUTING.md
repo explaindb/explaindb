@@ -53,6 +53,48 @@ above the command giving the reason and the date, and remove the entry again as 
 as a fixed version is available. (A failing job blocks merging because the GitLab project
 setting "Pipelines must succeed" is enabled.)
 
+The CI job `rust_dependency_audit` does the same for the Rust code: it runs
+[cargo-audit](https://crates.io/crates/cargo-audit) on the versions pinned in
+`generated/rust/Cargo.lock` and fails if any of them has a known vulnerability in the
+[RustSec advisory database](https://rustsec.org). Crates that are unmaintained (no longer
+looked after) or unsound (can break Rust's memory safety when used in a certain way) are only
+reported as warnings; yanked crates (withdrawn by their authors on crates.io) are not checked.
+To fix a finding (the `cargo` commands run in `generated/rust/`): a dependency update is the one change
+made directly in `generated/rust/`, in `Cargo.toml`, `Cargo.lock` and `rust-toolchain.toml`.
+
+- For an indirect dependency, run `cargo update -p <crate>`; if `Cargo.lock` holds two
+  versions of the crate, name the affected one: `cargo update -p <crate>@<version>`. If the
+  fixed version is a new major version that the crate depending on it does not accept yet,
+  update that crate instead.
+- For a direct dependency, raise its version in `generated/rust/Cargo.toml`, then run
+  `cargo update -p <crate>`.
+- Finally, run `python3 .ci/check_generated.py --update-dependencies` from the repository root, so
+  that the manifest `generated/rust/GENERATED_FROM.json` records the new hashes of these three files
+  (and only of them). Otherwise `generated_rust_check` reports them as edited by hand and fails on
+  main.
+
+If no fixed version exists yet, or the finding is a false positive, append `--ignore <ID>`
+(e.g. `--ignore RUSTSEC-2024-0001`) to the cargo-audit command in that job, with a comment
+giving the reason and the date, and remove it again as soon as a fix is available. Besides
+`--ignore <ID>`, the command may only take `--no-yanked`, `--file` with the lockfile and
+`-D`/`--deny <kind>` (which makes it stricter); reviewers watch for any other option, as options
+such as `--target-os`, `--url`, `--db` or `--no-fetch` can hide advisories, and
+`system/tests/repo/test_ci_config.py` fails on them. Do not add a `.cargo/audit.toml` instead:
+the job does not read it and fails if one exists, so that every ignored advisory is visible in
+the job. If the job fails because cargo-audit cannot read the advisory database (a parse error,
+not a finding), raise `CARGO_AUDIT_VERSION` and `CARGO_AUDIT_SHA256` in the job; the checksum is
+listed on GitHub with the release asset `cargo-audit-x86_64-unknown-linux-musl-v<version>.tgz`.
+
+To reproduce the check locally, install the version of `CARGO_AUDIT_VERSION` in the job and
+run it from the repository root as below (add the job's `--ignore` options, if any):
+cargo-audit then runs in an empty directory with an empty `CARGO_HOME`, so that, as in the
+job, no `audit.toml` (of the repository, a shared `/tmp` or your own configuration) is read:
+
+```sh
+cargo install cargo-audit --version 0.22.2 --locked
+( repo="$PWD"; cd "$(mktemp -d)" && CARGO_HOME="$(mktemp -d)" cargo-audit audit --no-yanked --file "$repo/generated/rust/Cargo.lock" )
+```
+
 ## Security checks
 
 Besides the dependency audit above, the CI scans every merge request for secrets and for
@@ -182,10 +224,11 @@ and how the transactions end. The regular test job runs every schedule of two sh
 The larger spaces (three transactions, voluntary aborts, longer transactions) take about half an
 hour locally (about two hours on CI). They run in the job `serializability_nightly` of the nightly
 scheduled pipeline on main; in a merge request the job can be started by hand. Only this job,
-`dependency_audit` and `generated_rust_check` run in scheduled pipelines: every new CI job must extend
-`.not_in_scheduled_pipelines` (or start its own rules with the same `schedule`/`never` rule), which
-`system/tests/repo/test_ci_config.py` checks. A job meant for scheduled pipelines is added to `SCHEDULED_JOBS`
-in that test instead. To run the larger spaces locally:
+`dependency_audit`, `rust_dependency_audit` and `generated_rust_check` run in scheduled pipelines:
+every new CI job must extend `.not_in_scheduled_pipelines` (or start its own rules with the same
+`schedule`/`never` rule), which `system/tests/repo/test_ci_config.py` checks. A job meant for
+scheduled pipelines is added to `SCHEDULED_JOBS` in that test instead. To run the larger spaces
+locally:
 
 ```sh
 EXPLAINDB_NIGHTLY=1 uv run python -m unittest -v system.tests.stores.test_mvcc_serializability.NightlySerializabilityTest

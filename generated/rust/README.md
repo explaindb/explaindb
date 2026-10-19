@@ -42,7 +42,7 @@ The port is built in steps (see
 | Step | Content | Status |
 |---|---|---|
 | 1a | WHERE-clause predicates, versioned key-value store | done |
-| audit | blocking `cargo audit` of the Rust dependencies in CI | planned |
+| audit | blocking `cargo audit` of the Rust dependencies in CI | done |
 | 1b | MVCC store (`TransactionalKeyValueStore`) with journal | planned |
 | 2 | indexed MVCC store, serializability test | planned |
 | 3 | benchmarks: Python against Rust | planned |
@@ -69,7 +69,8 @@ cargo doc --no-deps --open                    # API documentation in the browser
 ```
 
 The CI job `rust_test` runs the checks of [CONTRIBUTING.md](../../CONTRIBUTING.md#rust-code), which are stricter: e.g.
-`cargo doc` there fails on a broken link in a doc comment of the library.
+`cargo doc` there fails on a broken link in a doc comment of the library. The CI job `rust_dependency_audit` checks
+the crates in `Cargo.lock` for known vulnerabilities, see [CONTRIBUTING.md](../../CONTRIBUTING.md#security-audit).
 
 ## A first example
 
