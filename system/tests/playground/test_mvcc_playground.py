@@ -32,6 +32,7 @@ from dataclasses import dataclass
 from system.playground.mvcc_playground import (
     MAX_ORDER_LINES,
     MODES,
+    Mode,
     ObjectState,
     RunState,
     StoreWithoutValidation,
@@ -75,58 +76,113 @@ class MakeStoreTest(unittest.TestCase):
 
     def test_store_per_mode(self) -> None:
         """Method 1 re-runs every read at the commit, method 2 checks the reads against the objects written by
-        transactions that committed meanwhile, and "no validation" does not validate.
+        transactions that committed meanwhile, both at the isolation level serializable; "snapshot isolation" uses
+        the store's isolation level snapshot isolation, and "no validation" does not validate.
 
-        Would fail if a mode were mapped to the wrong validation, so the playground showed another method than
-        the one selected.
+        Would fail if a mode were mapped to the wrong store or isolation level, so the playground showed another
+        mode than the one selected.
         """
-        method_1: TransactionalKeyValueStore = make_store("method 1")
-        method_2: TransactionalKeyValueStore = make_store("method 2")
-        self.assertNotIsInstance(method_1, StoreWithoutValidation)
-        self.assertTrue(method_1.use_brute_force_validation)
-        self.assertNotIsInstance(method_2, StoreWithoutValidation)
-        self.assertFalse(method_2.use_brute_force_validation)
-        self.assertIsInstance(make_store("no validation"), StoreWithoutValidation)
+        # per mode: the class of the store, whether it re-runs every read at the commit (None: the store does not
+        # validate), and its isolation level:
+        expected: dict[Mode, tuple[type, bool | None, str]] = {
+            "method 1": (TransactionalKeyValueStore, True, "serializable"),
+            "method 2": (TransactionalKeyValueStore, False, "serializable"),
+            "snapshot isolation": (
+                TransactionalKeyValueStore,
+                False,
+                "snapshot isolation",
+            ),
+            "no validation": (StoreWithoutValidation, None, "serializable"),
+        }
+        self.assertEqual(set(MODES), set(expected))
+        for mode, (store_class, brute_force, isolation_level) in expected.items():
+            with self.subTest(mode=mode):
+                store: TransactionalKeyValueStore = make_store(mode)
+                self.assertIs(store_class, type(store))
+                if brute_force is not None:
+                    self.assertEqual(brute_force, store.use_brute_force_validation)
+                self.assertEqual(isolation_level, store.isolation_level)
 
 
 @dataclass(frozen=True)
 class ExpectedOutcome:
-    """The outcome of a scenario run to the end: transaction statuses and verdict kind, with and without
-    validation (method 1 and method 2 agree in every scenario)."""
+    """The outcome of a scenario run to the end in one mode: the statuses of the transactions and the verdict kind."""
 
-    validated: tuple[str, ...]
-    validated_verdict: str
-    unvalidated: tuple[str, ...]
-    unvalidated_verdict: str
+    statuses: tuple[str, ...]
+    verdict: str
 
 
 # the statuses of the transactions, and the verdict kinds: serializable in the order of the serialization points
 # (SAME), only in another order (OTHER), or not at all (NOT). The serialization point of a transaction that wrote
-# is its commit timestamp: validation methods 1 and 2 check its reads against the state at that timestamp. A
-# read-only transaction also gets a commit timestamp, but it skips the validation and reads only the snapshot of
-# its begin, so its serialization point is its begin (its TA_id). Commit timestamps and TA_ids come from the same
-# counter, so they can be compared. The verdict first replays the committed transactions in this order; aborted
-# transactions are left out (see TransactionRecord.serialization_point and serial_order):
+# is its commit timestamp: methods 1 and 2 check its reads against the state at that timestamp, so every run they
+# let commit is serializable in this order. Under snapshot isolation and without validation the reads are not
+# checked, so a run may be serializable only in another order or not at all. A read-only transaction also gets a
+# commit timestamp, but it reads only the snapshot of its begin (no mode checks its reads), so its serialization
+# point is its begin (its TA_id). Commit timestamps and TA_ids come from the same counter, so they can be compared.
+# The verdict first replays the committed transactions in this order; aborted transactions are left out (see
+# TransactionRecord.serialization_point and serial_order):
 C: str = "committed"
 A: str = "aborted"
 SAME: str = "serializable"
 OTHER: str = "serializable in another order"
 NOT: str = "not serializable"
 
-# the outcome of every scenario:
-EXPECTED_OUTCOMES: dict[str, ExpectedOutcome] = {
-    "serial": ExpectedOutcome((C, C), SAME, (C, C), SAME),
-    "lost update": ExpectedOutcome((C, A), SAME, (C, C), NOT),
-    "write skew": ExpectedOutcome((C, A), SAME, (C, C), NOT),
-    "write skew via phantom (insert and delete)": ExpectedOutcome(
-        (C, A), SAME, (C, C), NOT
-    ),
-    "phantom insert": ExpectedOutcome((A, C), SAME, (C, C), OTHER),
-    "concurrent delete": ExpectedOutcome((A, C), SAME, (C, C), OTHER),
-    "read-only transaction": ExpectedOutcome((C, C), SAME, (C, C), SAME),
-    "read-only anomaly (Fekete et al.)": ExpectedOutcome(
-        (C, A, C), SAME, (C, C, C), NOT
-    ),
+# the outcome of every scenario in every mode:
+EXPECTED_OUTCOMES: dict[str, dict[Mode, ExpectedOutcome]] = {
+    "serial": {
+        "method 1": ExpectedOutcome((C, C), SAME),
+        "method 2": ExpectedOutcome((C, C), SAME),
+        "snapshot isolation": ExpectedOutcome((C, C), SAME),
+        "no validation": ExpectedOutcome((C, C), SAME),
+    },
+    "lost update": {
+        "method 1": ExpectedOutcome((C, A), SAME),
+        "method 2": ExpectedOutcome((C, A), SAME),
+        "snapshot isolation": ExpectedOutcome((C, A), SAME),
+        "no validation": ExpectedOutcome((C, C), NOT),
+    },
+    "write skew": {
+        "method 1": ExpectedOutcome((C, A), SAME),
+        "method 2": ExpectedOutcome((C, A), SAME),
+        "snapshot isolation": ExpectedOutcome((C, C), NOT),
+        "no validation": ExpectedOutcome((C, C), NOT),
+    },
+    "write skew via phantom (insert and delete)": {
+        "method 1": ExpectedOutcome((C, A), SAME),
+        "method 2": ExpectedOutcome((C, A), SAME),
+        "snapshot isolation": ExpectedOutcome((C, C), NOT),
+        "no validation": ExpectedOutcome((C, C), NOT),
+    },
+    "phantom insert": {
+        "method 1": ExpectedOutcome((A, C), SAME),
+        "method 2": ExpectedOutcome((A, C), SAME),
+        "snapshot isolation": ExpectedOutcome((C, C), OTHER),
+        "no validation": ExpectedOutcome((C, C), OTHER),
+    },
+    "concurrent delete": {
+        "method 1": ExpectedOutcome((A, C), SAME),
+        "method 2": ExpectedOutcome((A, C), SAME),
+        "snapshot isolation": ExpectedOutcome((C, C), OTHER),
+        "no validation": ExpectedOutcome((C, C), OTHER),
+    },
+    "blind write": {
+        "method 1": ExpectedOutcome((C, C), SAME),
+        "method 2": ExpectedOutcome((C, C), SAME),
+        "snapshot isolation": ExpectedOutcome((A, C), SAME),
+        "no validation": ExpectedOutcome((C, C), SAME),
+    },
+    "read-only transaction": {
+        "method 1": ExpectedOutcome((C, C), SAME),
+        "method 2": ExpectedOutcome((C, C), SAME),
+        "snapshot isolation": ExpectedOutcome((C, C), SAME),
+        "no validation": ExpectedOutcome((C, C), SAME),
+    },
+    "read-only anomaly (Fekete et al.)": {
+        "method 1": ExpectedOutcome((C, A, C), SAME),
+        "method 2": ExpectedOutcome((C, A, C), SAME),
+        "snapshot isolation": ExpectedOutcome((C, C, C), NOT),
+        "no validation": ExpectedOutcome((C, C, C), NOT),
+    },
 }
 
 
@@ -134,31 +190,27 @@ class ScenarioOutcomeTest(unittest.TestCase):
     """Every scenario run to the end in every mode."""
 
     def test_outcome_and_verdict_per_mode(self) -> None:
-        """Each scenario ends with the pinned transaction statuses and verdict kind in each mode.
+        """Each scenario has a pinned outcome for every mode, and ends with its pinned transaction statuses and
+        verdict kind in each mode.
 
-        Would fail if a validation method let an anomaly commit, aborted a transaction needlessly, if the store
-        without validation stopped showing the anomalies, or if the verdict misjudged a run.
+        Would fail if a mode were added without pinning its outcomes, if methods 1 and 2 let an anomaly commit or
+        aborted a transaction needlessly, if snapshot isolation stopped aborting the second of two writers of an
+        object (lost update, blind write) or started to abort write skew, if the store without validation stopped
+        showing the anomalies, or if the verdict misjudged a run.
         """
+        # every scenario has a row, and every row belongs to a scenario:
+        self.assertEqual({s.name for s in SCENARIOS}, set(EXPECTED_OUTCOMES))
         for s in SCENARIOS:
-            expected: ExpectedOutcome = EXPECTED_OUTCOMES[s.name]
+            expected: dict[Mode, ExpectedOutcome] = EXPECTED_OUTCOMES[s.name]
+            with self.subTest(scenario=s.name):
+                self.assertEqual(set(MODES), set(expected))
             for mode in MODES:
                 with self.subTest(scenario=s.name, mode=mode):
                     result: RunState = run_to(
                         s.schedule, s.initial_state, mode, len(s.schedule)
                     )
-                    validated: bool = mode != "no validation"
-                    self.assertEqual(
-                        expected.validated if validated else expected.unvalidated,
-                        statuses(result),
-                    )
-                    self.assertEqual(
-                        (
-                            expected.validated_verdict
-                            if validated
-                            else expected.unvalidated_verdict
-                        ),
-                        result.verdict.kind,
-                    )
+                    self.assertEqual(expected[mode].statuses, statuses(result))
+                    self.assertEqual(expected[mode].verdict, result.verdict.kind)
 
 
 class VerdictTest(unittest.TestCase):
@@ -761,6 +813,155 @@ class ExplanationTest(unittest.TestCase):
             result.explanations,
         )
 
+    def test_snapshot_isolation_names_the_committing_writer(self) -> None:
+        """Under snapshot isolation, T2's update of x in the lost update fails, as T1 changed x and committed after
+        T2 began; the explanation names T1 and stands at T2's update.
+
+        ```text
+        T1                          T2
+        begin
+                                    begin
+        read all → {x}
+                                    read all → {x}
+        update x ← (a=1, b=1)
+        commit
+                                    update x ← (a=1, b=2) -> aborted
+                                    (commit: skipped)
+        ```
+
+        Would fail if the explanation of a write abort assumed another transaction's uncommitted version (there is
+        none here), named the wrong transaction, or stood at another operation.
+        """
+        s: Scenario = scenario_named("lost update")
+        result: RunState = run_to(
+            s.schedule, s.initial_state, "snapshot isolation", len(s.schedule)
+        )
+        self.assertEqual(
+            {6: "snapshot isolation: T1 changed x and committed after T2 began"},
+            result.explanations,
+        )
+
+    def test_snapshot_isolation_names_the_writer_of_the_object(self) -> None:
+        """Under snapshot isolation, T2 and then T3 commit after T1's begin, T2 a change of x and T3 a change of y;
+        T1's update of x fails, and the explanation names T2, which changed x, not T3, which committed last.
+
+        ```text
+        T1                          T2                          T3
+        begin
+                                    begin
+                                                                begin
+                                    update x ← (a=1, b=2)
+                                    commit
+                                                                update y ← (a=1, b=3)
+                                                                commit
+        update x ← (a=1, b=1) -> aborted
+        ```
+
+        Would fail if the explanation named the transaction that committed last instead of the one whose version of
+        x is committed now.
+        """
+        schedule: Schedule = schedule_of(
+            (1, "begin"),
+            (2, "begin"),
+            (3, "begin"),
+            (2, DataOperation("update", "x", Row(1, 2))),
+            (2, "commit"),
+            (3, DataOperation("update", "y", Row(1, 3))),
+            (3, "commit"),
+            (1, DataOperation("update", "x", Row(1, 1))),
+        )
+        result: RunState = run_to(
+            schedule, INITIAL_X, "snapshot isolation", len(schedule)
+        )
+        self.assertEqual(("aborted", "committed", "committed"), statuses(result))
+        self.assertEqual(
+            {7: "snapshot isolation: T2 changed x and committed after T1 began"},
+            result.explanations,
+        )
+
+    def test_snapshot_isolation_with_a_delete(self) -> None:
+        """Under snapshot isolation, a delete is stopped like an update, and a delete marker counts as a change:
+        T1's delete of x fails after T2 updated x and committed, and T1's update of x fails after T2 deleted x and
+        committed; both explanations name T2.
+
+        ```text
+        T1                          T2
+        begin
+                                    begin
+                                    update x ← (a=1, b=2)   (or: delete x)
+                                    commit
+        delete x -> aborted         (or: update x ← (a=1, b=1) -> aborted)
+        ```
+
+        Would fail if the explanation of a write abort handled only updates, or could not find the writer of a
+        newest committed version that is a delete marker.
+        """
+        cases: dict[str, tuple[DataOperation, DataOperation]] = {
+            "T1 deletes": (
+                DataOperation("update", "x", Row(1, 2)),
+                DataOperation("delete", "x"),
+            ),
+            "T2 deletes": (
+                DataOperation("delete", "x"),
+                DataOperation("update", "x", Row(1, 1)),
+            ),
+        }
+        for case, (write_of_t_2, write_of_t_1) in cases.items():
+            with self.subTest(case=case):
+                schedule: Schedule = schedule_of(
+                    (1, "begin"),
+                    (2, "begin"),
+                    (2, write_of_t_2),
+                    (2, "commit"),
+                    (1, write_of_t_1),
+                )
+                result: RunState = run_to(
+                    schedule, INITIAL_X, "snapshot isolation", len(schedule)
+                )
+                self.assertEqual(("aborted", "committed"), statuses(result))
+                self.assertEqual(
+                    {
+                        4: "snapshot isolation: T2 changed x and committed after T1 began"
+                    },
+                    result.explanations,
+                )
+
+    def test_uncommitted_writer_is_checked_before_snapshot_isolation(self) -> None:
+        """Under snapshot isolation, T2 changed x and committed after T1's begin, and T3 holds an uncommitted
+        version of x when T1 updates x; both reasons apply, and the explanation gives T3's uncommitted version, as
+        the store checks for it first.
+
+        ```text
+        T1                          T2                          T3
+        begin
+                                    begin
+                                    update x ← (a=1, b=2)
+                                    commit
+                                                                begin
+                                                                update x ← (a=1, b=3)
+        update x ← (a=1, b=1) -> aborted
+        ```
+
+        Would fail if the explanation checked the two reasons in another order than the store, and so gave the
+        commit of T2 as the reason.
+        """
+        schedule: Schedule = schedule_of(
+            (1, "begin"),
+            (2, "begin"),
+            (2, DataOperation("update", "x", Row(1, 2))),
+            (2, "commit"),
+            (3, "begin"),
+            (3, DataOperation("update", "x", Row(1, 3))),
+            (1, DataOperation("update", "x", Row(1, 1))),
+        )
+        result: RunState = run_to(
+            schedule, INITIAL_X, "snapshot isolation", len(schedule)
+        )
+        self.assertEqual(("aborted", "committed", "running"), statuses(result))
+        self.assertEqual(
+            {6: "T3 is writing x and has not committed yet"}, result.explanations
+        )
+
     def test_commit_that_succeeds_raises(self) -> None:
         """Asked to explain a commit that the store does not abort, abort_explanation raises an AssertionError.
 
@@ -784,6 +985,58 @@ class ExplanationTest(unittest.TestCase):
         # position 3 is T1's commit, which succeeds:
         with self.assertRaisesRegex(AssertionError, "no reason found"):
             abort_explanation(s.schedule, s.initial_state, "method 1", 3)
+
+    def test_write_that_succeeds_raises(self) -> None:
+        """Asked to explain a write that the store does not abort, abort_explanation raises an AssertionError, also
+        if snapshot isolation would abort the write.
+
+        The scenario "blind write", with method 2:
+
+        ```text
+        T1                          T2
+        begin
+                                    begin
+                                    update x ← (a=1, b=2)
+                                    commit
+        update x ← (a=1, b=1)                         <- position 4 (counted from 0): the write to explain
+        commit
+        ```
+
+        Would fail if the explanation gave the snapshot isolation reason (T2 changed x and committed after T1 began)
+        in a mode other than snapshot isolation, where the store does not abort for it.
+        """
+        s: Scenario = scenario_named("blind write")
+        # position 4 is T1's update of x, which succeeds:
+        with self.assertRaisesRegex(AssertionError, "no reason found"):
+            abort_explanation(s.schedule, s.initial_state, "method 2", 4)
+
+    def test_insert_that_succeeds_raises(self) -> None:
+        """Asked to explain an insert of a new key that the store does not abort, abort_explanation raises an
+        AssertionError, as for any other write that the store does not abort.
+
+        The scenario "serial", whose T1 inserts y, which is not in the store yet:
+
+        ```text
+        T1                          T2
+        begin
+        read a==1 → {x}
+        update y ← (a=1, b=0)                         <- position 2 (counted from 0): the insert to explain
+        commit
+                                    begin
+                                    read a==1 → {x, y}
+                                    delete x
+                                    commit
+        ```
+
+        Would fail if the explanation looked up the store's entry of y, which does not exist before the insert, and
+        raised a KeyError instead. Checked with method 1 and with snapshot isolation.
+        """
+        s: Scenario = scenario_named("serial")
+        for mode in ["method 1", "snapshot isolation"]:
+            with self.subTest(mode=mode):
+                # position 2 is T1's insert of y, which succeeds:
+                with self.assertRaisesRegex(AssertionError, "no reason found"):
+                    abort_explanation(s.schedule, s.initial_state, mode, 2)
 
     def test_nothing_to_explain(self) -> None:
         """The serial scenario has no explanations, before and after its end.

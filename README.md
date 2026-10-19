@@ -35,7 +35,7 @@ topic and points to the code that implements it. The launch badge opens a notebo
 | Notebook | Topic | Launch |
 |---|---|---|
 | [Data-Layout](notebooks/Data-Layout.ipynb) | Row vs. column layout: how much each layout has to read for different queries | [![Open Data-Layout on Binder](https://mybinder.org/badge_logo.svg)](https://mybinder.org/v2/gh/explaindb/explaindb/main?urlpath=lab/tree/notebooks/Data-Layout.ipynb) |
-| [MVCC-Playground](notebooks/MVCC-Playground.ipynb) | Building schedules of transactions by clicking and running them operation by operation on the MVCC store, with and without validation | [![Open MVCC-Playground on Binder](https://mybinder.org/badge_logo.svg)](https://mybinder.org/v2/gh/explaindb/explaindb/main?urlpath=lab/tree/notebooks/MVCC-Playground.ipynb) |
+| [MVCC-Playground](notebooks/MVCC-Playground.ipynb) | Building schedules of transactions by clicking and running them operation by operation on the MVCC store, serializable, under snapshot isolation or without validation | [![Open MVCC-Playground on Binder](https://mybinder.org/badge_logo.svg)](https://mybinder.org/v2/gh/explaindb/explaindb/main?urlpath=lab/tree/notebooks/MVCC-Playground.ipynb) |
 | [RAID-Nesting-Trade-offs](notebooks/RAID-Nesting-Trade-offs.ipynb) | Nesting RAID 0 arrays and its effect on sequential read performance | [![Open RAID-Nesting-Trade-offs on Binder](https://mybinder.org/badge_logo.svg)](https://mybinder.org/v2/gh/explaindb/explaindb/main?urlpath=lab/tree/notebooks/RAID-Nesting-Trade-offs.ipynb) |
 
 ### Indexing

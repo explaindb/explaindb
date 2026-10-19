@@ -80,10 +80,10 @@ commit   -> succeeds (serializable only)
 
 ## Try it
 
-Open the MVCC playground notebook: load a scenario (lost update, write skew, phantom insert, ...) or build a
-schedule of your own, and run it operation by operation with validation method 1, method 2 or no validation. It
-shows each key's versions, every transaction's snapshot plus its own writes, what it read and wrote, and whether the
-result is serializable.
+Open the MVCC playground notebook: load a scenario (lost update, write skew, blind write, ...) or build a schedule
+of your own, and run it operation by operation: serializable with method 1 or 2, under snapshot isolation, or without
+validation. It shows each key's versions, every transaction's snapshot plus its own writes, what it read and wrote,
+and whether the result is serializable.
 
 Then read `test_store_anomalies.py`: each test sets up two interleaved transactions that would trigger a
 classic anomaly, and asserts what the versioned/MVCC store returns.

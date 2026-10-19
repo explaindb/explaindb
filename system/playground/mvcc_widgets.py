@@ -58,10 +58,12 @@ RUNNING_OPERATIONS: tuple[str, ...] = (
     "abort",
 )
 KEYS: tuple[str, ...] = ("x", "y", "z")
-# the labels of the modes' buttons, which name how each validation method works:
+# the labels of the modes' buttons, which name the isolation level (where there is one) and how each mode decides
+# which transactions to abort:
 MODE_LABELS: dict[Mode, str] = {
-    "method 1": "method 1 (re-run reads, checksums)",
-    "method 2": "method 2 (write sets)",
+    "method 1": "serializable - method 1 (re-run reads, checksums)",
+    "method 2": "serializable - method 2 (write sets)",
+    "snapshot isolation": "snapshot isolation - first updater wins",
     "no validation": "no validation",
 }
 # the scenario to start from when building a schedule of one's own:
@@ -343,6 +345,7 @@ class MvccPlayground:  # pylint: disable=too-many-instance-attributes
         self.mode = widgets.ToggleButtons(
             options=[(MODE_LABELS[mode], mode) for mode in MODES],
             value="method 2",
+            description="mode",
             style={"button_width": "auto"},
         )
         self.transaction = widgets.Dropdown(description="transaction", style=full_label)
@@ -372,8 +375,10 @@ class MvccPlayground:  # pylint: disable=too-many-instance-attributes
         self.forward_button.on_click(lambda _: self.run_up_to(self.position + 1))
         self.widget = widgets.VBox(
             [
-                widgets.HBox([self.scenario, self.mode]),
+                self.scenario,
                 self.description,
+                # the modes on a row of their own, as four buttons next to the scenario dropdown get too wide:
+                self.mode,
                 # the controls that edit the schedule, in a box apart from the schedule (the style is for all boxes):
                 widgets.VBox(
                     [

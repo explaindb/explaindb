@@ -54,11 +54,17 @@ from system.query_processing.predicates import WHERE_Clause
 from system.stores.MVCC import TransactionalKeyValueStore
 from system.stores.VersionedKeyValueStore import VersionedKeyValueStore
 
-# how the store validates a transaction at its commit:
-Mode = Literal["method 1", "method 2", "no validation"]
+# how the store decides which transactions to abort, ordered from the mode that prevents the most anomalies to the
+# one that prevents the fewest:
+Mode = Literal["method 1", "method 2", "snapshot isolation", "no validation"]
 # where a transaction is in its life:
 Status = Literal["not begun", "running", "committed", "aborted"]
-MODES: tuple[Mode, ...] = ("method 1", "method 2", "no validation")
+MODES: tuple[Mode, ...] = (
+    "method 1",
+    "method 2",
+    "snapshot isolation",
+    "no validation",
+)
 # the verdict shows the differences of at most this many serial orders (all of them for up to 3 transactions):
 MAX_ORDER_LINES: int = 6
 
@@ -68,8 +74,8 @@ class StoreWithoutValidation(TransactionalKeyValueStore):
 
     Each transaction reads the snapshot of its begin plus its own writes. A write is stopped only while another
     transaction holds an uncommitted version of the same object (see :meth:`TransactionalKeyValueStore.update_object`).
-    This is weaker than snapshot isolation, which also stops a write to an object that another transaction committed
-    after the writer's begin::
+    This is weaker than snapshot isolation (the mode "snapshot isolation"), which also stops a write to an object that
+    another transaction committed after the writer's begin::
 
         T1                          T2
         begin
@@ -95,13 +101,16 @@ class StoreWithoutValidation(TransactionalKeyValueStore):
 
 
 def make_store(mode: Mode) -> TransactionalKeyValueStore:
-    """Returns an empty store that validates according to ``mode``.
+    """Returns an empty store that decides which transactions to abort according to ``mode``.
 
     @param mode: one of :data:`MODES`
-    @return: a store with validation method 1 or 2, or a :class:`StoreWithoutValidation`
+    @return: a serializable store with validation method 1 or 2, a store with the isolation level snapshot isolation,
+        or a :class:`StoreWithoutValidation`
     """
     if mode == "no validation":
         return StoreWithoutValidation()
+    if mode == "snapshot isolation":
+        return TransactionalKeyValueStore(isolation_level="snapshot isolation")
     return TransactionalKeyValueStore(use_brute_force_validation=mode == "method 1")
 
 
@@ -527,6 +536,22 @@ def snapshot_read(
     )
 
 
+def newest_writer(store: TransactionalKeyValueStore, run: ScheduleRun, key: str) -> str:
+    """Returns the name of the transaction that wrote the newest committed version of object ``key``.
+
+    @param store: the store the schedule ran on
+    @param run: the run of the schedule, with a record per transaction
+    @param key: an object whose newest committed version was written by a transaction of the schedule
+    @return: the name of the transaction whose commit timestamp is the start of that version
+    """
+    return next(
+        other.name
+        for other in run.records
+        if other.commit_timestamp
+        == store.key_value_store[key].committed[-1].start_validity
+    )
+
+
 def abort_explanation(
     schedule: Schedule,
     initial_state: tuple[StoredObject, ...],
@@ -536,33 +561,51 @@ def abort_explanation(
     """Explains why the store aborted the transaction of the operation at ``position`` of ``schedule``.
 
     The schedule runs again up to just before that operation; then the store's state is checked the way the store
-    decided: a write fails while another transaction holds an uncommitted version of the object, a commit fails if
-    the validation finds that a read changed (method 1: the read run again at the commit timestamp returns something
+    decided: a write fails while another transaction holds an uncommitted version of the object, and under snapshot
+    isolation also if another transaction committed the object after this one began; a commit fails if the
+    validation finds that a read changed (method 1: the read run again at the commit timestamp returns something
     different from what it returns in the snapshot of the transaction's begin; method 2: another transaction that
-    committed after this one began changed an object the read returns in that snapshot or returns now). Like the store,
-    both checks leave out the transaction's own writes.
+    committed after this one began changed an object the read returns in that snapshot or returns now). Like the
+    store, both commit checks leave out the transaction's own writes.
 
     @param schedule: the schedule, as for :func:`run_to`
     @param initial_state: the objects in the store before the first operation
-    @param mode: how the store validates
+    @param mode: how the store decides which transactions to abort
     @param position: the position of an operation at which the store aborted its transaction
-    @return: e.g. ``T1 is writing x and has not committed yet`` or ``validation: read a==1 now returns {}, but in
-        the snapshot of T2's begin it returns {x: (a=1, b=0)}``
+    @return: e.g. ``T1 is writing x and has not committed yet``, ``snapshot isolation: T1 changed x and committed
+        after T2 began`` or ``validation: read a==1 now returns {}, but in the snapshot of T2's begin it returns
+        {x: (a=1, b=0)}``
     """
     store: TransactionalKeyValueStore = fresh_store(mode, initial_state)
     run: ScheduleRun = run_schedule(store, schedule, position)
     transaction_index: int = schedule[position].transaction_index
     operation: Operation = schedule[position].operation
     record: TransactionRecord = run.records[transaction_index]
-    if operation != "commit":
-        # an update or a delete: another transaction holds a work-in-progress version of the object:
-        key: str = cast(DataOperation, operation).key
-        writer_id: int = store.key_value_store[key].wip.start_validity
-        writer: str = next(
-            other.name for other in run.records if other.TA_id == writer_id
-        )
-        return f"{writer} is writing {key} and has not committed yet"
     assert record.TA_id is not None
+    if operation != "commit":
+        # an update or a delete; the store checks for another transaction's work-in-progress version first:
+        key: str = cast(DataOperation, operation).key
+        # (an insert of a new key has no entry in the store yet):
+        wip: VersionedKeyValueStore.VersionEntry | None = (
+            store.key_value_store[key].wip if key in store.key_value_store else None
+        )
+        if wip is not None and wip.start_validity != record.TA_id:
+            writer: str = next(
+                other.name for other in run.records if other.TA_id == wip.start_validity
+            )
+            return f"{writer} is writing {key} and has not committed yet"
+        # then, under snapshot isolation only, for a version of the object that another transaction committed after
+        # this one began:
+        if (
+            store.isolation_level == "snapshot isolation"
+            and store._committed_after_begin(key, record.TA_id)
+        ):
+            return (
+                f"snapshot isolation: {newest_writer(store, run, key)} changed {key} and committed after "
+                f"{record.name} began"
+            )
+        # the store aborted the write, so one of the two checks above, which follow the store's, found the reason:
+        raise AssertionError(f"no reason found for the abort at position {position}")
     # the commit timestamp the commit gets: the next value of the store's counter (see commit_transaction):
     commit_timestamp: int = store.TA_id
     # the objects written by the transactions that committed after the transaction began (method 2 checks them):
@@ -604,13 +647,7 @@ def abort_explanation(
             )
             if before == after:
                 continue
-            # the transaction whose version of the object is committed now (its commit timestamp is the version's):
-            writer = next(
-                other.name
-                for other in run.records
-                if other.commit_timestamp
-                == store.key_value_store[key].committed[-1].start_validity
-            )
+            writer = newest_writer(store, run, key)
             if returned_by(where, before):
                 return (
                     f"validation: {writer} changed {key}, which {read} returns in the snapshot of "
@@ -637,7 +674,7 @@ def run_to(
         begins before its other operations and runs nothing after its commit or abort; with n transactions, the
         verdict may replay n! orders
     @param initial_state: the objects in the store before the first operation, each object id once
-    @param mode: how the store validates
+    @param mode: how the store decides which transactions to abort
     @param operation_count: how many operations to run, from 0; a larger number runs the whole schedule
     @return: the state after the operations, with the verdict ("pending" until every transaction has ended, "error"
         if the store raised an error other than an abort, e.g. a KeyError for a delete of an object it does not have)

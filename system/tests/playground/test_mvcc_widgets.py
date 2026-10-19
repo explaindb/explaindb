@@ -433,15 +433,17 @@ class MvccPlaygroundTest(unittest.TestCase):
                 )
 
     def test_mode_labels(self) -> None:
-        """The mode buttons name how each validation method works, while their values stay the modes.
+        """The mode buttons name the isolation level (where there is one) and how each mode decides which
+        transactions to abort, while their values stay the modes.
 
-        Would fail if a label named the wrong method, or a value changed so that the store was made for another mode.
+        Would fail if a label named the wrong mode, or a value changed so that the store was made for another mode.
         """
         playground = MvccPlayground()
         self.assertEqual(
             (
-                ("method 1 (re-run reads, checksums)", "method 1"),
-                ("method 2 (write sets)", "method 2"),
+                ("serializable - method 1 (re-run reads, checksums)", "method 1"),
+                ("serializable - method 2 (write sets)", "method 2"),
+                ("snapshot isolation - first updater wins", "snapshot isolation"),
                 ("no validation", "no validation"),
             ),
             playground.mode.options,

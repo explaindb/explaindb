@@ -171,6 +171,21 @@ SCENARIOS: tuple[Scenario, ...] = (
         ],
     ),
     make_scenario(
+        "blind write",
+        "T1 and T2 begin; T2 updates x and commits; then T1 updates x without reading it (a blind write). Committing "
+        "both gives the same result as running T2, then T1, yet snapshot isolation aborts T1 at its write, as x "
+        "changed after T1 began.",
+        {"x": Row(1, 0)},
+        [
+            (1, "begin"),
+            (2, "begin"),
+            (2, DataOperation("update", "x", Row(1, 2))),
+            (2, "commit"),
+            (1, DataOperation("update", "x", Row(1, 1))),
+            (1, "commit"),
+        ],
+    ),
+    make_scenario(
         "read-only transaction",
         "T1 only reads; it sees the snapshot of its begin, although T2 commits a change before T1 reads.",
         {"x": Row(1, 0)},
