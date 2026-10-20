@@ -256,13 +256,13 @@ class GeneratedRepositoryTest(unittest.TestCase):
         self.assertEqual([], script.update(self.root))
 
     def mark_manifest(self) -> bytes:
-        """Puts a marker into the manifest's commit field and returns the manifest's bytes.
+        """Adds a top-level key the script never writes to the manifest and returns the manifest's bytes.
 
-        A refused update must leave these bytes as they are; a rewrite would replace the marker by
-        the current commit, so it shows even if the files recorded are the same.
+        A refused update must leave these bytes as they are; a rewrite writes only ``files``, so the
+        key would be gone even if the files recorded are the same (the reader ignores unknown keys).
         """
         manifest: dict = self.manifest()
-        manifest["generated_at_commit"] = "marker of the manifest before"
+        manifest["marker"] = "marker of the manifest before"
         self.write_generated("GENERATED_FROM.json", json.dumps(manifest, indent=2))
         return self.manifest_path.read_bytes()
 
@@ -324,14 +324,28 @@ class UpToDateTest(GeneratedRepositoryTest):
         self.assertEqual(["sha256", "sources", "path"], list(entry))
         self.assertEqual(["sha256", "path"], list(entry["sources"][0]))
 
-    def test_update_works_without_git(self) -> None:
-        """Without git on the search path, ``update`` still writes the manifest, with an empty commit.
+    def test_commit_field_is_accepted_and_dropped_by_a_rewrite(self) -> None:
+        """A manifest with a ``generated_at_commit`` field, which the script does not write, passes the check.
 
-        Would fail if a missing git program made ``update`` crash, e.g. in a minimal container.
+        Both updates then write only ``files``.
+
+        Would fail if the reader refused such a manifest, or if ``update`` or ``update_dependencies``
+        wrote the field or kept it from the manifest before.
         """
-        with mock.patch.dict(os.environ, {"PATH": ""}):
-            self.update_cleanly()
-        self.assertEqual("", self.manifest()["generated_at_commit"])
+        self.update_cleanly()
+        for name, rewrite in [
+            ("update", script.update),
+            ("update_dependencies", script.update_dependencies),
+        ]:
+            with self.subTest(name):
+                manifest: dict = self.manifest()
+                manifest["generated_at_commit"] = "abc1234"
+                self.write_generated(
+                    "GENERATED_FROM.json", json.dumps(manifest, indent=2)
+                )
+                self.assertEqual([], script.check(self.root))
+                self.assertEqual([], rewrite(self.root))
+                self.assertEqual(["files"], list(self.manifest()))
 
 
 class ManifestReadTest(GeneratedRepositoryTest):
@@ -379,10 +393,10 @@ class ManifestReadTest(GeneratedRepositoryTest):
 
         def manifest_with(entry: dict) -> str:
             """Returns a manifest whose only entry is the given one."""
-            return json.dumps({"generated_at_commit": "abc1234", "files": [entry]})
+            return json.dumps({"files": [entry]})
 
         expected: dict[str, str] = {
-            '{"generated_at_commit": "abc1234"}': "KeyError('files')",
+            "{}": "KeyError('files')",
             json.dumps(
                 {"files": {"src/mvcc.rs": {"sources": {}, "sha256": "abc"}}}
             ): "TypeError(",

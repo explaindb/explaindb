@@ -81,7 +81,6 @@ import hashlib
 import json
 import os
 import re
-import subprocess
 import sys
 import tempfile
 from dataclasses import dataclass
@@ -783,24 +782,6 @@ def check(root: Path) -> list[str]:
     return problems
 
 
-def current_commit(root: Path) -> str:
-    """Returns the short hash of the commit checked out, for information in the manifest.
-
-    @param root: the repository root
-    @return: the short hash, or an empty string outside a git repository or without git
-    """
-    try:
-        return subprocess.run(
-            ["git", "rev-parse", "--short", "HEAD"],
-            cwd=root,
-            capture_output=True,
-            text=True,
-            check=False,
-        ).stdout.strip()
-    except OSError:
-        return ""
-
-
 def update(root: Path) -> list[str]:
     """Rewrites the manifest from the generated files as they are now; call it right after regenerating.
 
@@ -888,13 +869,9 @@ def write_manifest(root: Path, entries: list[RecordedFile]) -> list[str]:
         return [
             f"{(GENERATED / MANIFEST).as_posix()} is a symbolic link; it is not written through"
         ]
-    manifest: dict[str, object] = {
-        # for information only, the commit checked out while regenerating (the regeneration itself is committed
-        # after the update); the check compares content hashes, so it does not depend on the git history:
-        "generated_at_commit": current_commit(root),
-        "files": entries,
-    }
-    manifest_path.write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
+    manifest_path.write_text(
+        json.dumps({"files": entries}, indent=2) + "\n", encoding="utf-8"
+    )
     return []
 
 
