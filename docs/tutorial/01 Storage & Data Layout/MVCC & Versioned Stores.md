@@ -36,12 +36,13 @@ key "x":   v1@t1 ──── v2@t5 ──── v3@t9        (version history, 
 
 The MVCC store supports two isolation levels, chosen when the store is created with
 `TransactionalKeyValueStore(isolation_level=...)`. In both, a transaction reads the snapshot of its begin plus its own
-writes, and a transaction that writes an object which another transaction is still writing is aborted. They differ in
-what else aborts a transaction:
+writes (snapshot read), and a transaction that writes an object which another transaction is still writing is
+aborted. They differ in what else aborts a transaction:
 
-- **serializable** (default): at its commit, the store checks whether a transaction that committed in the meantime
-  changed something this transaction read; if so, it is aborted. Because of this check, and as commits are installed
-  one at a time, the committed transactions have the same effect as if they had run one after another.
+- **serializable** (default): at the commit of a transaction that wrote something, the store checks whether a
+  transaction that committed in the meantime changed something it read; if so, it is aborted. Because of this check,
+  and as commits are installed one at a time, the committed transactions have the same effect as if they had run one
+  after another.
 - **snapshot isolation**: reads are not checked. Instead, a transaction that writes an object is aborted at once if
   another transaction changed that object and committed after the writer began (*first updater wins*).
 

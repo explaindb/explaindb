@@ -210,3 +210,6 @@ private method, `_abort_if_committed_after_begin`, built on `_committed_after_be
 
 Rust port (2026-10-19): the parity in the Rust port, listed above as out of scope, is feature 019
 ([docs/changes/019-regenerate-rust](../019-regenerate-rust/DECISION.md)).
+
+Snapshot read (2026-10-20): the older comments that said "under snapshot isolation" for reading now say "snapshot read",
+and the class docstring of `TransactionalKeyValueStore` no longer explains them (deferred above).

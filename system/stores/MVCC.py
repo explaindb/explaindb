@@ -95,13 +95,12 @@ class TransactionalKeyValueStore(VersionedKeyValueStore, ACIDStore):
     transaction.
 
     The store supports two isolation levels, chosen in ``__init__``. In both, a transaction reads the snapshot of its
-    begin plus its own writes (snapshot read; older comments in this file that say "under snapshot isolation" for
-    reading, e.g. in ``_get_visible_object_version``, mean this snapshot read, which both levels use). In both, a
-    transaction that writes an object which another transaction is still writing (not yet committed) is aborted. In
-    addition:
+    begin plus its own writes (snapshot read). In both, a transaction that writes an object which another transaction
+    is still writing (not yet committed) is aborted. In addition:
 
-    - serializable (default): at its commit, the store checks whether a transaction that committed in the meantime
-      changed something this transaction read; if so, it is aborted. The write skew anomaly is detected and avoided.
+    - serializable (default): at the commit of a transaction that wrote something, the store checks whether a
+      transaction that committed in the meantime changed something it read; if so, it is aborted. The write skew
+      anomaly is detected and avoided.
     - snapshot isolation: reads are not checked. Instead, a transaction that writes an object is aborted at once if
       another transaction changed that object and committed after the writer began. Together with the rule above,
       of two concurrent transactions that write the same object, the later writer is aborted at once (first updater
@@ -184,21 +183,21 @@ class TransactionalKeyValueStore(VersionedKeyValueStore, ACIDStore):
         self, object_id: str, timestamp: int, ignore_wip=False
     ) -> object | None:
         """
-        Gets the visible version of object <object_id> for TA <TA_id> under snapshot isolation.
+        Gets the version of object <object_id> visible at <timestamp>, i.e. in the snapshot of the transaction whose
+        id is <timestamp> (the validation also passes a commit timestamp).
 
         This entails:
-        - getting the most recent committed version of the object that is visible to TA <TA_id> under snapshot isolation
-        - this is either the wip entry created by TA <TA_id> or the most recent committed version of the object
-        - if the most recent committed version was deleted, None is returned
-        - if the object did not exist yet in this snapshot (no committed version with start < TA_id), None is returned
-        - the returned method must have a start < TA_id
+        - the wip entry created by the transaction <timestamp>, if there is one and wip entries are not ignored;
+        - otherwise the most recent committed version with a start before <timestamp>;
+        - None if that version is a delete, or if there is no committed version with a start before <timestamp> (the
+          object did not exist yet in this snapshot)
 
         @param object_id: the object id of the object to be read
-        @param timestamp: the timestamp, i.e. the transaction id of the transaction reading the object
+        @param timestamp: the timestamp, typically the transaction id of the transaction reading the object
         @param ignore_wip: if set to True, the wip entries are ignored, i.e. only committed versions are considered.
 
-        @return: the visible version of the object for TA <TA_id> under snapshot isolation, None if it was deleted
-        or did not exist yet in this snapshot
+        @return: the version of the object visible at <timestamp>, None if it was deleted or did not exist yet in
+        this snapshot
         """
 
         if object_id not in self.key_value_store:
@@ -226,7 +225,7 @@ class TransactionalKeyValueStore(VersionedKeyValueStore, ACIDStore):
 
         # post/else: there is no wip entry for object <object_id> by TA <TA_id>
 
-        # get all committed versions of this object (under snapshot isolation) from the system:
+        # get all committed versions of this object from the system:
         committed_object_versions: list[VersionedKeyValueStore.VersionEntry] = (
             self.key_value_store[object_id].committed
         )
@@ -247,7 +246,7 @@ class TransactionalKeyValueStore(VersionedKeyValueStore, ACIDStore):
                 "committed object versions are not ordered by their validity start"
             )
 
-        # get the version of this object visible to TA <TA_id> under snapshot isolation:
+        # get the version of this object visible in the snapshot of TA <TA_id>:
         visible_version_to_TA_id_list: list[VersionedKeyValueStore.UpdateEntry] = list(
             filter(
                 # version must have existed (in the sense of committed! NOT started!) before TA_id started:
@@ -264,7 +263,7 @@ class TransactionalKeyValueStore(VersionedKeyValueStore, ACIDStore):
 
         # get the most recent visible version to this TA_id:
         # note that there may be multiple committed and also deleted versions of the object
-        # that are visible to TA <TA_id> under snapshot isolation
+        # that are visible in the snapshot of TA <TA_id>
         # so, we return the last one in the list:
         last_committed_version_visible_to_TA_id: VersionedKeyValueStore.UpdateEntry = (
             visible_version_to_TA_id_list[-1]
@@ -282,41 +281,13 @@ class TransactionalKeyValueStore(VersionedKeyValueStore, ACIDStore):
 
         return last_committed_version_visible_to_TA_id.value
 
-    def _read_more_recent_committed_versions_iterable(
-        self, where: Clause = None
-    ) -> ItemsView[object]:
-        """Defines an iterable with all objects that were committed after TA_id <TA_id>.
-
-        @param where: a where clause expression that is evaluated against the actual data (not the object ids), if it
-        is None, all objects are returned
-
-        @return: an iterable of the objects matching (not just the object_ids!)
-        """
-
-        # the following can be quite expensive to execute without indexes:
-        # a better method would be to delegate to the query optimizer and make use of indexes
-        # loop over all entries from tuples touched in the kv-store:
-        entry: VersionedKeyValueStore.KVStoreEntry
-        for _, entry in self.key_value_store.items():
-            # get the most recent committed version of the object available (rather than the version seen under
-            # snapshot isolation), i.e. the last element in the committed list:
-            most_recent_entry: VersionedKeyValueStore.UpdateEntry = entry.committed[-1]
-
-            # if the last committed version was deleted, we skip it:
-            if most_recent_entry.deleted:
-                continue
-
-            # return the object if the where clause is None or the object matches the where clause:
-            if where is None or where.evaluate(most_recent_entry.value):
-                yield most_recent_entry.value
-
     def _read_objects_iterable(
         self, timestamp: int, where: Clause = None, ignore_wip=False
     ) -> ItemsView[str, list[object]]:
         """Returns an iterable with all objects that match the WHERE_clause.
 
         @param timestamp: the timestamp to use for reading data, typically a transaction ID,
-        required for snapshot isolation
+        required for the snapshot read
         @param where: a where clause expression that is evaluated against the actual data (not the object ids)
         @param ignore_wip: if set to True, the wip entries are ignored, i.e. only committed versions are considered.
         @return: an iterator over the object ids that match the given conditions
@@ -325,7 +296,7 @@ class TransactionalKeyValueStore(VersionedKeyValueStore, ACIDStore):
         # TODO: following should be delegated to the query optimizer and make use of indexes:
         object_id: str
         for object_id in self.key_value_store.keys():
-            # get the most recent visible version of the object to TA <TA_id> under snapshot isolation:
+            # get the most recent version of the object visible in the snapshot of TA <TA_id>:
             _object: object = self._get_visible_object_version(
                 object_id, timestamp, ignore_wip=ignore_wip
             )
@@ -346,8 +317,8 @@ class TransactionalKeyValueStore(VersionedKeyValueStore, ACIDStore):
         compared by identity; this is safe as committed versions are never removed, so no other object can get the
         address of a version that was read. Equal objects with different reprs only cause unnecessary aborts.
 
-        @param timestamp: the timestamp to use for reading data, typically a transaction ID, required for snapshot
-        isolation
+        @param timestamp: the timestamp to use for reading data, typically a transaction ID, required for the
+        snapshot read
         @param where: a where clause expression that is evaluated against the actual data (not the object ids)
         @param ignore_wip: if set to True, the wip entries are ignored, i.e. only committed versions are considered
 
@@ -377,13 +348,14 @@ class TransactionalKeyValueStore(VersionedKeyValueStore, ACIDStore):
         checksum is also computed over the objects matching the WHERE_clause in the committed snapshot of TA <TA_id>,
         i.e. without TA <TA_id>'s own work-in-progress changes.
 
-        In any case, the where clause (and checksum) are added to the read set of TA <TA_id>.
+        Unless collect_read_clause is False, the where clause (and checksum) are added to the read set of TA <TA_id>.
 
-        @param TA_id: the transaction id reading the data, required for snapshot isolation
+        @param TA_id: the transaction id reading the data, required for the snapshot read
         @param where: a where clause expression that is evaluated against the actual data (not the object ids)
-        @param collect_read_clause: if set to True, the where clause is not added to the read set of TA <TA_id>
+        @param collect_read_clause: if set to True (the default), the where clause is added to the read set of
+        TA <TA_id>; False reads without adding it
 
-        @return: a list over the object ids that match the given conditions
+        @return: a list of (object id, object) pairs that match the given conditions
         """
 
         if TA_id not in self.TD:
@@ -656,8 +628,8 @@ class TransactionalKeyValueStore(VersionedKeyValueStore, ACIDStore):
 
                 # 2. an object <object_id> was modified in any way, i.e. updated, deleted, or inserted and committed
                 # by another transaction while TA <TA_id> was still running
-                # -> there is a new version of this object in the committed list superseding the version we read under
-                # snapshot isolation
+                # -> there is a new version of this object in the committed list superseding the version in our
+                # snapshot (if any)
 
                 # There are the following subcases:
                 # (2a.) the object was updated/inserted, but previously AND now it is NOT returned -> no conflict
@@ -768,7 +740,7 @@ class TransactionalKeyValueStore(VersionedKeyValueStore, ACIDStore):
                 for object_id in combined_write_set:
                     # for each object_id in the combined write set, we check whether the object was visible by
                     # TA <TA_id>
-                    # get the version of the object TA <TA_id> read under snapshot isolation, i.e. ignoring the wip
+                    # get the version of the object in the snapshot of TA <TA_id>, i.e. ignoring the wip
                     # entry of TA <TA_id> itself (None if it did not exist in or was deleted from the snapshot):
                     _object_as_of_TA_ID: object | None = (
                         self._get_visible_object_version(

@@ -408,7 +408,7 @@ class IndexingTest(AbstractUnitTest):
                                                                 read a==5 -> sees (5, 5)
 
         The index holds all versions of an object, including uncommitted ones. Reads do not consult the index;
-        which version a transaction sees is decided by the store's snapshot rule.
+        which version a transaction sees is decided by the store's snapshot read.
         """
         store = IndexedTransactionalKeyValueStore()
         store.put("1", IndexingTest.Stuff(2, 3))

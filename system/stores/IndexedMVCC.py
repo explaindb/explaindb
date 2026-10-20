@@ -149,8 +149,8 @@ class IndexedTransactionalKeyValueStore(TransactionalKeyValueStore, IndexedACIDS
 
         # So an index lookup works like this:
         # 1. call the index to get the object_ids with potential matches
-        # 2. for each object_id returned, get the most recent visible version of the object to TA <TA_id> under
-        # snapshot isolation
+        # 2. for each object_id returned, get the most recent version of the object visible in the snapshot of
+        # TA <TA_id>
         # 3. check whether the object matches the where clause
         # 4. if it does, add it to the result set
 

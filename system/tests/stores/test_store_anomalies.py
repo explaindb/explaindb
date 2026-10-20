@@ -21,7 +21,7 @@
 # Test modules use self-documenting method/class names and module-level
 # fixtures, so pylint's naming and docstring checks are relaxed here.
 # pylint: disable=invalid-name,missing-class-docstring,missing-function-docstring
-"""Tests for transactional store isolation and anomalies (snapshot isolation, write skew)."""
+"""Tests for transactional store isolation and anomalies (snapshot read, isolation levels, write skew)."""
 
 import hashlib
 import unittest
@@ -119,7 +119,7 @@ class StoreTestAnomalies(AbstractUnitTest):
         # write set is still there:
         self.assertEqual(len(tkvs.TD[TA_id].write_set), len(object_ids_to_test))
 
-    def test_store_snapshot_isolation_TA_self_modification(self):
+    def test_snapshot_read_sees_own_wip_version(self):
         """A TA that updated an object keeps reading its own work-in-progress version, even after a newer committed
         version appears; the test adds that version directly to the store, as if another TA had committed it.
 
@@ -180,11 +180,12 @@ class StoreTestAnomalies(AbstractUnitTest):
         self.assertEqual(len(result_reread), 1)
 
         item: tuple[str, object] = result_reread[0]
-        # snapshot isolation must return the same object as before:
+        # the snapshot read still returns the transaction's own wip version, not the newer committed one:
         self.assertEqual(new_version, item[1])
 
-    def test_snapshot_isolation_read_correct_version(self):
-        """Tests if the store correctly handles reads from the store in particular w.r.t. snapshot isolation"""
+    def test_snapshot_read_returns_correct_version(self):
+        """A snapshot read returns the newest committed version that began before the reader; a committed list out of
+        order raises an error."""
 
         tkvs = TransactionalKeyValueStore()
 
@@ -221,7 +222,7 @@ class StoreTestAnomalies(AbstractUnitTest):
         )
 
         # assert of the store must fail now:
-        with self.assertRaises(Exception):
+        with self.assertRaisesRegex(RuntimeError, "not ordered"):
             tkvs._get_visible_object_version(object_id, 6)
 
     def test_read_write_conflict(self):
@@ -295,7 +296,7 @@ class StoreTestAnomalies(AbstractUnitTest):
         self.assertEqual(len(tkvs.key_value_store[object_id].committed), 2)
 
         # TA_ID_1 must not see the new value even though TA_ID_2 has already committed,
-        # TA_ID_1 still sees the old object as it is running under snapshot isolation -> repeatable reads
+        # TA_ID_1 still sees the old object in its snapshot read -> repeatable reads
         result_reread = list(tkvs.read_objects(TA_ID_1, where=where))
         self.assertEqual(result_initial, result_reread)
 
@@ -1067,7 +1068,7 @@ class StoreTestAnomalies(AbstractUnitTest):
         read a==42 -> still sees A=(42, 0)
         commit -> succeeds
 
-        t_i writes nothing, so it is validated against its own snapshot, in which nothing changed. The same schedule
+        t_i writes nothing, so the validation passes without checking its reads. The same schedule
         with a write of t_i aborts, see test_validation_detects_lost_update_on_read_object. Checked for both
         validation methods.
         """
@@ -1091,7 +1092,7 @@ class StoreTestAnomalies(AbstractUnitTest):
                 tkvs.update_object("A", StoreTestAnomalies.Stuff(7, 0), t_j)
                 tkvs.commit_transaction(t_j)
 
-                # snapshot isolation: t_i still sees the old version of A:
+                # snapshot read: t_i still sees the old version of A:
                 result_reread: list[tuple[str, object]] = tkvs.read_objects(
                     t_i, WHERE_Clause("a", "==", 42)
                 )
@@ -1483,6 +1484,59 @@ class StoreTestAnomalies(AbstractUnitTest):
 
                 # t_i left no wip entry on x:
                 self.assertIsNone(tkvs.key_value_store[object_id].wip)
+
+    def test_snapshot_isolation_level_reports_wip_writer_before_commit_after_begin(
+        self,
+    ):
+        """Under snapshot isolation, a write to an object that another transaction is still writing and that a third
+        transaction committed after the writer began is aborted with the reason of the uncommitted writer.
+
+        t_i                     t_j                     t_k
+        begin
+                                begin
+                                update A
+                                commit
+                                                        begin
+                                                        update A
+        update or delete A
+        -> aborted: another transaction is currently modifying A
+
+        update_object and delete_object check for a wip version of another transaction first and only then for a
+        commit after the writer began. t_k may write A, as it began after t_j's commit. The playground test
+        test_uncommitted_writer_is_checked_before_snapshot_isolation in system/tests/playground/test_mvcc_playground.py
+        explains the same order. Checked for t_i updating and deleting A.
+        """
+        write_kinds: list[WriteKind] = ["update", "delete"]
+        for write_i in write_kinds:
+            with self.subTest(write_i=write_i):
+                tkvs: TransactionalKeyValueStore = TransactionalKeyValueStore(
+                    isolation_level="snapshot isolation"
+                )
+                object_id: str = "A"
+                tkvs.put(object_id, StoreTestAnomalies.Stuff(1, 0))
+
+                # t_i begins, then t_j updates A and commits after t_i began:
+                t_i: int = tkvs.begin_transaction()
+                t_j: int = tkvs.begin_transaction()
+                self._write("update", tkvs, object_id, t_j)
+                tkvs.commit_transaction(t_j)
+
+                # t_k begins after t_j's commit, so it may update A and holds a wip version of A:
+                t_k: int = tkvs.begin_transaction()
+                self._write("update", tkvs, object_id, t_k)
+
+                # t_i writes A: both rules apply, the uncommitted writer t_k is reported:
+                with self.assertRaisesRegex(
+                    TransactionAbortedException,
+                    "another transaction is currently modifying object A already",
+                ):
+                    self._write(write_i, tkvs, object_id, t_i)
+
+                # t_k's wip version of A is untouched:
+                self.assertIsNotNone(tkvs.key_value_store[object_id].wip)
+                self.assertEqual(
+                    tkvs.key_value_store[object_id].wip.start_validity, t_k
+                )
 
     def test_serializable_level_commits_blind_write_after_concurrent_commit(self):
         """Under serializable, a transaction that writes an object another transaction changed and committed after

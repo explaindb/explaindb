@@ -70,3 +70,7 @@ checks (another transaction's work-in-progress version is reported before the sn
 its own merge request, first in Python, then regenerated (user decision). The doc comments of the older tests in
 `tests/stores/test_store_anomalies.rs` follow the current Python docstrings, too; `tests/common/mod.rs` and
 `tests/indexes/test_indexing.rs` needed no change, as the parts of their Python sources they port did not change.
+
+Order of the write checks (2026-10-20): the test in Python is
+`test_snapshot_isolation_level_reports_wip_writer_before_commit_after_begin`, in the merge request that also renamed
+"snapshot isolation" to "snapshot read" where reading is meant; the Rust port follows by `/regenerate-rust`.
