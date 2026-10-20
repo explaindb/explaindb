@@ -28,11 +28,11 @@ All changes are made in Python; the Rust code is then generated again. Therefore
   [`generated/python_sources/`](../python_sources/README.md), and `--diff` compares it with the current source.
 - After regenerating every Rust file of a changed source, run `python3 .ci/check_generated.py --update` from the
   repository root to record the new hashes and store the copies, and commit the new copies with the Rust files.
-- One exception: a dependency or Rust version update may change `Cargo.toml`, `Cargo.lock` and
-  `rust-toolchain.toml` directly (e.g. to fix a finding of the dependency audit). Record it with
+- One exception: a person may change `Cargo.toml`, `Cargo.lock` and `rust-toolchain.toml` directly, e.g. a
+  dependency or Rust version update to fix a finding of the dependency audit. Record it with
   `python3 .ci/check_generated.py --update-dependencies`, which rewrites only the entries of these three files;
-  `--update` would also record out-of-date or hand-edited Rust files as current. A later regeneration keeps the
-  versions in these files.
+  `--update` would also record out-of-date or hand-edited Rust files as current. A regeneration keeps these files as
+  they are: `--update` refuses while one of them differs from the manifest.
 - Hidden tool settings (`.cargo/`, `.rustfmt.toml`, `.clippy.toml`, in any folder) and symbolic links are not allowed
   here, as they could change the build or the checks unnoticed.
 - GitLab folds the generated files in merge request diffs (`gitlab-generated` in

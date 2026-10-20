@@ -56,16 +56,17 @@ The update keeps a copy of every recorded source version in ``generated/python_s
 its hash and never deleted, so that ``--diff`` can show what changed in a source since a generated file was generated
 from it, also after squash merges.
 
-One kind of change in the generated folder is allowed without regenerating: a dependency or Rust version update in
-``Cargo.toml``, ``Cargo.lock`` and ``rust-toolchain.toml`` (e.g. to fix a finding of the dependency audit). Record it
-with ``--update-dependencies``, which rewrites only the entries of these three files: ``--update`` would also record
-out-of-date or hand-edited Rust files as current. A later regeneration keeps the versions in these files.
+One kind of change in the generated folder is allowed without regenerating: a change of ``Cargo.toml``,
+``Cargo.lock`` and ``rust-toolchain.toml`` that a person decided, e.g. a dependency or Rust version update to fix a
+finding of the dependency audit. Record it with ``--update-dependencies``, which rewrites only the entries of these
+three files: ``--update`` would also record out-of-date or hand-edited Rust files as current. A regeneration keeps
+these files as they are: ``--update`` refuses while one of them differs from the manifest.
 
 Usage, from the repository root::
 
     python3 .ci/check_generated.py                         # check; exit status 1 if anything is reported
     python3 .ci/check_generated.py --update                # after regenerating: rewrite the whole manifest
-    python3 .ci/check_generated.py --update-dependencies   # after a dependency update: record only the Cargo files
+    python3 .ci/check_generated.py --update-dependencies   # after a change of the Cargo files: record only them
     python3 .ci/check_generated.py --diff [FILE ...]       # before regenerating: what changed in the Python sources
                                                            # (FILE relative to generated/rust/; all files if none)
 
@@ -108,7 +109,7 @@ SOURCE_FOLDER: str = "system/"
 MODULE: re.Pattern[str] = re.compile(
     r"^\s*(?:pub(?:\([^)]*\))?\s+)?mod\s+(\w+)\s*;", re.MULTILINE
 )
-# the files a dependency or Rust version update may change directly (see --update-dependencies):
+# the Cargo files, which a person changes directly and a regeneration keeps (see --update-dependencies):
 DEPENDENCY_FILES: frozenset[str] = frozenset(
     {"Cargo.toml", "Cargo.lock", "rust-toolchain.toml"}
 )
@@ -787,10 +788,24 @@ def update(root: Path) -> list[str]:
 
     @param root: the repository root
     @return: the problems that keep the manifest from being written: those of the generated files (see
-        current_files); those of the folder of the copies (see copy_folder_problems); a source that changed while the
-        update ran; a manifest that is a symbolic link. Empty on success
+        current_files); a Cargo file changed, added or deleted since the manifest was written (record it first with
+        update_dependencies); those of the folder of the copies (see copy_folder_problems); a source that changed
+        while the update ran; a manifest that is a symbolic link. Empty on success
     """
     files, problems = current_files(root)
+    # a regeneration keeps the Cargo files: one changed, added or deleted since the manifest was written is refused
+    recorded, _ = read_manifest(root)
+    if recorded is not None:
+        current: dict[str, str] = {file.path: file.sha256 for file in files}
+        # a Cargo file that could not be read is reported already:
+        reported: set[str] = {problem.split(":")[0] for problem in problems}
+        problems += [
+            f"{path}: differs from the manifest (changed, added or deleted); a regeneration keeps the Cargo files, "
+            "and a change of them is decided by a person and recorded with --update-dependencies before the update"
+            for path in sorted(DEPENDENCY_FILES)
+            if path not in reported
+            and current.get(path) != recorded.get(path, {}).get("sha256")
+        ]
     # a missing copy is no problem here: the copies of the current sources are written below
     problems += copy_folder_problems(root)
     if problems:
@@ -802,7 +817,7 @@ def update(root: Path) -> list[str]:
 
 
 def update_dependencies(root: Path) -> list[str]:
-    """Rewrites only the manifest entries of Cargo.toml, Cargo.lock and rust-toolchain.toml, after a dependency update.
+    """Rewrites only the manifest entries of Cargo.toml, Cargo.lock and rust-toolchain.toml, after a change of them.
 
     Every other entry stays as it is, so out-of-date or hand-edited Rust files are still reported afterwards. The
     three files name no Python source (a first line naming one is refused), so no copy is stored.
@@ -1072,7 +1087,7 @@ def main(arguments: list[str]) -> int:
     mode.add_argument(
         "--update-dependencies",
         action="store_true",
-        help="record only Cargo.toml, Cargo.lock and rust-toolchain.toml after a dependency update",
+        help="record only Cargo.toml, Cargo.lock and rust-toolchain.toml after a change of them",
     )
     mode.add_argument(
         "--diff",

@@ -190,6 +190,14 @@ def missing_current_copy(name: str, source: str) -> str:
     )
 
 
+def cargo_changed(path: str) -> str:
+    """Returns the problem ``update`` reports for a Cargo file that differs from its entry in the manifest."""
+    return (
+        f"{path}: differs from the manifest (changed, added or deleted); a regeneration keeps the Cargo files, "
+        "and a change of them is decided by a person and recorded with --update-dependencies before the update"
+    )
+
+
 def corrupt_copy(name: str) -> str:
     """Returns the problem reported for a copy whose content does not match its name: delete it, then see the check."""
     return (
@@ -1305,7 +1313,10 @@ class UpdateDependenciesTest(GeneratedRepositoryTest):
     """Checks ``update_dependencies``, which records only Cargo.toml, Cargo.lock and rust-toolchain.toml anew."""
 
     def setUp(self) -> None:
-        """Adds the three dependency files and writes the manifest."""
+        """Adds the three dependency files and writes the manifest.
+
+        Without a manifest, the update records the Cargo files as they are.
+        """
         super().setUp()
         self.write_generated(
             "Cargo.toml",
@@ -1396,7 +1407,7 @@ class UpdateDependenciesTest(GeneratedRepositoryTest):
         reported as not in the manifest.
         """
         (self.generated / "rust-toolchain.toml").unlink()
-        self.update_cleanly()
+        self.assertEqual([], script.update_dependencies(self.root))
         self.write_generated(
             "rust-toolchain.toml",
             "# Code generated for the Rust port (no Python source). DO NOT EDIT.\n"
@@ -1407,6 +1418,87 @@ class UpdateDependenciesTest(GeneratedRepositoryTest):
             digest(self.generated / "rust-toolchain.toml"),
             self.recorded("rust-toolchain.toml")["sha256"],
         )
+        self.assertEqual([], script.check(self.root))
+
+    def test_update_refuses_on_a_changed_added_or_deleted_cargo_file(self) -> None:
+        """A Cargo file changed, added or deleted since the manifest was written makes ``update`` refuse.
+
+        The update writes neither copies nor the manifest, so a Rust file regenerated in the same run
+        is not recorded either. Would fail if ``update`` recorded a Cargo change that no person
+        decided, or compared only the Cargo files on disk and in the manifest, missing an added or
+        a deleted one.
+        """
+        toolchain: bytes = (self.generated / "rust-toolchain.toml").read_bytes()
+        (self.generated / "rust-toolchain.toml").unlink()
+        self.assertEqual([], script.update_dependencies(self.root))
+        before: bytes = self.mark_manifest()
+        copies: dict[str, bytes] = self.copies()
+        self.write("system/stores/mvcc.py", "class MVCC:\n    x = 1\n")
+        self.write_generated(
+            "src/mvcc.rs",
+            header("system/stores/mvcc.py") + "\npub struct Mvcc { x: i32 }\n",
+        )
+
+        def set_content(target: Path, content: bytes | None) -> None:
+            """Writes the bytes to the file, or deletes it if they are ``None``."""
+            if content is None:
+                target.unlink()
+            else:
+                target.write_bytes(content)
+
+        changes: dict[str, bytes | None] = {
+            "Cargo.toml": (self.generated / "Cargo.toml").read_bytes()
+            + b'serde = "1"\n',
+            "rust-toolchain.toml": toolchain,  # not in the manifest
+            "Cargo.lock": None,
+        }
+        for path, content in changes.items():
+            with self.subTest(path=path):
+                target: Path = self.generated / path
+                original: bytes | None = (
+                    target.read_bytes() if target.exists() else None
+                )
+                set_content(target, content)
+                try:
+                    self.assertEqual([cargo_changed(path)], script.update(self.root))
+                    self.assertEqual(before, self.manifest_path.read_bytes())
+                    self.assertEqual(copies, self.copies())
+                finally:
+                    set_content(target, original)
+
+    def test_update_reports_an_unreadable_cargo_file_once(self) -> None:
+        """A Cargo.toml without its first line gives ``update`` only the first-line problem.
+
+        Would fail if ``update`` also reported the file as changed since it was recorded, because
+        it is missing from the files that could be read.
+        """
+        self.write_generated("Cargo.toml", '[dependencies]\nrand = "0.8"\n')
+        self.assertEqual([f"Cargo.toml: {NO_HEADER}"], script.update(self.root))
+
+    def test_update_with_an_unreadable_manifest_records_the_cargo_files(self) -> None:
+        """With an unreadable manifest, ``update`` records the Cargo files as they are, so the check passes.
+
+        Would fail if ``update`` treated an unreadable manifest as one without entries and refused
+        every Cargo file as added, so a broken manifest could not be written anew.
+        """
+        self.write_generated("GENERATED_FROM.json", '{"files": [')
+        self.update_cleanly()
+        self.assertEqual([], script.check(self.root))
+
+    def test_update_succeeds_after_the_cargo_change_is_recorded(self) -> None:
+        """After ``update_dependencies`` recorded a changed Cargo.lock, ``update`` records a regenerated Rust file.
+
+        Would fail if ``update`` compared the Cargo files with anything but the manifest, so it
+        refused also once the change was recorded.
+        """
+        self.append_generated("Cargo.lock", 'version = "0.9.0"\n')
+        self.write("system/stores/mvcc.py", "class MVCC:\n    x = 1\n")
+        self.write_generated(
+            "src/mvcc.rs",
+            header("system/stores/mvcc.py") + "\npub struct Mvcc { x: i32 }\n",
+        )
+        self.assertEqual([], script.update_dependencies(self.root))
+        self.update_cleanly()
         self.assertEqual([], script.check(self.root))
 
     @unittest.skipUnless(SYMLINKS, "this system cannot create symbolic links")

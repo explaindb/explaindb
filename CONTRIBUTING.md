@@ -335,11 +335,12 @@ sources. Regenerate every Rust file of a changed source, then record the new has
 `generated_rust_check` runs the check without `--update` and reports Rust files that are out of
 date or were edited by hand, and missing or corrupt copies or other files in
 `generated/python_sources/`; the job fails on main and in the nightly pipeline and
-only warns in a merge request. A dependency or Rust version update is the one change made directly
-in `Cargo.toml`, `Cargo.lock` and `rust-toolchain.toml`; record it with
-`python3 .ci/check_generated.py --update-dependencies`, which rewrites only the entries of these
-three files (`--update` would also record out-of-date or hand-edited Rust files as current). A later
-regeneration keeps the versions in these files.
+only warns in a merge request. A change of `Cargo.toml`, `Cargo.lock` and `rust-toolchain.toml` that
+a person decided (e.g. a dependency or Rust version update) is the one change made directly; record
+it with `python3 .ci/check_generated.py --update-dependencies`, which rewrites only the entries of
+these three files (`--update` would also record out-of-date or hand-edited Rust files as current). A
+regeneration keeps these files as they are: `--update` refuses while one of them differs from the
+manifest.
 
 The generated code follows the same rules as the Python code, written the Rust way. The CI job
 `rust_test` fails if one of these checks fails (run them in `generated/rust/`):
