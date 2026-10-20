@@ -322,7 +322,8 @@ the interface documentation.
 The Rust port of the store core in [`generated/rust/`](generated/rust) is **generated** from the
 Python code in `system/` and never edited by hand: change the Python code, then generate the Rust
 code again (see
-[`generated/rust/README.md`](generated/rust/README.md#generated-code-change-the-python-not-this-folder)).
+[`generated/rust/README.md`](generated/rust/README.md#generated-code-change-the-python-not-this-folder)),
+for example with the Claude Code skill [`/regenerate-rust`](.claude/commands/regenerate-rust.md).
 Every generated file names its Python sources in its first line
 (`// Code generated from ... DO NOT EDIT.`; only `Cargo.lock`, written by Cargo, and the manifest
 have none), and its folders mirror `system/`. To see what changed in the Python sources of

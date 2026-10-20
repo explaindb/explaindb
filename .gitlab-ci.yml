@@ -58,6 +58,7 @@ stages:
 # top-level README.md does not count as docs-only: a unit test
 # (system/tests/repo/test_readme_notebooks.py) checks its notebook table. Neither
 # does generated/rust/README.md: rust_test runs its code example as a test.
+# Nor does .claude/commands/regenerate-rust.md: a unit test checks the options it names.
 detect-docs-only:
   stage: prepare
   extends: .not_in_scheduled_pipelines
@@ -75,10 +76,11 @@ detect-docs-only:
         echo "Changed files vs $BASE:"
         printf '%s\n' "$CHANGED"
         # docs-only: at least one change, no changed file is a non-.md file, and
-        # neither README.md (its notebook table is tested) nor
-        # generated/rust/README.md (its code example is tested) is among them
+        # none of README.md (its notebook table is tested),
+        # generated/rust/README.md (its code example is tested) and
+        # .claude/commands/regenerate-rust.md (its options are tested) is among them
         if [ -n "$CHANGED" ] && ! printf '%s\n' "$CHANGED" | grep -qvE '\.md$' \
-            && ! printf '%s\n' "$CHANGED" | grep -qxE 'README\.md|generated/rust/README\.md'; then
+            && ! printf '%s\n' "$CHANGED" | grep -qxE 'README\.md|generated/rust/README\.md|\.claude/commands/regenerate-rust\.md'; then
           DOCS_ONLY=true
         fi
       fi

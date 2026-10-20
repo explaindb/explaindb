@@ -133,7 +133,7 @@ DANGEROUS: re.Pattern[str] = re.compile(
 )
 # the build script Cargo runs before every build when it finds it at the top of the crate:
 BUILD_SCRIPT: str = "build.rs"
-# the lines with a dangerous construct the generated code may hold, by file, without whitespace:
+# the lines with a dangerous construct the generated code may hold, by file; whitespace is ignored when comparing:
 ALLOWED_LINES: dict[str, frozenset[str]] = {
     "examples/benchmarks/workloads.rs": frozenset(
         {
@@ -496,9 +496,9 @@ def dangerous_construct_problems(root: Path, paths: list[str]) -> list[str]:
             continue
         # read_text made every line ending "\n"; splitlines would also split at e.g. a form feed, unlike an editor:
         for number, line in enumerate(text.split("\n"), start=1):
-            if DANGEROUS.search(line) and "".join(
-                line.split()
-            ) not in ALLOWED_LINES.get(path, frozenset()):
+            if DANGEROUS.search(line) and "".join(line.split()) not in {
+                "".join(allowed.split()) for allowed in ALLOWED_LINES.get(path, ())
+            }:
                 problems.append(
                     f"{path}:{number}: dangerous construct `{line.strip()}`; a person decides on it (allowed lines "
                     "are listed in .ci/check_generated.py)"

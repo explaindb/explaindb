@@ -62,6 +62,12 @@ begin
 read all -> sees only A
 ```
 
+## Generated Rust code
+
+`generated/rust/` is generated from `system/`; change it only through the skill
+[`/regenerate-rust`](commands/regenerate-rust.md), which keeps it up to date or
+ports a new part.
+
 ## Formatting
 
 All Python code is formatted with [black](https://black.readthedocs.io) (default

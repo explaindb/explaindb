@@ -37,6 +37,7 @@ import importlib.util
 import io
 import json
 import os
+import re
 import shutil
 import stat
 import subprocess
@@ -1334,6 +1335,27 @@ class DangerousConstructTest(GeneratedRepositoryTest):
                 self.root, [workloads, "src/build.rs", "src/mvcc.rs"]
             ),
         )
+
+    def test_allowed_line_written_with_spaces_allows_the_line_with_other_spacing(
+        self,
+    ) -> None:
+        """An allowed line written with spaces, as the check shows it, allows the line also without these spaces.
+
+        Would fail if the whitespace were removed only from the line in the file and not from the allowed
+        entry, so that an entry copied from the check's report would never match.
+        """
+        # an entry with spaces, and the same line without them and with other spaces in the file:
+        allowed: dict[str, frozenset[str]] = {
+            "src/case.rs": frozenset({'#[path = "x.rs"]'})
+        }
+        self.write_generated(
+            "src/case.rs", 'pub struct Mvcc;\n#[path="x.rs"]\n  #[ path =  "x.rs" ]\n'
+        )
+        # neither line is reported:
+        with mock.patch.dict(script.ALLOWED_LINES, allowed):
+            self.assertEqual(
+                [], script.dangerous_construct_problems(self.root, ["src/case.rs"])
+            )
 
     def test_update_refuses_on_a_dangerous_construct(self) -> None:
         """A dangerous construct added after an update is reported by the check, and ``update`` refuses to record it.
@@ -3504,6 +3526,34 @@ class MainTest(GeneratedRepositoryTest):
             MVCC_DIFF[:-1] + ["+    name = 'Müller'"],
             output.getvalue().decode("utf-8").splitlines(),
         )
+
+
+class SkillTest(unittest.TestCase):
+    """Checks the skill ``.claude/commands/regenerate-rust.md`` against the command line of the script."""
+
+    def test_options_named_by_the_skill_exist(self) -> None:
+        """Every option the skill writes after ``.ci/check_generated.py`` is one the script's ``--help`` lists.
+
+        Would fail if an option were renamed or dropped in the script but not in the skill, so that the
+        skill would tell Claude to run a command the script refuses.
+        """
+        # the options the skill writes after the script's name, also across a line break:
+        skill: str = (
+            REPO_ROOT / ".claude" / "commands" / "regenerate-rust.md"
+        ).read_text(encoding="utf-8")
+        named: set[str] = set(
+            re.findall(r"\.ci/check_generated\.py\s+(--[a-z][a-z-]*)", skill)
+        )
+        self.assertNotEqual(set(), named, msg="the skill names no option of the script")
+        # the options the script itself lists in its help:
+        help_text: str = subprocess.run(
+            [sys.executable, str(SCRIPT_PATH), "--help"],
+            capture_output=True,
+            text=True,
+            check=True,
+        ).stdout
+        listed: set[str] = set(re.findall(r"--[a-z][a-z-]*", help_text))
+        self.assertEqual(set(), named - listed)
 
 
 if __name__ == "__main__":
