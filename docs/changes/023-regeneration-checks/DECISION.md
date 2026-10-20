@@ -63,3 +63,8 @@ as in every report, and the skill looks for `: dangerous construct`. Dropped aft
 need: the `build` key in `Cargo.toml` and the `rust-toolchain` file (a regeneration cannot change Cargo files unnoticed
 since the first merge request, and the manifest shows every new file), and `std` followed by `as` or `::*` (deliberate
 hiding). `path =` in `Cargo.toml` or `rust-toolchain.toml` is likewise left to the refusal of changed Cargo files.
+
+**Note 2026-10-20 (follow-up):** `rustfmt.toml` and `clippy.toml` without a leading dot are not rejected like the
+hidden tool settings, for the same reason as `rust-toolchain`: a regeneration that adds one shows it as a new file in
+the manifest and the merge request (user decision). Deferred like `generated/.cargo/`: rustfmt and clippy also read
+their settings in folders above the crate (`generated/` or the repository root), which the check does not look at.
