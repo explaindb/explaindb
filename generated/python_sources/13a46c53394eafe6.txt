@@ -1,0 +1,218 @@
+#
+#    This is ExplainDB, educational database systems materials.
+#
+#    Copyright (C) 2026 Prof. Dr. Jens Dittrich, Saarland University
+#
+#    This program is free software: you can redistribute it and/or modify
+#    it under the terms of the GNU Affero General Public License as
+#    published by the Free Software Foundation, either version 3 of the
+#    License, or (at your option) any later version.
+#
+#    This program is distributed in the hope that it will be useful,
+#    but WITHOUT ANY WARRANTY; without even the implied warranty of
+#    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+#    GNU Affero General Public License for more details.
+#
+#    You should have received a copy of the GNU Affero General Public License
+#    along with this program.  If not, see <https://www.gnu.org/licenses/>.
+#
+#
+
+# Test modules use self-documenting method/class names and module-level
+# fixtures, so pylint's naming and docstring checks are relaxed here.
+# pylint: disable=invalid-name,missing-class-docstring,missing-function-docstring
+"""Tests for basic key-value store operations."""
+
+import unittest
+
+from system.interfaces.indexing.Index import IndexProperties
+from system.stores.IndexedMVCC import IndexedTransactionalKeyValueStore
+from system.stores.VersionedKeyValueStore import VersionedKeyValueStore
+from system.stores.MVCC import (
+    TransactionalKeyValueStore,
+    Begin,
+    Commit,
+    Abort,
+    Delete,
+    Update,
+)
+from faker import Faker
+
+from system.tests.abstract_unit_test import AbstractUnitTest
+
+Faker.seed(42)
+
+
+class StoreTestBasics(AbstractUnitTest):
+
+    def test_KeyValueStore_basics(self):
+        """Test basic bulkload functionality of KeyValueStore"""
+        # run the same checks on all three store variants; the transactional stores override neither bulkload nor
+        # put, so all must behave identically here:
+        kvs: VersionedKeyValueStore
+        for kvs in [
+            VersionedKeyValueStore(),
+            TransactionalKeyValueStore(),
+            IndexedTransactionalKeyValueStore(),
+        ]:
+            # bulkload 100 (key, Stuff) pairs outside of any transaction:
+            kvs.bulkload(self._create_fake_data().__iter__())
+            self.assertEqual(kvs.size(), 100)
+
+            # inspect the internal layout of every object: the key is a string, and the object has exactly
+            # one committed version (no history yet, as nothing was updated):
+            for key, value in kvs.key_value_store.items():
+                self.assertIsInstance(key, str)
+                entries = value.committed
+                self.assertIsInstance(entries, list)
+                self.assertEqual(len(entries), 1)
+
+                # this single version is an update entry holding a Stuff object; it is valid from timestamp 0 on,
+                # i.e. it is visible to every transaction:
+                entry = entries[0]
+                self.assertIsInstance(entry, VersionedKeyValueStore.UpdateEntry)
+                self.assertIsInstance(entry.value, StoreTestBasics.Stuff)
+                self.assertEqual(entry.start_validity, 0)
+
+                # the public get() returns the same value as the internal version entry:
+                self.assertEqual(list(kvs.get(key))[0], entry.value)
+
+    def test_TransactionalKeyValueStore(self):
+        """A new transactional store is empty and hands out the transaction ids 1, 2, ... in this order."""
+        tkvs: TransactionalKeyValueStore = TransactionalKeyValueStore()
+        self.assertEqual(tkvs.size(), 0)
+
+        # the transaction id counter starts at 1; each call returns the current value and then increments it:
+        self.assertEqual(tkvs.TA_id, 1)
+        self.assertEqual(tkvs._get_next_TA_id(), 1)
+        self.assertEqual(tkvs._get_next_TA_id(), 2)
+
+        # handing out ids starts no transaction: the transaction dictionary TD, the trace of committed transactions
+        # and the journal stay empty:
+        self.assertEqual(tkvs.TD, {})
+        self.assertEqual(tkvs.committed_transactions_trace, [])
+        self.assertEqual(tkvs.journal.size(), 0)
+
+    def test_begin_transaction(self):
+        """`begin_transaction` adds the TA to the transaction dictionary with a read clause set, a write set and no
+        commit timestamp. It also stores the position in the commit trace of the last TA that had committed when it
+        began (-1 if none); this position does not change when the TA itself commits while a second TA runs.
+
+        TA 1                                TA 2
+        begin
+                                            begin
+        commit
+        """
+        tkvs = TransactionalKeyValueStore()
+        TA_ID: int = tkvs.begin_transaction()
+
+        # check store:
+        self.assertEqual(len(tkvs.key_value_store), 0)
+        self.assertIn(TA_ID, tkvs.TD)
+        TD_entry = tkvs.TD[TA_ID]
+        self.assertIsInstance(TD_entry.read_clauses, set)
+        self.assertIsInstance(TD_entry.write_set, set)
+        self.assertIsNone(TD_entry.committed_timestamp)
+        self.assertEqual(TD_entry.last_committed_TA_index_in_TA_trace, -1)
+
+        # start a second TA, then commit TA 1 while TA 2 is still running:
+        tkvs.begin_transaction()
+        tkvs.commit_transaction(TA_ID)
+
+        # TA 1's own commit does not change the trace position it stored at its begin:
+        self.assertEqual(tkvs.TD[TA_ID].last_committed_TA_index_in_TA_trace, -1)
+
+    def test_journaling(self):
+        """The journal holds one list of entries per TA: `Begin` at the start, then `Update` and `Delete` for its
+        writes, and `Commit` with the commit timestamp or `Abort` at the end.
+
+        TA 1                                TA 2
+        begin
+                                            begin
+        commit (timestamp 3)
+                                            update "a" to "b"
+                                            update "b" to "c"
+                                            delete "b"
+                                            abort
+        """
+
+        tkvs = TransactionalKeyValueStore()
+        TA_ID: int = tkvs.begin_transaction()
+
+        # check begin:
+        self.assertEqual(tkvs.journal.size(), 1)
+        self.assertEqual(len(list(tkvs.journal.get(TA_ID))), 1)
+        self.assertEqual(list(tkvs.journal.get(TA_ID))[0], Begin(TA_id=TA_ID))
+
+        TA_ID_2: int = tkvs.begin_transaction()
+        # check second begin:
+        self.assertEqual(tkvs.journal.size(), 2)
+        self.assertEqual(len(list(tkvs.journal.get(TA_ID))), 1)
+        self.assertEqual(len(list(tkvs.journal.get(TA_ID_2))), 1)
+        self.assertEqual(list(tkvs.journal.get(TA_ID_2))[0], Begin(TA_id=TA_ID_2))
+
+        tkvs.commit_transaction(TA_ID)
+        # check commit; TA ids and commit timestamps share one counter, so after the two begins (ids 1 and 2)
+        # the commit of TA 1 gets timestamp 3:
+        self.assertEqual(tkvs.journal.size(), 2)
+        self.assertEqual(len(list(tkvs.journal.get(TA_ID))), 2)
+        self.assertEqual(
+            list(tkvs.journal.get(TA_ID))[1], Commit(TA_id=TA_ID, commit_timestamp=3)
+        )
+
+        tkvs.update_object("a", "b", TA_ID_2)
+        # check update:
+        self.assertEqual(tkvs.journal.size(), 2)
+        self.assertEqual(len(list(tkvs.journal.get(TA_ID_2))), 2)
+        self.assertEqual(
+            list(tkvs.journal.get(TA_ID_2))[1],
+            Update(object_id="a", nev_value="b", TA_id=TA_ID_2),
+        )
+
+        tkvs.update_object("b", "c", TA_ID_2)
+        # check update:
+        self.assertEqual(tkvs.journal.size(), 2)
+        self.assertEqual(len(list(tkvs.journal.get(TA_ID_2))), 3)
+        self.assertEqual(
+            list(tkvs.journal.get(TA_ID_2))[2],
+            Update(object_id="b", nev_value="c", TA_id=TA_ID_2),
+        )
+
+        tkvs.delete_object("b", TA_ID_2)
+        # check delete:
+        self.assertEqual(tkvs.journal.size(), 2)
+        self.assertEqual(
+            list(tkvs.journal.get(TA_ID_2))[3], Delete(TA_id=TA_ID_2, object_id="b")
+        )
+        self.assertEqual(len(list(tkvs.journal.get(TA_ID_2))), 4)
+
+        tkvs.abort_transaction(TA_ID_2)
+        # check abort:
+        self.assertEqual(tkvs.journal.size(), 2)
+        self.assertEqual(list(tkvs.journal.get(TA_ID_2))[4], Abort(TA_id=TA_ID_2))
+        self.assertEqual(len(list(tkvs.journal.get(TA_ID_2))), 5)
+
+    def test_IndexedTransactionalKeyValueStore_basics(self):
+        """A new indexed store has no indexes; `create_index` adds an index to both catalogues, `drop_index` removes
+        it from both.
+        """
+        # a new store has no indexes: both index catalogues, by name and by (attribute, operator), are empty:
+        itkvs: IndexedTransactionalKeyValueStore = IndexedTransactionalKeyValueStore()
+        self.assertEqual(itkvs.indexes_by_name, {})
+        self.assertEqual(itkvs.indexes_by_properties, {})
+
+        # create an index for equality predicates on attribute "a"; it is listed in both catalogues:
+        itkvs.create_index("a_idx", "a", "=")
+        self.assertEqual(list(itkvs.indexes_by_name), ["a_idx"])
+        self.assertEqual(
+            itkvs.indexes_by_properties, {IndexProperties("a", "="): "a_idx"}
+        )
+
+        # dropping it removes it from both catalogues again:
+        itkvs.drop_index("a_idx")
+        self.assertEqual(itkvs.indexes_by_name, {})
+        self.assertEqual(itkvs.indexes_by_properties, {})
+
+
+if __name__ == "__main__":
+    unittest.main(argv=["ignored", "-v"], verbosity=2, exit=False)

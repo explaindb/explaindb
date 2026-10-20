@@ -39,7 +39,7 @@ step it describes. Example from `test_stores_basics.py`:
 ```python
 # bulkload 100 (key, Stuff) pairs outside of any transaction:
 kvs.bulkload(self._create_fake_data().__iter__())
-self.assertTrue(kvs.size() == 100)
+self.assertEqual(kvs.size(), 100)
 
 # inspect the internal layout of every object: the key is a string, and the object has exactly
 # one committed version (no history yet, as nothing was updated):

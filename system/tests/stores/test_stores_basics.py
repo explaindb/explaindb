@@ -57,7 +57,7 @@ class StoreTestBasics(AbstractUnitTest):
         ]:
             # bulkload 100 (key, Stuff) pairs outside of any transaction:
             kvs.bulkload(self._create_fake_data().__iter__())
-            self.assertTrue(kvs.size() == 100)
+            self.assertEqual(kvs.size(), 100)
 
             # inspect the internal layout of every object: the key is a string, and the object has exactly
             # one committed version (no history yet, as nothing was updated):
@@ -80,7 +80,7 @@ class StoreTestBasics(AbstractUnitTest):
     def test_TransactionalKeyValueStore(self):
         """A new transactional store is empty and hands out the transaction ids 1, 2, ... in this order."""
         tkvs: TransactionalKeyValueStore = TransactionalKeyValueStore()
-        self.assertTrue(tkvs.size() == 0)
+        self.assertEqual(tkvs.size(), 0)
 
         # the transaction id counter starts at 1; each call returns the current value and then increments it:
         self.assertEqual(tkvs.TA_id, 1)
