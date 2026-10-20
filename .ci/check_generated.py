@@ -50,7 +50,9 @@ compares them with the files as they are now and reports:
   (``.cargo/``, ``.rustfmt.toml``, ``.clippy.toml``, at any depth), a symbolic link, a missing or unreadable
   manifest, or a file missing from the manifest or on disk;
 - a missing or corrupt copy of a recorded Python source, another file or folder in the folder of the copies, or that
-  folder (or ``generated/``) being a symbolic link or no folder.
+  folder (or ``generated/``) being a symbolic link or no folder;
+- a dangerous construct (see DANGEROUS and BUILD_SCRIPT): a person decides on each, and the few allowed lines are
+  listed in ALLOWED_LINES.
 
 The update keeps a copy of every recorded source version in ``generated/python_sources/<16 hex digits>.txt``, named by
 its hash and never deleted, so that ``--diff`` can show what changed in a source since a generated file was generated
@@ -116,6 +118,33 @@ DEPENDENCY_FILES: frozenset[str] = frozenset(
 # hidden tool settings that Cargo, rustfmt or clippy read in the generated folder; hidden files are not part of the
 # generated code, so they are rejected instead:
 TOOL_SETTINGS: tuple[str, ...] = (".cargo", ".rustfmt.toml", ".clippy.toml")
+# constructs of Rust code that reach processes, the network, files or the environment, skip the compiler's memory
+# safety checks, call foreign code, include files or load modules from another path; searched line by line, comments
+# included, in the Rust files and the README, whose code blocks run as doctests. They catch accidents, not deliberate
+# hiding (see docs/changes/023-regeneration-checks):
+DANGEROUS: re.Pattern[str] = re.compile(
+    r"\bstd\s*::\s*(process|net|fs|os|env)\b"
+    # a group would get around the line above, e.g. use std::{fs, ...}:
+    r"|\bstd\s*::\s*\{"
+    r"|\b(extern|unsafe)\b"
+    # macros; not followed by "=", so a comparison like env != x is no macro:
+    r"|\b(include|include_bytes|include_str|env|option_env)\s*!(?!=)"
+    r"|#\s*!?\s*\[[^\]]*\bpath\s*="
+)
+# the build script Cargo runs before every build when it finds it at the top of the crate:
+BUILD_SCRIPT: str = "build.rs"
+# the lines with a dangerous construct the generated code may hold, by file, without whitespace:
+ALLOWED_LINES: dict[str, frozenset[str]] = {
+    "examples/benchmarks/workloads.rs": frozenset(
+        {
+            "letarguments:Vec<String>=std::env::args().skip(1).collect();",
+            "std::process::exit(2);",
+        }
+    ),
+    "src/lib.rs": frozenset({'#[doc=include_str!("../README.md")]'}),
+    "tests/query_processing/main.rs": frozenset({'#[path="../common/mod.rs"]'}),
+    "tests/stores/main.rs": frozenset({'#[path="../common/mod.rs"]'}),
+}
 # the copies of the Python sources, one per recorded version, named by its hash (see store_copies), relative to the
 # repository root; besides the copies, the folder holds only its README (and hidden files, which are ignored):
 COPIES: Path = Path("generated/python_sources")
@@ -442,6 +471,41 @@ def tool_settings_problems(root: Path) -> list[str]:
     return problems
 
 
+def dangerous_construct_problems(root: Path, paths: list[str]) -> list[str]:
+    """Reports the lines with a dangerous construct (see DANGEROUS) that ALLOWED_LINES does not allow, and BUILD_SCRIPT.
+
+    The lines of the Rust files and of the README are searched; a build script is reported because it exists.
+
+    @param root: the repository root
+    @param paths: the generated files, relative to the generated folder
+    @return: one line per construct, starting with the file (and the line number for a line), then "dangerous
+        construct"
+    """
+    problems: list[str] = [
+        f"{path}: dangerous construct, a build script Cargo runs; a person decides on it"
+        for path in paths
+        if path == BUILD_SCRIPT
+    ]
+    for path in paths:
+        if not (path.endswith(".rs") or path == "README.md"):
+            continue
+        try:
+            text: str = (root / GENERATED / path).read_text(encoding="utf-8")
+        except UnicodeDecodeError:
+            # reported with the first line (see sources_of)
+            continue
+        # read_text made every line ending "\n"; splitlines would also split at e.g. a form feed, unlike an editor:
+        for number, line in enumerate(text.split("\n"), start=1):
+            if DANGEROUS.search(line) and "".join(
+                line.split()
+            ) not in ALLOWED_LINES.get(path, frozenset()):
+                problems.append(
+                    f"{path}:{number}: dangerous construct `{line.strip()}`; a person decides on it (allowed lines "
+                    "are listed in .ci/check_generated.py)"
+                )
+    return problems
+
+
 def symbolic_link_problems(root: Path) -> list[str]:
     """Rejects symbolic links in the generated folder.
 
@@ -636,7 +700,7 @@ def current_files(root: Path) -> tuple[list[GeneratedFile], list[str]]:
 
     @param root: the repository root
     @return: the files that could be read, and the problems found while reading (a file name with ':' or '\\',
-        first line, sources, test folders and modules, hidden tool settings, symbolic links)
+        first line, sources, test folders and modules, hidden tool settings, dangerous constructs, symbolic links)
     """
     paths: list[str] = generated_paths(root)
     files: list[GeneratedFile] = []
@@ -664,18 +728,15 @@ def current_files(root: Path) -> tuple[list[GeneratedFile], list[str]]:
                 digest_of(root / GENERATED / path),
             )
         )
+    paths_without_links: list[str] = [
+        path for path in paths if not any(link.startswith(f"{path}:") for link in links)
+    ]
     return (
         files,
         problems
-        + module_problems(
-            root,
-            [
-                path
-                for path in paths
-                if not any(link.startswith(f"{path}:") for link in links)
-            ],
-        )
+        + module_problems(root, paths_without_links)
         + tool_settings_problems(root)
+        + dangerous_construct_problems(root, paths_without_links)
         + links,
     )
 

@@ -1234,6 +1234,128 @@ class ToolSettingsTest(GeneratedRepositoryTest):
                     link.unlink()
 
 
+class DangerousConstructTest(GeneratedRepositoryTest):
+    """Checks that constructs reaching the system or the build are reported, unless their line is allowed."""
+
+    def problem(self, path: str, number: int, line: str) -> str:
+        """Returns what the script reports for a dangerous construct, by file, line number and line."""
+        return (
+            f"{path}:{number}: dangerous construct `{line.strip()}`; a person decides on it (allowed lines are "
+            "listed in .ci/check_generated.py)"
+        )
+
+    def test_dangerous_constructs_are_reported(self) -> None:
+        """Each dangerous construct is reported with its file and line number, also in the README; so is ``build.rs``.
+
+        Would fail if one of the std modules, macros or keywords listed below were no longer matched, if
+        ``std::{`` or ``# [ path =``, ``env !`` or ``::std :: fs`` with spaces were missed, if a doc comment
+        were skipped although it runs as a doctest, if the code in ``README.md`` were not searched, if
+        ``build.rs`` at the top were not reported, or if the line number were counted from 0.
+        """
+        rust_lines: list[str] = [
+            '/// std::process::Command::new("sh");',
+            'let _ = std::net::TcpStream::connect("x");',
+            'let _ = ::std :: fs::read("x");',
+            'std::os::unix::fs::symlink("a", "b");',
+            'let _ = std::env::var("HOME");',
+            "use std::{collections::HashMap, net::TcpStream};",
+            "extern crate alloc;",
+            "unsafe { }",
+            'include!("x.rs");',
+            'include_bytes!("x");',
+            'include_str!("x");',
+            'let _ = env !("HOME");',
+            'option_env!("X");',
+            '# [ path = "x.rs" ] mod x;',
+            '#![path = "x"]',
+            '#[cfg_attr(test, path = "x.rs")] mod y;',
+        ]
+        readme_line: str = 'let _ = std::fs::read("x");'
+        # the file to write, its text, and the problems it is expected to give:
+        cases: list[tuple[str, str, list[str]]] = [
+            (
+                "src/case.rs",
+                f"pub struct Mvcc;\n{line}\n",
+                [self.problem("src/case.rs", 2, line)],
+            )
+            for line in rust_lines
+        ] + [
+            (
+                "README.md",
+                f"```rust\n{readme_line}\n```\n",
+                [self.problem("README.md", 2, readme_line)],
+            ),
+            (
+                "build.rs",
+                "fn main() {}\n",
+                [
+                    "build.rs: dangerous construct, a build script Cargo runs; a person decides on it"
+                ],
+            ),
+        ]
+        for path, text, expected in cases:
+            with self.subTest(path=path, text=text):
+                self.write_generated(path, text)
+                self.assertEqual(
+                    expected, script.dangerous_construct_problems(self.root, [path])
+                )
+
+    def test_harmless_and_allowed_lines_are_not_reported(self) -> None:
+        """Harmless lines, allowed lines and a nested ``build.rs`` are not reported; an allowed line elsewhere is.
+
+        The line ``std::process::exit(2);`` is allowed in ``examples/benchmarks/workloads.rs`` only, also
+        with other spacing, and only as the whole line. A form feed does not start a new line, as in an
+        editor. Would fail if ``std::collections``, a variable named ``path``, ``external`` or
+        ``unsafe_count``, or the comparison ``env != 0`` counted as dangerous, if ``src/build.rs`` were taken
+        for the build script, if the allowed lines were ignored, allowed in every file or matched as part of a
+        line, or if lines were split at a form feed.
+        """
+        workloads: str = "examples/benchmarks/workloads.rs"
+        two_calls: str = 'std::process::exit(2); std::fs::remove_file("x");'
+        self.write_generated(
+            "src/mvcc.rs",
+            header("system/stores/mvcc.py")
+            + '\nuse std::collections::HashMap;\f\nlet path = "x";\nstd::process::exit(2);\n'
+            + "let external = 1;\nlet unsafe_count = 0;\nif env != 0 {}\n",
+        )
+        self.write_generated("src/build.rs", NO_SOURCE_HEADER + "\nfn main() {}\n")
+        self.write_generated(
+            workloads,
+            NO_SOURCE_HEADER
+            + f'\n    std::process::exit( 2 );\nstd::process::Command::new("sh");\n{two_calls}\n',
+        )
+        self.assertEqual(
+            [
+                self.problem(workloads, 3, 'std::process::Command::new("sh");'),
+                self.problem(workloads, 4, two_calls),
+                self.problem("src/mvcc.rs", 4, "std::process::exit(2);"),
+            ],
+            script.dangerous_construct_problems(
+                self.root, [workloads, "src/build.rs", "src/mvcc.rs"]
+            ),
+        )
+
+    def test_update_refuses_on_a_dangerous_construct(self) -> None:
+        """A dangerous construct added after an update is reported by the check, and ``update`` refuses to record it.
+
+        Would fail if the check that CI runs missed the construct, or if ``update`` recorded it and so
+        changed the manifest.
+        """
+        self.update_cleanly()
+        before: bytes = self.mark_manifest()
+        self.append_generated("src/mvcc.rs", "unsafe { }\n")
+        problem: str = self.problem("src/mvcc.rs", 3, "unsafe { }")
+        self.assertEqual(
+            [
+                problem,
+                "src/mvcc.rs: edited by hand; change the Python source and regenerate instead",
+            ],
+            script.check(self.root),
+        )
+        self.assertEqual([problem], script.update(self.root))
+        self.assertEqual(before, self.manifest_path.read_bytes())
+
+
 @unittest.skipUnless(SYMLINKS, "this system cannot create symbolic links")
 class SymbolicLinkTest(GeneratedRepositoryTest):
     """Checks that the generated folder holds no symbolic links."""

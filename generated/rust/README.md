@@ -35,6 +35,11 @@ All changes are made in Python; the Rust code is then generated again. Therefore
   they are: `--update` refuses while one of them differs from the manifest.
 - Hidden tool settings (`.cargo/`, `.rustfmt.toml`, `.clippy.toml`, in any folder) and symbolic links are not allowed
   here, as they could change the build or the checks unnoticed.
+- The check reports dangerous constructs, e.g. code that starts processes or reaches the network or files, and a
+  build script; also in comments and in this README, whose code blocks run as tests. The list is `DANGEROUS` in
+  [`.ci/check_generated.py`](../../.ci/check_generated.py), with the few allowed lines; a person decides on each. It
+  catches accidents, not deliberate hiding, so the review stays. In a merge request it only warns and runs next to
+  `rust_test`, so run the check before building or testing regenerated code.
 - GitLab folds the generated files in merge request diffs (`gitlab-generated` in
   [`.gitattributes`](../../.gitattributes)), so reviewers see the Python change first; `Cargo.toml`, `Cargo.lock` and
   `rust-toolchain.toml`, which control the build and its dependencies, stay unfolded.

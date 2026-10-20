@@ -56,3 +56,10 @@ blocked construct needs an allowlist entry in the script. In a merge request the
   tests are deliberately not ported.
 
 <!-- notes below: skill never overwrites past this marker -->
+
+**Note 2026-10-20 (second merge request, after review):** the check reports a dangerous construct as
+`<file>:<line>: dangerous construct ...` (a build script as `build.rs: dangerous construct ...`): the file comes first,
+as in every report, and the skill looks for `: dangerous construct`. Dropped after review as more than the accidents
+need: the `build` key in `Cargo.toml` and the `rust-toolchain` file (a regeneration cannot change Cargo files unnoticed
+since the first merge request, and the manifest shows every new file), and `std` followed by `as` or `::*` (deliberate
+hiding). `path =` in `Cargo.toml` or `rust-toolchain.toml` is likewise left to the refusal of changed Cargo files.

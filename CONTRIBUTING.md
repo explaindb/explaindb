@@ -340,7 +340,8 @@ a person decided (e.g. a dependency or Rust version update) is the one change ma
 it with `python3 .ci/check_generated.py --update-dependencies`, which rewrites only the entries of
 these three files (`--update` would also record out-of-date or hand-edited Rust files as current). A
 regeneration keeps these files as they are: `--update` refuses while one of them differs from the
-manifest.
+manifest. The check also reports dangerous constructs in the generated code, e.g. `std::process` or
+a build script (see [`generated/rust/README.md`](generated/rust/README.md)).
 
 The generated code follows the same rules as the Python code, written the Rust way. The CI job
 `rust_test` fails if one of these checks fails (run them in `generated/rust/`):
