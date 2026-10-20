@@ -1,5 +1,5 @@
 {
-  "generated_at_commit": "c1374c3",
+  "generated_at_commit": "f994a40",
   "files": [
     {
       "sha256": "sha256:d498064da618ab59",
@@ -12,7 +12,7 @@
       "path": "Cargo.toml"
     },
     {
-      "sha256": "sha256:317e870f214017c0",
+      "sha256": "sha256:b73ac9768199a351",
       "sources": [],
       "path": "README.md"
     },

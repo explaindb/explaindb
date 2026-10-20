@@ -23,8 +23,11 @@ All changes are made in Python; the Rust code is then generated again. Therefore
   It fails on main and in the nightly pipeline and only warns in a merge request, so a Python change can be merged
   before its Rust image is regenerated. While main is red, the jobs of the deploy stage (e.g. publishing the API
   documentation) do not run.
-- After regenerating, run `python3 .ci/check_generated.py --update` from the repository root to record the new
-  hashes.
+- Before regenerating, `python3 .ci/check_generated.py --diff` shows what changed in the Python sources of the
+  out-of-date files since they were generated: `--update` keeps a copy of each recorded source version in
+  [`generated/python_sources/`](../python_sources/README.md), and `--diff` compares it with the current source.
+- After regenerating every Rust file of a changed source, run `python3 .ci/check_generated.py --update` from the
+  repository root to record the new hashes and store the copies, and commit the new copies with the Rust files.
 - One exception: a dependency or Rust version update may change `Cargo.toml`, `Cargo.lock` and
   `rust-toolchain.toml` directly (e.g. to fix a finding of the dependency audit). Record it with
   `python3 .ci/check_generated.py --update-dependencies`, which rewrites only the entries of these three files;

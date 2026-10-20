@@ -321,17 +321,25 @@ the interface documentation.
 
 The Rust port of the store core in [`generated/rust/`](generated/rust) is **generated** from the
 Python code in `system/` and never edited by hand: change the Python code, then generate the Rust
-code again (see [`generated/rust/README.md`](generated/rust/README.md#generated-code-change-the-python-not-this-folder)).
-Every generated file names its Python sources in its first line (`// Code generated from ...
-DO NOT EDIT.`; only `Cargo.lock`, written by Cargo, and the manifest have none), and its folders
-mirror `system/`. After regenerating, record the new hashes with
-`python3 .ci/check_generated.py --update`. The CI job `generated_rust_check` runs the check without
-`--update` and reports Rust files that are out of date or were edited by hand; the job fails on main
-and in the nightly pipeline and only warns in a merge request. A dependency or Rust version update
-is the one change made directly in `Cargo.toml`, `Cargo.lock` and `rust-toolchain.toml`; record it
-with `python3 .ci/check_generated.py --update-dependencies`, which rewrites only the entries of these
-three files (`--update` would also record out-of-date or hand-edited Rust files as current). A later regeneration
-keeps the versions in these files.
+code again (see
+[`generated/rust/README.md`](generated/rust/README.md#generated-code-change-the-python-not-this-folder)).
+Every generated file names its Python sources in its first line
+(`// Code generated from ... DO NOT EDIT.`; only `Cargo.lock`, written by Cargo, and the manifest
+have none), and its folders mirror `system/`. To see what changed in the Python sources of
+out-of-date Rust files since they were generated, run
+`python3 .ci/check_generated.py --diff [<file relative to generated/rust/> ...]`: it compares the
+copies in [`generated/python_sources/`](generated/python_sources/README.md) with the current
+sources. Regenerate every Rust file of a changed source, then record the new hashes with
+`python3 .ci/check_generated.py --update`, which also stores a copy of each recorded source version
+(copies are never deleted); commit the new copies with the Rust files. The CI job
+`generated_rust_check` runs the check without `--update` and reports Rust files that are out of
+date or were edited by hand, and missing or corrupt copies or other files in
+`generated/python_sources/`; the job fails on main and in the nightly pipeline and
+only warns in a merge request. A dependency or Rust version update is the one change made directly
+in `Cargo.toml`, `Cargo.lock` and `rust-toolchain.toml`; record it with
+`python3 .ci/check_generated.py --update-dependencies`, which rewrites only the entries of these
+three files (`--update` would also record out-of-date or hand-edited Rust files as current). A later
+regeneration keeps the versions in these files.
 
 The generated code follows the same rules as the Python code, written the Rust way. The CI job
 `rust_test` fails if one of these checks fails (run them in `generated/rust/`):

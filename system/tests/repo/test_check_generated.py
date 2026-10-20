@@ -25,7 +25,7 @@
 
 Every test builds a small repository in a temporary directory: a ``system/`` folder with Python
 sources and a ``generated/rust/`` folder with generated files. It then calls ``update`` (as a
-developer does right after regenerating), changes something, and calls ``check``. The real
+developer does right after regenerating), changes something, and calls ``check`` (or ``diff``). The real
 ``generated/rust/`` folder is checked by a separate CI job, not here.
 
 ``.ci`` is not an importable package, so the module is loaded from its file path.
@@ -38,10 +38,12 @@ import io
 import json
 import os
 import shutil
+import stat
+import subprocess
 import sys
 import tempfile
 import unittest
-from pathlib import Path
+from pathlib import Path, PureWindowsPath
 from types import ModuleType
 from unittest import mock
 
@@ -73,8 +75,22 @@ def symlinks_work() -> bool:
     return True
 
 
+def colon_and_backslash_names_work() -> bool:
+    """Returns whether this system can create files named with ':' and '\\' (Windows cannot, or means other files)."""
+    names: list[str] = ["a:b.rs", "a\\b.rs"]
+    with tempfile.TemporaryDirectory() as directory:
+        try:
+            for name in names:
+                (Path(directory) / name).write_bytes(b"")
+        except OSError:
+            return False
+        # on Windows, "a:b.rs" would write into a file "a" instead:
+        return sorted(os.listdir(directory)) == sorted(names)
+
+
 script: ModuleType = load_script()
 SYMLINKS: bool = symlinks_work()
+COLON_AND_BACKSLASH_NAMES: bool = colon_and_backslash_names_work()
 
 # the first line of a generated file without a Python source, in Rust:
 NO_SOURCE_HEADER: str = (
@@ -82,6 +98,16 @@ NO_SOURCE_HEADER: str = (
 )
 # what the script reports for a file without a valid first line:
 NO_HEADER: str = 'the first line is not a "Code generated ... DO NOT EDIT." comment'
+# the folder of the copies of the Python sources, relative to the repository root:
+COPIES: str = "generated/python_sources"
+# what the diff prints if no Python source changed:
+NOTHING_CHANGED: str = (
+    "No Python source changed since its generated files were generated."
+)
+# what the diff reports for a path that is not in the manifest:
+UNKNOWN_PATH: str = (
+    "src/nope.rs: not in the manifest (paths are relative to generated/rust/)"
+)
 
 
 def header(*sources: str) -> str:
@@ -95,6 +121,81 @@ def digest(path: Path) -> str:
     The manifest records the first 16 hex digits of the SHA-256, after the prefix ``sha256:``.
     """
     return "sha256:" + hashlib.sha256(path.read_bytes()).hexdigest()[:16]
+
+
+def copy_name_of_file(path: Path) -> str:
+    """Returns the name of the copy of a file as it is now: its hash without the prefix, plus ``.txt``."""
+    return digest(path).removeprefix("sha256:") + ".txt"
+
+
+def copy_name_of_text(text: str) -> str:
+    """Returns the name of the copy of a source with the given text (UTF-8, LF line endings)."""
+    return hashlib.sha256(text.encode("utf-8")).hexdigest()[:16] + ".txt"
+
+
+def old_label(source: str, text: str) -> str:
+    """Returns the diff's header line of the old version of a source: its path and the name of its copy."""
+    return f"--- {source} (as generated, {copy_name_of_text(text)})"
+
+
+def mvcc_diff_head(old: str) -> list[str]:
+    """Returns the first four lines the diff prints for ``system/stores/mvcc.py`` changed from the given old text.
+
+    These are the heading, the header lines of the old and the new version, and the range line of a
+    change within the first two lines.
+    """
+    return [
+        "system/stores/mvcc.py: changed; generated from it: src/mvcc.rs",
+        old_label("system/stores/mvcc.py", old),
+        "+++ system/stores/mvcc.py (now)",
+        "@@ -1,2 +1,2 @@",
+    ]
+
+
+# what the diff prints after system/stores/mvcc.py changed from "pass" to "x = 1":
+MVCC_DIFF: list[str] = mvcc_diff_head("class MVCC:\n    pass\n") + [
+    " class MVCC:",
+    "-    pass",
+    "+    x = 1",
+]
+
+
+# what the check says to do before the update records every Rust file as generated from the current sources:
+REGENERATE_FIRST: str = (
+    "regenerate every Rust file the check reports as out of date or edited by hand first"
+)
+
+
+def recovery(copy: str, source: str) -> str:
+    """Returns the hint how to get a missing copy of an older version back, for the copy's path and its source."""
+    return (
+        f"find the commit that added it with `git log --all --diff-filter=A --format=%H -n 1 -- {copy}` and restore "
+        f"it with `git checkout <commit> -- {copy}`; if git finds no commit, or the check reports the restored copy "
+        f"as corrupt, delete the copy, regenerate every Rust file generated from {source} and every Rust file the "
+        "check reports as out of date or edited by hand, then run the update"
+    )
+
+
+def missing_copy(name: str, source: str) -> str:
+    """Returns the problem reported for a missing copy of an older version, with the hint how to restore it."""
+    copy: str = f"{COPIES}/{name}"
+    return f"{copy}: missing, the copy of {source} as recorded in the manifest; {recovery(copy, source)}"
+
+
+def missing_current_copy(name: str, source: str) -> str:
+    """Returns the problem reported for a missing copy of the current version of a source, which the update writes."""
+    return (
+        f"{COPIES}/{name}: missing, the copy of the current version of {source}; {REGENERATE_FIRST}, then run the "
+        "update to write it, and commit it"
+    )
+
+
+def corrupt_copy(name: str) -> str:
+    """Returns the problem reported for a copy whose content does not match its name: delete it, then see the check."""
+    return (
+        f"{COPIES}/{name}: corrupt, its content does not match its name; delete it, and if the manifest still records "
+        "its version, the check says how to get it back"
+    )
 
 
 class GeneratedRepositoryTest(unittest.TestCase):
@@ -164,6 +265,13 @@ class GeneratedRepositoryTest(unittest.TestCase):
         manifest["generated_at_commit"] = "marker of the manifest before"
         self.write_generated("GENERATED_FROM.json", json.dumps(manifest, indent=2))
         return self.manifest_path.read_bytes()
+
+    def copies(self) -> dict[str, bytes]:
+        """Returns the entries of the folder of the copies, by name, with the bytes of each file."""
+        return {
+            entry.name: entry.read_bytes() if entry.is_file() else b""
+            for entry in (self.root / COPIES).iterdir()
+        }
 
 
 class UpToDateTest(GeneratedRepositoryTest):
@@ -306,6 +414,99 @@ class ManifestReadTest(GeneratedRepositoryTest):
                     ),
                     problems[0],
                 )
+
+    def test_source_hash_that_is_no_hash_is_reported(self) -> None:
+        """A source hash that is not ``sha256:`` and 16 hex digits makes the manifest unreadable, for check and diff.
+
+        The hash of a source is also the name of its copy. Would fail if any string were accepted,
+        which would let ``sha256:../../x`` make ``--diff`` read a file outside the folder of the copies.
+        """
+        self.update_cleanly()
+        for invalid in [
+            "sha256:../../x",
+            "0123456789abcdef",
+            "sha256:0123456789ABCDEF",
+            "sha256:0123456789abcdef0",
+        ]:
+            with self.subTest(sha256=invalid):
+                manifest: dict = self.manifest()
+                manifest["files"][0]["sources"][0]["sha256"] = invalid
+                self.write_generated("GENERATED_FROM.json", json.dumps(manifest))
+                problems: list[str] = script.check(self.root)
+                self.assertEqual(1, len(problems))
+                self.assertTrue(
+                    problems[0].startswith(
+                        "generated/rust/GENERATED_FROM.json cannot be read (ValueError("
+                    ),
+                    problems[0],
+                )
+                self.assertIn("has no valid hash", problems[0])
+                self.assertEqual(([], problems), script.diff(self.root, []))
+
+    def test_entry_path_outside_the_generated_folder_is_reported(self) -> None:
+        """An entry path that is empty, absolute or has a backslash, colon or ``..`` part makes the manifest unreadable.
+
+        The paths of the manifest lead into the generated folder. Would fail if any string were
+        accepted as a path, so an edited manifest could name a file outside the generated folder
+        (or, with a backslash or a drive such as ``C:``, one that means another folder on Windows;
+        ``C:x.rs`` is no absolute path on Linux or macOS, so only the colon gives it away there).
+        """
+        self.update_cleanly()
+        for invalid in ["", "/abs/x.rs", "../x.rs", "src\\x.rs", "C:x.rs"]:
+            with self.subTest(path=invalid):
+                manifest: dict = self.manifest()
+                manifest["files"][0]["path"] = invalid
+                self.write_generated("GENERATED_FROM.json", json.dumps(manifest))
+                problems: list[str] = script.check(self.root)
+                self.assertEqual(1, len(problems))
+                self.assertTrue(
+                    problems[0].startswith(
+                        "generated/rust/GENERATED_FROM.json cannot be read (ValueError("
+                    ),
+                    problems[0],
+                )
+                self.assertIn("has no valid path", problems[0])
+                self.assertEqual(([], problems), script.diff(self.root, []))
+
+    def test_entry_path_starting_with_a_slash_is_reported_also_under_windows_rules(
+        self,
+    ) -> None:
+        """An entry path ``/abs/x.rs`` makes the manifest unreadable also where paths follow Windows rules.
+
+        Windows takes ``/abs/x.rs`` for a path relative to the current drive, not for an absolute
+        one, yet joined to the repository root it leads out of it. Windows rules are simulated by
+        reading the manifest with ``Path`` replaced by ``PureWindowsPath``. Would fail if only the
+        system's own rules were asked whether the path is absolute, so the manifest were accepted
+        on Windows.
+        """
+        self.update_cleanly()
+        manifest: dict = self.manifest()
+        manifest["files"][0]["path"] = "/abs/x.rs"
+        self.write_generated("GENERATED_FROM.json", json.dumps(manifest))
+        with mock.patch.object(script, "Path", PureWindowsPath):
+            recorded, problem = script.read_manifest(self.root)
+        self.assertIsNone(recorded)
+        self.assertIn("has no valid path", str(problem))
+
+    def test_entry_path_that_appears_twice_is_reported(self) -> None:
+        """Two entries with the same path make the manifest unreadable, for check and diff.
+
+        The second entry records another source hash, so it is not a harmless repetition. Would
+        fail if the entries were read into a dictionary by path without a check, so the last one
+        silently replaced the first and the check compared the file with only one of them.
+        """
+        self.update_cleanly()
+        manifest: dict = self.manifest()
+        twin: dict = json.loads(json.dumps(manifest["files"][0]))
+        twin["sources"][0]["sha256"] = "sha256:0123456789abcdef"
+        manifest["files"].append(twin)
+        self.write_generated("GENERATED_FROM.json", json.dumps(manifest))
+        problem: str = (
+            "generated/rust/GENERATED_FROM.json cannot be read "
+            '(ValueError("an entry\'s path appears twice")); run the update after regenerating'
+        )
+        self.assertEqual([problem], script.check(self.root))
+        self.assertEqual(([], [problem]), script.diff(self.root, []))
 
 
 class OutOfDateTest(GeneratedRepositoryTest):
@@ -564,6 +765,23 @@ class HeaderTest(GeneratedRepositoryTest):
                     [f"src/mvcc.rs: its source {source} is not in system/"],
                     script.update(self.root),
                 )
+
+    def test_source_with_a_nul_character_is_reported_as_outside_system(self) -> None:
+        """A source with a NUL character in the first line is reported as not in ``system/``, by check and diff.
+
+        No file in ``system/`` has a NUL character in its name. Would fail if the path were resolved
+        on disk, which raises ``ValueError`` for a NUL character, so check and ``--diff`` would crash
+        with a traceback instead of naming the file to fix.
+        """
+        self.update_cleanly()
+        source: str = "system/stores/mvcc\0.py"
+        self.write_generated(
+            "src/mvcc.rs",
+            header("system/stores/mvcc.py", source) + "\npub struct Mvcc;\n",
+        )
+        problem: str = f"src/mvcc.rs: its source {source} is not in system/"
+        self.assertEqual([problem], script.check(self.root))
+        self.assertEqual(([], [problem]), script.diff(self.root, []))
 
     @unittest.skipUnless(SYMLINKS, "this system cannot create symbolic links")
     def test_source_linked_to_outside_system_is_reported(self) -> None:
@@ -857,14 +1075,14 @@ class ModuleTest(GeneratedRepositoryTest):
 
 
 class ToolSettingsTest(GeneratedRepositoryTest):
-    """Checks that the generated folder holds no hidden tool settings: ``.cargo``, ``.rustfmt.toml``, ``.clippy.toml``."""
+    """Checks that the generated folder has no hidden tool settings: ``.cargo``, ``.rustfmt.toml``, ``.clippy.toml``."""
 
     def problem(self, name: str) -> str:
         """Returns what the script reports for hidden tool settings, by their path in the generated folder."""
         return f"{name}: hidden tool settings are not allowed in the generated code"
 
     def test_tool_settings_are_reported(self) -> None:
-        """A ``.cargo/`` folder, a ``.rustfmt.toml`` and a ``.clippy.toml`` are each reported; ``update`` writes nothing.
+        """A ``.cargo/`` folder, ``.rustfmt.toml`` and ``.clippy.toml`` are each reported; ``update`` writes nothing.
 
         Would fail if one of them were ignored like any other hidden file, although Cargo, rustfmt
         or clippy read it and so could build or check the code differently from what the check has seen.
@@ -1010,6 +1228,64 @@ class SymbolicLinkTest(GeneratedRepositoryTest):
         self.update_cleanly()
         self.assertEqual([], script.check(self.root))
 
+    def test_linked_generated_folder_is_reported_and_update_refuses(self) -> None:
+        """``generated/rust`` itself as a symbolic link is reported; ``update`` writes nothing through it.
+
+        Would fail if only the links inside the generated folder were looked for: the listing follows
+        the link at its start, so ``update`` wrote the manifest into a folder anywhere on the machine,
+        stored a copy of the changed source, and the check took the code there for the generated code.
+        """
+        self.update_cleanly()
+        before: bytes = self.mark_manifest()
+        copies: dict[str, bytes] = self.copies()
+        self.write("system/stores/mvcc.py", "class MVCC:\n    x = 1\n")
+        elsewhere: Path = self.root.parent / "elsewhere"
+        self.generated.rename(elsewhere)
+        os.symlink(elsewhere, self.generated)
+        content: list[Path] = sorted(elsewhere.rglob("*"))
+        problem: str = "generated/rust: a symbolic link; it must be a real folder"
+        self.assertEqual([problem], script.update(self.root))
+        self.assertEqual(before, (elsewhere / "GENERATED_FROM.json").read_bytes())
+        self.assertEqual(content, sorted(elsewhere.rglob("*")))
+        self.assertEqual(copies, self.copies())
+        self.assertEqual(
+            [
+                problem,
+                "src/mvcc.rs: out of date, system/stores/mvcc.py changed since it was generated; "
+                "regenerate it and run the update",
+            ],
+            script.check(self.root),
+        )
+
+    def test_linked_folder_with_a_dangling_link_inside_is_reported_without_a_crash(
+        self,
+    ) -> None:
+        """A linked ``generated/rust`` or ``generated/`` whose files include a link to nothing gives both reports.
+
+        The files behind the folder link are still listed, so the link to nothing among them is
+        reported and not read. Would fail if the check stopped at the folder link and then read
+        ``src/dangling.rs`` as a generated file, so it crashed with ``FileNotFoundError``, or if
+        the link inside were not reported.
+        """
+        self.update_cleanly()
+        os.symlink(self.root.parent / "missing.rs", self.generated / "src/dangling.rs")
+        for folder in ["generated/rust", "generated"]:
+            with self.subTest(folder=folder):
+                linked: Path = self.root / folder
+                elsewhere: Path = self.root.parent / "elsewhere"
+                linked.rename(elsewhere)
+                os.symlink(elsewhere, linked)
+                try:
+                    expected: list[str] = [
+                        f"{folder}: a symbolic link; it must be a real folder",
+                        "src/dangling.rs: a symbolic link, not allowed in the generated code",
+                    ]
+                    self.assertEqual(expected, script.check(self.root))
+                    self.assertEqual(expected, script.update(self.root))
+                finally:
+                    linked.unlink()
+                    elsewhere.rename(linked)
+
 
 class UpdateDependenciesTest(GeneratedRepositoryTest):
     """Checks ``update_dependencies``, which records only Cargo.toml, Cargo.lock and rust-toolchain.toml anew."""
@@ -1119,6 +1395,56 @@ class UpdateDependenciesTest(GeneratedRepositoryTest):
         )
         self.assertEqual([], script.check(self.root))
 
+    @unittest.skipUnless(SYMLINKS, "this system cannot create symbolic links")
+    def test_refused_on_a_linked_generated_folder(self) -> None:
+        """If ``generated/rust`` or ``generated`` is a symbolic link, ``update_dependencies`` writes nothing through it.
+
+        The link is no problem of a dependency file, but of the folder that holds them all. Would
+        fail if only the problems of the three files refused the dependency update, so it wrote the
+        manifest into a folder anywhere on the machine.
+        """
+        before: bytes = self.mark_manifest()
+        expected: dict[str, str] = {
+            "generated/rust": "generated/rust: a symbolic link; it must be a real folder",
+            "generated": "generated: a symbolic link; it must be a real folder",
+        }
+        for folder, problem in expected.items():
+            with self.subTest(folder=folder):
+                linked: Path = self.root / folder
+                elsewhere: Path = self.root.parent / "elsewhere"
+                linked.rename(elsewhere)
+                os.symlink(elsewhere, linked)
+                try:
+                    self.append_generated("Cargo.lock", 'version = "0.9.0"\n')
+                    content: list[Path] = sorted(elsewhere.rglob("*"))
+                    self.assertEqual([problem], script.update_dependencies(self.root))
+                    self.assertEqual(before, self.manifest_path.read_bytes())
+                    self.assertEqual(content, sorted(elsewhere.rglob("*")))
+                finally:
+                    linked.unlink()
+                    elsewhere.rename(linked)
+
+    def test_refused_when_a_dependency_file_names_a_python_source(self) -> None:
+        """A Cargo.toml whose first line names a Python source is reported, and the manifest stays as it was.
+
+        A dependency update records no sources, so such a file must be regenerated. Would fail if
+        ``update_dependencies`` recorded the file with its source: then the hash of that source would
+        be recorded without the copy that ``--diff`` needs, and without regenerating.
+        """
+        before: bytes = self.mark_manifest()
+        self.write_generated(
+            "Cargo.toml",
+            "# Code generated from system/stores/mvcc.py. DO NOT EDIT.\n"
+            '[dependencies]\nrand = "0.9"\n',
+        )
+        self.assertEqual(
+            [
+                "Cargo.toml: names a Python source; a dependency update records no sources, regenerate instead"
+            ],
+            script.update_dependencies(self.root),
+        )
+        self.assertEqual(before, self.manifest_path.read_bytes())
+
     def test_refused_without_manifest(self) -> None:
         """Without a manifest, ``update_dependencies`` reports it missing and writes none.
 
@@ -1146,6 +1472,32 @@ class UpdateRefusesTest(GeneratedRepositoryTest):
         self.assertEqual([f"src/lib.rs: {NO_HEADER}"], script.update(self.root))
         self.assertEqual(before, self.manifest_path.read_bytes())
 
+    @unittest.skipUnless(
+        COLON_AND_BACKSLASH_NAMES,
+        "this system cannot create files named with ':' or '\\'",
+    )
+    def test_update_refuses_on_a_file_name_with_a_colon_or_a_backslash(self) -> None:
+        """A generated file named with ':' or '\\' is reported by the check, and ``update`` writes nothing.
+
+        The manifest refuses such paths, as they mean other files on Windows. Would fail if
+        ``update`` recorded the file anyway, so it wrote a manifest that the check and ``--diff``
+        then refuse to read.
+        """
+        self.update_cleanly()
+        before: bytes = self.mark_manifest()
+        for name in ["src/a:b.rs", "src/a\\b.rs"]:
+            with self.subTest(name=name):
+                self.write_generated(name, NO_SOURCE_HEADER + "\n")
+                problem: str = (
+                    f"{name}: a file name with ':' or '\\' is not allowed in the generated code"
+                )
+                try:
+                    self.assertEqual([problem], script.update(self.root))
+                    self.assertEqual(before, self.manifest_path.read_bytes())
+                    self.assertEqual([problem], script.check(self.root))
+                finally:
+                    (self.generated / name).unlink()
+
     def test_update_refuses_on_missing_source_without_manifest(self) -> None:
         """With a missing source and no manifest yet, ``update`` returns the problem and writes nothing.
 
@@ -1158,6 +1510,65 @@ class UpdateRefusesTest(GeneratedRepositoryTest):
             ["src/mvcc.rs: its source system/stores/gone.py does not exist"],
             script.update(self.root),
         )
+        self.assertFalse(self.manifest_path.exists())
+
+    def test_update_refuses_on_a_source_changed_while_it_ran(self) -> None:
+        """A source that changes after it was hashed but before its copy is stored makes ``update`` refuse.
+
+        The change is made right after ``current_files`` has hashed the sources. Would fail if the
+        copy were written from the changed source under the old hash, so the copy were corrupt,
+        or if the manifest were written with the old hash.
+        """
+        hash_sources = script.current_files
+
+        def hash_sources_then_change_one(root: Path) -> tuple[list, list[str]]:
+            """Hashes the sources as ``update`` does, then changes one of them."""
+            result: tuple[list, list[str]] = hash_sources(root)
+            self.write("system/stores/mvcc.py", "class MVCC:\n    x = 1\n")
+            return result
+
+        with mock.patch.object(
+            script, "current_files", side_effect=hash_sources_then_change_one
+        ):
+            self.assertEqual(
+                [
+                    "system/stores/mvcc.py: changed while the update ran; run the update again"
+                ],
+                script.update(self.root),
+            )
+        self.assertFalse(self.manifest_path.exists())
+        self.assertFalse((self.root / COPIES).exists())
+
+    def test_source_of_two_files_changed_while_the_update_ran_is_reported_once(
+        self,
+    ) -> None:
+        """A source of two generated files that changes while the update runs is reported once, not once per file.
+
+        The change is made right after ``current_files`` has hashed the sources, as above. Would fail
+        if every generated file that names the source added its own line, so the same advice
+        appeared twice.
+        """
+        self.write_generated(
+            "src/versioned.rs",
+            header("system/stores/mvcc.py") + "\npub struct Versioned;\n",
+        )
+        hash_sources = script.current_files
+
+        def hash_sources_then_change_one(root: Path) -> tuple[list, list[str]]:
+            """Hashes the sources as ``update`` does, then changes the shared one."""
+            result: tuple[list, list[str]] = hash_sources(root)
+            self.write("system/stores/mvcc.py", "class MVCC:\n    x = 1\n")
+            return result
+
+        with mock.patch.object(
+            script, "current_files", side_effect=hash_sources_then_change_one
+        ):
+            self.assertEqual(
+                [
+                    "system/stores/mvcc.py: changed while the update ran; run the update again"
+                ],
+                script.update(self.root),
+            )
         self.assertFalse(self.manifest_path.exists())
 
     @unittest.skipUnless(SYMLINKS, "this system cannot create symbolic links")
@@ -1197,6 +1608,1270 @@ class UpdateRefusesTest(GeneratedRepositoryTest):
         self.assertEqual(before, elsewhere.read_bytes())
 
 
+def git_available() -> bool:
+    """Returns whether git is installed and runs."""
+    try:
+        return (
+            subprocess.run(
+                ["git", "--version"], capture_output=True, check=False
+            ).returncode
+            == 0
+        )
+    except OSError:
+        return False
+
+
+# skipped without git only outside CI; in CI, missing git makes the tests fail instead of hiding the rules' loss:
+@unittest.skipUnless(git_available() or os.environ.get("CI"), "git is not available")
+class GitAttributesTest(unittest.TestCase):
+    """Checks the rules of the repository's real ``.gitattributes`` for the folder of the copies."""
+
+    def check_attr(self, *arguments: str) -> list[str]:
+        """Runs ``git check-attr`` with the given arguments on the repository's ``.gitattributes``; returns its lines.
+
+        Only the rules in that file count: it is copied into a new, empty repository made without
+        templates, so neither the ``info/attributes`` of the checkout, which outrank
+        ``.gitattributes``, nor the developer's personal or the system's attributes take part.
+        """
+        with tempfile.TemporaryDirectory() as folder:
+            env: dict[str, str] = {**os.environ, "GIT_ATTR_NOSYSTEM": "1"}
+            subprocess.run(
+                ["git", "init", "-q", "--template="],
+                cwd=folder,
+                capture_output=True,
+                check=True,
+                env=env,
+            )
+            shutil.copyfile(
+                REPO_ROOT / ".gitattributes", Path(folder) / ".gitattributes"
+            )
+            return subprocess.run(
+                [
+                    "git",
+                    "-c",
+                    f"core.attributesFile={os.devnull}",
+                    "check-attr",
+                    *arguments,
+                ],
+                cwd=folder,
+                capture_output=True,
+                text=True,
+                check=True,
+                env=env,
+            ).stdout.splitlines()
+
+    def test_copies_keep_their_bytes_but_the_readme_is_text(self) -> None:
+        """Git never converts the line endings of a copy; the README of their folder is ordinary text.
+
+        A copy is checked byte for byte against its name, which is the hash of its bytes. Would fail
+        if the rule were lost, so a Windows checkout with ``core.autocrlf`` turned every copy into
+        CR LF and the check reported all of them as corrupt, or if the README fell under that rule
+        or an ``eol`` rule were left over for the copies.
+        """
+        copy: str = f"{COPIES}/0123456789abcdef.txt"
+        readme: str = f"{COPIES}/README.md"
+        self.assertEqual(
+            [
+                f"{copy}: text: unset",
+                f"{copy}: eol: unspecified",
+                f"{readme}: text: auto",
+                f"{readme}: eol: unspecified",
+            ],
+            self.check_attr("text", "eol", "--", copy, readme),
+        )
+
+    def test_copies_are_folded_but_not_their_readme(self) -> None:
+        """GitLab folds the copies in merge request diffs, but not the README of their folder.
+
+        Would fail if the README were caught by the rule for the copies, so a change of its text
+        was hidden from reviewers, or if the rule for the copies were lost.
+        """
+        copy: str = f"{COPIES}/0123456789abcdef.txt"
+        readme: str = f"{COPIES}/README.md"
+        self.assertEqual(
+            [f"{copy}: gitlab-generated: set", f"{readme}: gitlab-generated: unset"],
+            self.check_attr("gitlab-generated", "--", copy, readme),
+        )
+
+
+class SourceCopiesTest(GeneratedRepositoryTest):
+    """Checks that ``update`` stores a copy of every Python source, once per version, and never deletes one."""
+
+    def test_update_stores_one_copy_per_source_named_by_its_hash(self) -> None:
+        """After ``update``, the folder holds exactly one copy per source, named by its hash and holding its bytes.
+
+        ``system/stores/mvcc.py`` is a source of both generated files. Would fail if a copy were not
+        named by the start of the SHA-256 of its source's bytes, held other bytes, or if the folder
+        held any other entry, such as a second copy of the shared source under another name.
+        """
+        self.write("system/stores/versioned.py", "class Versioned:\n    pass\n")
+        self.write_generated(
+            "src/versioned.rs",
+            header("system/stores/mvcc.py", "system/stores/versioned.py")
+            + "\npub struct Versioned;\n",
+        )
+        self.update_cleanly()
+        mvcc: Path = self.root / "system/stores/mvcc.py"
+        versioned: Path = self.root / "system/stores/versioned.py"
+        self.assertEqual(
+            {
+                copy_name_of_file(mvcc): mvcc.read_bytes(),
+                copy_name_of_file(versioned): versioned.read_bytes(),
+            },
+            self.copies(),
+        )
+
+    def test_source_with_windows_line_endings_is_stored_with_lf(self) -> None:
+        """A source with CR LF line endings gives the same copy as its LF version: same name, LF bytes.
+
+        Would fail if the raw bytes were stored: the copy would not match its name, so the check would
+        report it as corrupt, and a Windows checkout would store other copies than Linux.
+        """
+        lf_version: Path = self.root.parent / "mvcc_lf.py"
+        lf_version.write_bytes(b"class MVCC:\n    pass\n")
+        self.write("system/stores/mvcc.py", "class MVCC:\r\n    pass\r\n")
+        self.update_cleanly()
+        self.assertEqual(
+            {copy_name_of_file(lf_version): b"class MVCC:\n    pass\n"}, self.copies()
+        )
+
+    def test_old_copy_stays_after_the_source_changed(self) -> None:
+        """When a source changes and ``update`` runs again, the copy of the old version stays next to the new one.
+
+        Would fail if ``update`` removed the copies the manifest no longer names, although a manifest
+        entry merged from another branch may still name them; the check must not report the old copy.
+        """
+        mvcc: Path = self.root / "system/stores/mvcc.py"
+        self.update_cleanly()
+        old_name: str = copy_name_of_file(mvcc)
+        self.write("system/stores/mvcc.py", "class MVCC:\n    x = 1\n")
+        self.update_cleanly()
+        self.assertEqual(
+            {
+                old_name: b"class MVCC:\n    pass\n",
+                copy_name_of_file(mvcc): b"class MVCC:\n    x = 1\n",
+            },
+            self.copies(),
+        )
+        self.assertEqual([], script.check(self.root))
+
+    def hidden_and_visible_copies(self) -> tuple[dict[str, bytes], dict[str, bytes]]:
+        """Returns the hidden and the visible entries of the folder of the copies, each by name with its bytes."""
+        entries: dict[str, bytes] = self.copies()
+        hidden: dict[str, bytes] = {
+            name: data for name, data in entries.items() if name.startswith(".")
+        }
+        visible: dict[str, bytes] = {
+            name: data for name, data in entries.items() if not name.startswith(".")
+        }
+        return hidden, visible
+
+    def test_interrupted_update_leaves_no_cut_off_copy(self) -> None:
+        """An update interrupted while storing a copy leaves only a hidden partial file, which the check ignores.
+
+        The interruption is simulated by a rename that fails, as it may when the disk is full. The
+        next update stores the copy in full and leaves no partial file of its own; the leftover one
+        stays, as an update never deletes anything in the folder of the copies. Would fail if the
+        copy were written under its own name directly: an interruption could leave a cut-off copy,
+        which the check would report as corrupt and every later update would refuse because of.
+        """
+        source: Path = self.root / "system/stores/mvcc.py"
+        with mock.patch.object(
+            script.os, "replace", side_effect=OSError("No space left on device")
+        ):
+            with self.assertRaises(OSError):
+                script.update(self.root)
+        leftover, visible = self.hidden_and_visible_copies()
+        self.assertEqual({}, visible)
+        self.assertEqual(1, len(leftover), leftover)
+        self.assertRegex(next(iter(leftover)), r"^\..+\.partial$")
+        self.assertEqual(
+            ["generated/rust/GENERATED_FROM.json is missing"], script.check(self.root)
+        )
+        self.update_cleanly()
+        self.assertEqual(
+            (leftover, {copy_name_of_file(source): source.read_bytes()}),
+            self.hidden_and_visible_copies(),
+        )
+        self.assertEqual([], script.check(self.root))
+
+    @unittest.skipIf(os.name == "nt", "Windows has no Unix permission bits")
+    def test_copy_is_readable_by_everyone(self) -> None:
+        """A copy written by ``update`` has the permissions ``rw-r--r--`` (0o644) of a checked-out file.
+
+        Would fail if the copy kept the permissions of its hidden file, which ``mkstemp`` makes
+        readable by its owner only, so other users of a shared checkout could not read the copies.
+        """
+        self.update_cleanly()
+        copy: Path = (
+            self.root / COPIES / copy_name_of_file(self.root / "system/stores/mvcc.py")
+        )
+        self.assertEqual(0o644, stat.S_IMODE(copy.stat().st_mode))
+
+    def test_copy_is_flushed_to_disk_before_it_gets_its_name(self) -> None:
+        """``update`` makes the system write a copy's bytes to disk before the copy is renamed to its own name.
+
+        Would fail without the ``os.fsync`` (or with it after the rename): after a power loss, the
+        renamed copy could be empty or cut off, and the check would report it as corrupt.
+        """
+        name: str = copy_name_of_file(self.root / "system/stores/mvcc.py")
+        named_at_sync: list[bool] = []
+        sync = os.fsync
+
+        def note_and_sync(descriptor: int) -> None:
+            """Notes whether the copy has its own name yet, then writes the file to disk."""
+            named_at_sync.append((self.root / COPIES / name).exists())
+            sync(descriptor)
+
+        with mock.patch.object(script.os, "fsync", side_effect=note_and_sync):
+            self.update_cleanly()
+        self.assertEqual([False], named_at_sync)
+
+    @unittest.skipUnless(SYMLINKS, "this system cannot create symbolic links")
+    def test_update_does_not_write_through_a_planted_hidden_link(self) -> None:
+        """Hidden links ``.<copy name>.partial`` and ``.x.partial`` to a file outside are not written through.
+
+        ``update`` succeeds, the file outside keeps its bytes, and the copy is a real file with the
+        source's bytes. Would fail if the copy were first written to one of these two names without
+        creating that file exclusively: the write would follow the link and overwrite the file
+        outside, and the rename would then put the link in place of the copy.
+        """
+        source: Path = self.root / "system/stores/mvcc.py"
+        name: str = copy_name_of_file(source)
+        outside: Path = self.root.parent / "outside.txt"
+        outside.write_bytes(b"keep me\n")
+        folder: Path = self.root / COPIES
+        folder.mkdir(parents=True)
+        for link in (f".{name}.partial", ".x.partial"):
+            os.symlink(outside, folder / link)
+        self.update_cleanly()
+        self.assertEqual(b"keep me\n", outside.read_bytes())
+        self.assertFalse((folder / name).is_symlink())
+        self.assertEqual(source.read_bytes(), (folder / name).read_bytes())
+        self.assertEqual([], script.check(self.root))
+
+
+class CopyProblemsTest(GeneratedRepositoryTest):
+    """Checks that the check reports missing, corrupt and unexpected entries in the folder of the copies."""
+
+    def test_missing_copy_of_an_older_version_is_reported_with_the_recovery_hint(
+        self,
+    ) -> None:
+        """A missing copy of a recorded version the source no longer has is reported, with how to get it back from git.
+
+        The update cannot write that copy, so the advice is to restore it from git or, if git has no
+        intact copy, to regenerate the Rust files before the update. Would fail if the copies were
+        not compared with the manifest, so a deleted copy went unnoticed until ``--diff`` needs it,
+        or if the report said to just run the update without regenerating first, which would record
+        the out-of-date Rust file as current.
+        """
+        self.update_cleanly()
+        name: str = copy_name_of_file(self.root / "system/stores/mvcc.py")
+        (self.root / COPIES / name).unlink()
+        self.write("system/stores/mvcc.py", "class MVCC:\n    x = 1\n")
+        self.assertEqual(
+            [
+                missing_copy(name, "system/stores/mvcc.py"),
+                "src/mvcc.rs: out of date, system/stores/mvcc.py changed since it was generated; "
+                "regenerate it and run the update",
+            ],
+            script.check(self.root),
+        )
+
+    def test_missing_copy_shared_by_two_sources_is_reported_for_each(self) -> None:
+        """Two sources with the same content share one copy; if it is missing, each source gets its own report.
+
+        One source changed since, the other did not, so only the second still has the version of the
+        copy and gets the advice to run the update. Would fail if the copy were reported for one of
+        the sources only, so the advice to regenerate the Rust files of the other one were lost.
+        """
+        self.write("system/stores/legacy.py", "class MVCC:\n    pass\n")
+        self.write_generated(
+            "src/legacy.rs",
+            header("system/stores/legacy.py") + "\npub struct Legacy;\n",
+        )
+        self.update_cleanly()
+        name: str = copy_name_of_file(self.root / "system/stores/mvcc.py")
+        (self.root / COPIES / name).unlink()
+        self.write("system/stores/mvcc.py", "class MVCC:\n    x = 1\n")
+        self.assertEqual(
+            [
+                missing_current_copy(name, "system/stores/legacy.py"),
+                missing_copy(name, "system/stores/mvcc.py"),
+                "src/mvcc.rs: out of date, system/stores/mvcc.py changed since it was generated; "
+                "regenerate it and run the update",
+            ],
+            script.check(self.root),
+        )
+
+    def test_corrupt_copy_is_reported(self) -> None:
+        """A copy whose content does not match its name is reported as corrupt, with the advice to delete it.
+
+        Would fail if only the presence of a copy were checked, so an edited copy made ``--diff`` show
+        changes that were never made.
+        """
+        self.update_cleanly()
+        name: str = copy_name_of_file(self.root / "system/stores/mvcc.py")
+        self.write(f"{COPIES}/{name}", "class MVCC:\n    edited = True\n")
+        self.assertEqual(
+            [corrupt_copy(name)],
+            script.check(self.root),
+        )
+
+    def test_copy_with_windows_line_endings_is_corrupt(self) -> None:
+        """A copy whose text is unchanged but whose line endings became CR LF is corrupt, for check and diff.
+
+        A copy holds the bytes its name is the hash of, which have LF line endings. Would fail if a
+        copy were hashed like a source, with CR LF made LF first, so ``diff`` showed every old line
+        with a CR at its end.
+        """
+        self.update_cleanly()
+        name: str = copy_name_of_file(self.root / "system/stores/mvcc.py")
+        self.write(f"{COPIES}/{name}", "class MVCC:\r\n    pass\r\n")
+        corrupt: str = corrupt_copy(name)
+        self.assertEqual([corrupt], script.check(self.root))
+        self.write("system/stores/mvcc.py", "class MVCC:\n    x = 1\n")
+        self.assertEqual(([], [corrupt]), script.diff(self.root, []))
+
+    def test_unexpected_entries_are_reported_and_hidden_files_ignored(self) -> None:
+        """Subfolders and files that are no copy are reported; the README and ``.DS_Store`` are not.
+
+        A copy is named by exactly 16 lower-case hex digits and ``.txt``, so a name in upper case or
+        with a further suffix (as a merge tool leaves it) is no copy, and neither is a folder named
+        like a copy. Would fail if the folder accepted any file, so notes or stray files could pile
+        up between the copies, if the name were only matched at its start or without regard to
+        case, if a folder with the name of a copy were read as a copy, which makes the check crash,
+        or if a file that macOS puts there made the check fail.
+        """
+        self.update_cleanly()
+        self.write(f"{COPIES}/README.md", "# Python sources\n")
+        self.write(f"{COPIES}/.DS_Store", "finder\n")
+        self.write(f"{COPIES}/notes.md", "to do\n")
+        self.write(f"{COPIES}/0123456789ABCDEF.txt", "upper case\n")
+        self.write(f"{COPIES}/0123456789abcdef.txt.orig", "left by a merge\n")
+        (self.root / COPIES / "old").mkdir()
+        # a name other than 0123456789abcdef.txt, which a file system that ignores case takes for the file above:
+        (self.root / COPIES / "fedcba9876543210.txt").mkdir()
+        self.assertEqual(
+            [
+                f"{COPIES}/0123456789ABCDEF.txt: not a copy of a Python source; only copies <16 hex digits>.txt "
+                "and README.md belong here",
+                f"{COPIES}/0123456789abcdef.txt.orig: not a copy of a Python source; only copies <16 hex "
+                "digits>.txt and README.md belong here",
+                f"{COPIES}/fedcba9876543210.txt: not a copy of a Python source; only copies <16 hex digits>.txt "
+                "and README.md belong here",
+                f"{COPIES}/notes.md: not a copy of a Python source; only copies <16 hex digits>.txt and "
+                "README.md belong here",
+                f"{COPIES}/old: not a copy of a Python source; only copies <16 hex digits>.txt and "
+                "README.md belong here",
+            ],
+            script.check(self.root),
+        )
+
+    def test_unexpected_entry_is_reported_also_without_manifest(self) -> None:
+        """A file that is no copy is reported next to the missing manifest, not hidden by it.
+
+        Would fail if the check stopped at the missing manifest, so the stray file only showed after
+        the next update, which then refuses because of it.
+        """
+        self.write(f"{COPIES}/notes.md", "to do\n")
+        self.assertEqual(
+            [
+                f"{COPIES}/notes.md: not a copy of a Python source; only copies <16 hex digits>.txt and "
+                "README.md belong here",
+                "generated/rust/GENERATED_FROM.json is missing",
+            ],
+            script.check(self.root),
+        )
+
+    def test_update_refuses_on_a_corrupt_copy(self) -> None:
+        """With a corrupt copy, ``update`` returns the problem and writes neither the manifest nor new copies.
+
+        Would fail if ``update`` went on and recorded a manifest whose copies cannot be trusted.
+        """
+        self.update_cleanly()
+        before: bytes = self.mark_manifest()
+        name: str = copy_name_of_file(self.root / "system/stores/mvcc.py")
+        self.write(f"{COPIES}/{name}", "class MVCC:\n    edited = True\n")
+        self.write("system/stores/mvcc.py", "class MVCC:\n    x = 1\n")
+        self.assertEqual(
+            [corrupt_copy(name)],
+            script.update(self.root),
+        )
+        self.assertEqual(before, self.manifest_path.read_bytes())
+        self.assertEqual([name], list(self.copies()))
+
+    def test_deleted_corrupt_copy_of_the_current_version_is_written_by_the_update(
+        self,
+    ) -> None:
+        """A corrupt copy of a current source, once deleted as advised, is reported missing, and the update writes it.
+
+        This is the way out of the corrupt state: the check says to delete the copy, then says how to
+        get it back, and after the update it passes. Would fail if a deleted copy were not reported
+        as missing with the advice to run the update, or if the update did not write it again.
+        """
+        self.update_cleanly()
+        mvcc: Path = self.root / "system/stores/mvcc.py"
+        name: str = copy_name_of_file(mvcc)
+        self.write(f"{COPIES}/{name}", "class MVCC:\n    edited = True\n")
+        self.assertEqual([corrupt_copy(name)], script.check(self.root))
+        (self.root / COPIES / name).unlink()
+        self.assertEqual(
+            [missing_current_copy(name, "system/stores/mvcc.py")],
+            script.check(self.root),
+        )
+        self.update_cleanly()
+        self.assertEqual({name: mvcc.read_bytes()}, self.copies())
+        self.assertEqual([], script.check(self.root))
+
+    def test_update_refuses_on_an_unexpected_entry(self) -> None:
+        """With a file that is no copy in the folder, ``update`` returns the problem and writes nothing.
+
+        Would fail if ``update`` ignored the folder's content and so left the stray file to every
+        later check.
+        """
+        self.update_cleanly()
+        before: bytes = self.mark_manifest()
+        name: str = copy_name_of_file(self.root / "system/stores/mvcc.py")
+        self.write(f"{COPIES}/notes.md", "to do\n")
+        self.write("system/stores/mvcc.py", "class MVCC:\n    x = 1\n")
+        self.assertEqual(
+            [
+                f"{COPIES}/notes.md: not a copy of a Python source; only copies <16 hex digits>.txt and "
+                "README.md belong here"
+            ],
+            script.update(self.root),
+        )
+        self.assertEqual(before, self.manifest_path.read_bytes())
+        self.assertEqual({name, "notes.md"}, set(self.copies()))
+
+    def test_update_writes_a_missing_copy(self) -> None:
+        """The check says to regenerate and then run the update for a missing copy of a current source, which it writes.
+
+        Would fail if the check gave the hint to restore the copy from git, although the source
+        still has the version, or if ``update`` refused on missing copies like the check does, so a
+        developer could not record a regeneration while a copy is missing.
+        """
+        self.update_cleanly()
+        mvcc: Path = self.root / "system/stores/mvcc.py"
+        (self.root / COPIES / copy_name_of_file(mvcc)).unlink()
+        self.assertEqual(
+            [missing_current_copy(copy_name_of_file(mvcc), "system/stores/mvcc.py")],
+            script.check(self.root),
+        )
+        self.update_cleanly()
+        self.assertEqual({copy_name_of_file(mvcc): mvcc.read_bytes()}, self.copies())
+        self.assertEqual([], script.check(self.root))
+
+    @unittest.skipUnless(SYMLINKS, "this system cannot create symbolic links")
+    def test_linked_folders_are_reported_and_update_refuses(self) -> None:
+        """The copies folder or ``generated/`` as a symbolic link is reported; ``update`` writes nothing through it.
+
+        ``generated/`` holds both the folder of the copies and the generated folder; it is reported
+        once, as the folder that holds the generated folder. Would fail if the folders were only
+        checked to exist, so ``update`` wrote copies into a folder anywhere on the machine and the
+        check read copies from there, or if the link at ``generated/`` were reported a second time.
+        """
+        self.update_cleanly()
+        before: bytes = self.mark_manifest()
+        self.write("system/stores/mvcc.py", "class MVCC:\n    x = 1\n")
+        out_of_date: str = (
+            "src/mvcc.rs: out of date, system/stores/mvcc.py changed since it was generated; "
+            "regenerate it and run the update"
+        )
+        expected: dict[str, list[str]] = {
+            COPIES: [f"{COPIES}: not a folder; it must be a real folder, not a link"],
+            "generated": ["generated: a symbolic link; it must be a real folder"],
+        }
+        for folder, problems in expected.items():
+            with self.subTest(folder=folder):
+                linked: Path = self.root / folder
+                elsewhere: Path = self.root.parent / "elsewhere"
+                linked.rename(elsewhere)
+                os.symlink(elsewhere, linked)
+                try:
+                    content: list[Path] = sorted(elsewhere.rglob("*"))
+                    self.assertEqual(problems, script.update(self.root))
+                    self.assertEqual(before, self.manifest_path.read_bytes())
+                    self.assertEqual(content, sorted(elsewhere.rglob("*")))
+                    self.assertEqual(problems + [out_of_date], script.check(self.root))
+                finally:
+                    linked.unlink()
+                    elsewhere.rename(linked)
+
+    def test_copies_folder_that_is_a_file_is_reported_and_update_refuses(
+        self,
+    ) -> None:
+        """A file in place of the folder of the copies is reported by the check, and ``update`` refuses.
+
+        Would fail if ``update`` crashed on creating the folder, or if the check only reported the
+        copies missing, without the reason.
+        """
+        self.update_cleanly()
+        before: bytes = self.mark_manifest()
+        name: str = copy_name_of_file(self.root / "system/stores/mvcc.py")
+        shutil.rmtree(self.root / COPIES)
+        self.write(COPIES, "not a folder\n")
+        problem: str = f"{COPIES}: not a folder; it must be a real folder, not a link"
+        self.assertEqual(
+            [problem, missing_current_copy(name, "system/stores/mvcc.py")],
+            script.check(self.root),
+        )
+        self.assertEqual([problem], script.update(self.root))
+        self.assertEqual(before, self.manifest_path.read_bytes())
+
+    @unittest.skipUnless(SYMLINKS, "this system cannot create symbolic links")
+    def test_link_in_the_copies_folder_is_reported(self) -> None:
+        """A symbolic link named like a copy, to an intact copy elsewhere, is reported as no copy.
+
+        Would fail if a link counted as a copy because the file it points to matches its name, so a
+        copy could live outside the repository, where git does not keep it.
+        """
+        self.update_cleanly()
+        name: str = copy_name_of_file(self.root / "system/stores/mvcc.py")
+        elsewhere: Path = self.root.parent / name
+        (self.root / COPIES / name).rename(elsewhere)
+        os.symlink(elsewhere, self.root / COPIES / name)
+        self.assertEqual(
+            [
+                f"{COPIES}/{name}: not a copy of a Python source; only copies <16 hex digits>.txt and "
+                "README.md belong here"
+            ],
+            script.check(self.root),
+        )
+
+
+class DiffTest(GeneratedRepositoryTest):
+    """Checks ``diff``: what changed in the Python sources since their generated files were generated."""
+
+    def test_changed_source_is_shown_against_its_copy(self) -> None:
+        """A changed source gives one unified diff of its copy against the current file, under a heading.
+
+        The removed line is in no current file, so it can only come from the copy, whose name the
+        header line of the old version gives. Would fail if the old text were read from anywhere else,
+        the heading named the wrong state or files, or the header line did not name the copy.
+        """
+        self.update_cleanly()
+        self.write("system/stores/mvcc.py", "class MVCC:\n    x = 1\n")
+        self.assertEqual(
+            (
+                [
+                    "system/stores/mvcc.py: changed; generated from it: src/mvcc.rs",
+                    old_label("system/stores/mvcc.py", "class MVCC:\n    pass\n"),
+                    "+++ system/stores/mvcc.py (now)",
+                    "@@ -1,2 +1,2 @@",
+                    " class MVCC:",
+                    "-    pass",
+                    "+    x = 1",
+                ],
+                [],
+            ),
+            script.diff(self.root, []),
+        )
+
+    def test_nothing_changed_gives_a_single_line(self) -> None:
+        """Without a changed source, ``diff`` gives only the line saying so.
+
+        Would fail if an unchanged source were compared and shown with an empty diff.
+        """
+        self.update_cleanly()
+        self.assertEqual(([NOTHING_CHANGED], []), script.diff(self.root, []))
+
+    def test_source_shared_by_two_files_is_shown_once(self) -> None:
+        """A changed source recorded in the same version for two generated files gives one diff naming both.
+
+        Would fail if the diff were made per generated file, so the same change was shown twice.
+        """
+        self.write_generated(
+            "src/other.rs", header("system/stores/mvcc.py") + "\npub struct Other;\n"
+        )
+        self.update_cleanly()
+        self.write("system/stores/mvcc.py", "class MVCC:\n    x = 1\n")
+        self.assertEqual(
+            (
+                [
+                    "system/stores/mvcc.py: changed; generated from it: src/mvcc.rs, src/other.rs"
+                ]
+                + MVCC_DIFF[1:],
+                [],
+            ),
+            script.diff(self.root, []),
+        )
+
+    def test_changed_sources_are_shown_in_the_order_of_their_paths(self) -> None:
+        """The diffs of two changed sources come in the order of the source paths, not of the generated files.
+
+        ``src/kv_store.rs`` comes before ``src/mvcc.rs``, but its source ``system/stores/versioned.py``
+        comes after ``system/stores/mvcc.py``. Would fail if the versions were shown in the order they
+        were found, file by file, so the order depended on the names of the generated files.
+        """
+        self.write("system/stores/versioned.py", "class Versioned:\n    pass\n")
+        self.write_generated(
+            "src/kv_store.rs",
+            header("system/stores/versioned.py") + "\npub struct KvStore;\n",
+        )
+        self.update_cleanly()
+        self.write("system/stores/mvcc.py", "class MVCC:\n    x = 1\n")
+        self.write("system/stores/versioned.py", "class Versioned:\n    x = 1\n")
+        self.assertEqual(
+            (
+                MVCC_DIFF
+                + [
+                    "system/stores/versioned.py: changed; generated from it: src/kv_store.rs",
+                    old_label(
+                        "system/stores/versioned.py", "class Versioned:\n    pass\n"
+                    ),
+                    "+++ system/stores/versioned.py (now)",
+                    "@@ -1,2 +1,2 @@",
+                    " class Versioned:",
+                    "-    pass",
+                    "+    x = 1",
+                ],
+                [],
+            ),
+            script.diff(self.root, []),
+        )
+
+    def test_two_recorded_versions_of_one_source_give_two_diffs(self) -> None:
+        """Two files recorded with different versions of one source give one diff per version, each with its files.
+
+        The manifest is edited by hand into the state after merging two branches, each of which
+        regenerated one of the files from another version of the source::
+
+            src/mvcc.rs    recorded with "pass"
+            src/other.rs   recorded with "y = 2"
+            now            "x = 1"
+
+        The two diffs come in the order of the recorded hashes: the hash of "y = 2" is the smaller one,
+        although ``src/mvcc.rs`` and its version are found first; the header line of each old version
+        names its own copy, so the two are told apart. Would fail if the diff were grouped by source
+        path only, so one of the two old versions was lost and the other was shown for both files, if
+        the diffs of one source came in the order they were found, or if both header lines were the same.
+        """
+        mvcc: Path = self.root / "system/stores/mvcc.py"
+        self.update_cleanly()
+        first: str = digest(mvcc)
+        self.write_generated(
+            "src/other.rs", header("system/stores/mvcc.py") + "\npub struct Other;\n"
+        )
+        self.write("system/stores/mvcc.py", "class MVCC:\n    y = 2\n")
+        self.update_cleanly()
+        second: str = digest(mvcc)
+        manifest: dict = self.manifest()
+        for entry in manifest["files"]:
+            if entry["path"] == "src/mvcc.rs":
+                entry["sources"][0]["sha256"] = first
+        self.write_generated("GENERATED_FROM.json", json.dumps(manifest, indent=2))
+        self.write("system/stores/mvcc.py", "class MVCC:\n    x = 1\n")
+        # the order of the hashes is the opposite of the order in which the versions are found:
+        self.assertLess(second, first)
+        self.assertEqual(
+            (
+                [
+                    "system/stores/mvcc.py: changed; generated from it: src/other.rs",
+                    old_label("system/stores/mvcc.py", "class MVCC:\n    y = 2\n"),
+                    "+++ system/stores/mvcc.py (now)",
+                    "@@ -1,2 +1,2 @@",
+                    " class MVCC:",
+                    "-    y = 2",
+                    "+    x = 1",
+                    "system/stores/mvcc.py: changed; generated from it: src/mvcc.rs",
+                    old_label("system/stores/mvcc.py", "class MVCC:\n    pass\n"),
+                    "+++ system/stores/mvcc.py (now)",
+                    "@@ -1,2 +1,2 @@",
+                    " class MVCC:",
+                    "-    pass",
+                    "+    x = 1",
+                ],
+                [],
+            ),
+            script.diff(self.root, []),
+        )
+
+    def test_deleted_source_is_shown_as_deleted(self) -> None:
+        """A source that no longer exists is shown as deleted, all its old lines removed.
+
+        Would fail if a missing source made ``diff`` crash or were left out.
+        """
+        self.update_cleanly()
+        (self.root / "system/stores/mvcc.py").unlink()
+        self.assertEqual(
+            (
+                [
+                    "system/stores/mvcc.py: deleted; generated from it: src/mvcc.rs",
+                    old_label("system/stores/mvcc.py", "class MVCC:\n    pass\n"),
+                    "+++ system/stores/mvcc.py (deleted)",
+                    "@@ -1,2 +0,0 @@",
+                    "-class MVCC:",
+                    "-    pass",
+                ],
+                [],
+            ),
+            script.diff(self.root, []),
+        )
+
+    def test_source_added_to_the_first_line_is_shown_as_not_recorded(self) -> None:
+        """A source in a file's first line but not in its manifest entry is shown as not recorded, all lines added.
+
+        Would fail if only the sources in the manifest were looked at, so a source added while
+        regenerating was not shown before the update.
+        """
+        self.update_cleanly()
+        self.write("system/stores/versioned.py", "class Versioned:\n    pass\n")
+        self.write_generated(
+            "src/mvcc.rs",
+            header("system/stores/mvcc.py", "system/stores/versioned.py")
+            + "\npub struct Mvcc;\n",
+        )
+        self.assertEqual(
+            (
+                [
+                    "system/stores/versioned.py: named in the first line, not recorded in the manifest; "
+                    "generated from it: src/mvcc.rs",
+                    "--- system/stores/versioned.py (not recorded)",
+                    "+++ system/stores/versioned.py (now)",
+                    "@@ -0,0 +1,2 @@",
+                    "+class Versioned:",
+                    "+    pass",
+                ],
+                [],
+            ),
+            script.diff(self.root, []),
+        )
+
+    def test_source_that_is_not_utf8_is_an_error(self) -> None:
+        """A changed source that is not UTF-8 text gives an error instead of a diff.
+
+        Would fail if the decoding error escaped from ``diff``, so the command showed a traceback.
+        """
+        self.update_cleanly()
+        (self.root / "system/stores/mvcc.py").write_bytes(b"class MVCC:\n    \xff\n")
+        self.assertEqual(
+            (
+                [],
+                [
+                    "system/stores/mvcc.py: not a UTF-8 text file, so it cannot be compared"
+                ],
+            ),
+            script.diff(self.root, []),
+        )
+
+    def test_copy_that_is_not_utf8_is_an_error(self) -> None:
+        """A changed source whose copy is not UTF-8 text gives an error naming the copy instead of a diff.
+
+        The source was not UTF-8 when it was generated from, so its intact copy is not either. Would
+        fail if the copy were decoded without a check, so the decoding error escaped from ``diff`` and
+        the command showed a traceback.
+        """
+        (self.root / "system/stores/mvcc.py").write_bytes(b"class MVCC:\n    \xff\n")
+        self.update_cleanly()
+        name: str = copy_name_of_file(self.root / "system/stores/mvcc.py")
+        self.write("system/stores/mvcc.py", "class MVCC:\n    x = 1\n")
+        self.assertEqual(
+            (
+                [],
+                [f"{COPIES}/{name}: not a UTF-8 text file, so it cannot be compared"],
+            ),
+            script.diff(self.root, []),
+        )
+
+    def test_lines_are_split_at_lf_only(self) -> None:
+        """A form feed or a lone CR inside a line of a source stays in that line of the diff, as in git.
+
+        Only the first line changes, so the line with the form feed or CR is shown once, as context.
+        Would fail if the texts were split with ``str.splitlines``, which also splits at these
+        characters, so the diff showed more lines than the source has and marked them as missing
+        their final newline.
+        """
+        for case, line in {
+            "form feed": "    x = 1\f# next page",
+            "lone CR": "    x = 1\r# after a CR",
+        }.items():
+            with self.subTest(case=case):
+                self.write("system/stores/mvcc.py", f"class MVCC:\n{line}\n")
+                self.update_cleanly()
+                self.write("system/stores/mvcc.py", f"class Mvcc:\n{line}\n")
+                self.assertEqual(
+                    (
+                        mvcc_diff_head(f"class MVCC:\n{line}\n")
+                        + ["-class MVCC:", "+class Mvcc:", f" {line}"],
+                        [],
+                    ),
+                    script.diff(self.root, []),
+                )
+
+    def test_missing_manifest_is_an_error(self) -> None:
+        """Without a manifest, ``diff`` gives the problem as an error.
+
+        Would fail if ``diff`` crashed on the missing manifest or said that nothing changed.
+        """
+        self.assertEqual(
+            ([], ["generated/rust/GENERATED_FROM.json is missing"]),
+            script.diff(self.root, []),
+        )
+
+    def test_diff_works_despite_problems_elsewhere(self) -> None:
+        """A broken first line in another file and a stray file among the copies do not keep a change from being shown.
+
+        The broken first line is an error; the stray file is the check's business, not the diff's.
+        Would fail if ``diff`` refused like ``update`` on any problem, so a developer could not see
+        what changed while the generated folder is in the middle of a regeneration.
+        """
+        self.write("system/stores/versioned.py", "class Versioned:\n    pass\n")
+        self.write_generated(
+            "src/versioned.rs",
+            header("system/stores/versioned.py") + "\npub struct Versioned;\n",
+        )
+        self.update_cleanly()
+        self.write_generated("src/versioned.rs", "pub struct Versioned;\n")
+        self.write(f"{COPIES}/notes.md", "to do\n")
+        self.write("system/stores/mvcc.py", "class MVCC:\n    x = 1\n")
+        self.assertEqual(
+            (MVCC_DIFF, [f"src/versioned.rs: {NO_HEADER}"]), script.diff(self.root, [])
+        )
+
+    def test_corrupt_copy_is_an_error(self) -> None:
+        """A changed source whose copy does not match its name gives an error instead of a diff.
+
+        Would fail if the copy were read without checking its hash, so an edited copy made ``diff``
+        show changes that were never made.
+        """
+        self.update_cleanly()
+        name: str = copy_name_of_file(self.root / "system/stores/mvcc.py")
+        self.write(f"{COPIES}/{name}", "class MVCC:\n    edited = True\n")
+        self.write("system/stores/mvcc.py", "class MVCC:\n    x = 1\n")
+        self.assertEqual(
+            (
+                [],
+                [corrupt_copy(name)],
+            ),
+            script.diff(self.root, []),
+        )
+
+    def test_windows_line_endings_alone_are_no_change(self) -> None:
+        """A source whose line endings only became CR LF gives the line that nothing changed.
+
+        Would fail if the current source were hashed with its raw bytes, so a Windows checkout showed
+        every source as changed.
+        """
+        self.update_cleanly()
+        self.write("system/stores/mvcc.py", "class MVCC:\r\n    pass\r\n")
+        self.assertEqual(([NOTHING_CHANGED], []), script.diff(self.root, []))
+
+    def test_source_with_windows_line_endings_shows_only_the_real_change(self) -> None:
+        """A source with CR LF line endings and one changed line shows only that line as changed.
+
+        Would fail if the current source were compared with its raw bytes, so every line differed from
+        the copy by its CR, or if a CR were left at the end of the lines shown.
+        """
+        self.update_cleanly()
+        self.write("system/stores/mvcc.py", "class MVCC:\r\n    x = 1\r\n")
+        self.assertEqual((MVCC_DIFF, []), script.diff(self.root, []))
+
+    def test_missing_final_newline_is_marked_as_git_does(self) -> None:
+        """A change that only removes or adds the final newline shows the last line changed, marked as in git.
+
+        Would fail if the diff lost the change (lines compared without their line endings) or left
+        out the note ``\\ No newline at end of file`` after the line without one.
+        """
+        cases: dict[str, tuple[str, str, list[str]]] = {
+            "removed": (
+                "class MVCC:\n    pass\n",
+                "class MVCC:\n    pass",
+                ["-    pass", "+    pass", "\\ No newline at end of file"],
+            ),
+            "added": (
+                "class MVCC:\n    pass",
+                "class MVCC:\n    pass\n",
+                ["-    pass", "\\ No newline at end of file", "+    pass"],
+            ),
+        }
+        for case, (before, after, changed) in cases.items():
+            with self.subTest(newline=case):
+                self.write("system/stores/mvcc.py", before)
+                self.update_cleanly()
+                self.write("system/stores/mvcc.py", after)
+                self.assertEqual(
+                    (mvcc_diff_head(before) + [" class MVCC:"] + changed, []),
+                    script.diff(self.root, []),
+                )
+
+
+class DiffSourcePathTest(GeneratedRepositoryTest):
+    """Checks ``diff`` on sources that are missing, outside ``system/``, no longer named or spelled differently."""
+
+    def test_missing_source_named_in_the_first_line_is_an_error(self) -> None:
+        """A source named in a first line but not recorded and not on disk is an error.
+
+        Would fail if the missing source were shown as deleted from an empty old version, or made
+        ``diff`` crash on reading it.
+        """
+        self.update_cleanly()
+        self.write_generated(
+            "src/mvcc.rs",
+            header("system/stores/mvcc.py", "system/stores/gone.py")
+            + "\npub struct Mvcc;\n",
+        )
+        self.assertEqual(
+            (
+                [],
+                [
+                    "src/mvcc.rs: its source system/stores/gone.py is named in the first line but does not exist"
+                ],
+            ),
+            script.diff(self.root, []),
+        )
+
+    def test_recorded_source_outside_system_is_an_error_and_not_shown(self) -> None:
+        """A source in the manifest that is outside ``system/`` is an error, and its content is not printed.
+
+        The manifest is edited by hand to name a file outside the repository, with the recorded hash
+        of a copy that exists. Would fail if ``diff`` compared that copy with the file the path leads
+        to, so a manifest could print any file of the machine.
+        """
+        (self.root.parent / "outside.py").write_bytes(b"SECRET = 1\n")
+        self.update_cleanly()
+        manifest: dict = self.manifest()
+        entry: dict = manifest["files"][0]
+        entry["sources"].append(
+            {
+                "sha256": entry["sources"][0]["sha256"],
+                "path": "system/../../outside.py",
+            }
+        )
+        self.write_generated("GENERATED_FROM.json", json.dumps(manifest, indent=2))
+        self.assertEqual(
+            ([], ["src/mvcc.rs: its source system/../../outside.py is not in system/"]),
+            script.diff(self.root, []),
+        )
+
+    def test_source_outside_system_in_the_first_line_is_an_error_and_not_shown(
+        self,
+    ) -> None:
+        """A source in a first line that is outside ``system/`` is an error, and its content is not printed.
+
+        Would fail if a source named only in the first line were shown as not recorded without the
+        check, so a generated file could print any file of the machine.
+        """
+        (self.root.parent / "outside.py").write_bytes(b"SECRET = 1\n")
+        self.update_cleanly()
+        self.write_generated(
+            "src/mvcc.rs",
+            header("system/stores/mvcc.py", "system/../../outside.py")
+            + "\npub struct Mvcc;\n",
+        )
+        self.assertEqual(
+            ([], ["src/mvcc.rs: its source system/../../outside.py is not in system/"]),
+            script.diff(self.root, []),
+        )
+
+    def test_unchanged_source_dropped_from_the_first_line_gives_a_note(self) -> None:
+        """A recorded source that the first line no longer names, but that did not change, gives a note.
+
+        No version differs, so the line saying that nothing changed comes first, then the note. Would
+        fail if the dropped source were left out (so ``diff`` said only that nothing changed although
+        the check reports the file as out of date) or shown with an empty diff.
+        """
+        self.write("system/stores/versioned.py", "class Versioned:\n    pass\n")
+        self.write_generated(
+            "src/mvcc.rs",
+            header("system/stores/mvcc.py", "system/stores/versioned.py")
+            + "\npub struct Mvcc;\n",
+        )
+        self.update_cleanly()
+        self.write_generated(
+            "src/mvcc.rs", header("system/stores/mvcc.py") + "\npub struct Mvcc;\n"
+        )
+        self.assertEqual(
+            (
+                [
+                    NOTHING_CHANGED,
+                    "src/mvcc.rs: no longer generated from system/stores/versioned.py, which did not change",
+                ],
+                [],
+            ),
+            script.diff(self.root, []),
+        )
+
+    def test_changed_source_dropped_from_the_first_line_gives_the_diff_and_a_note(
+        self,
+    ) -> None:
+        """A recorded source that changed and that the first line no longer names gives its diff and a note.
+
+        The note comes after the diffs. Would fail if the note were only given for an unchanged
+        source, so the diff did not say that the file is no longer generated from the changed
+        source, or if the dropped source's diff were left out.
+        """
+        self.write("system/stores/versioned.py", "class Versioned:\n    pass\n")
+        self.write_generated(
+            "src/mvcc.rs",
+            header("system/stores/mvcc.py", "system/stores/versioned.py")
+            + "\npub struct Mvcc;\n",
+        )
+        self.update_cleanly()
+        self.write("system/stores/versioned.py", "class Versioned:\n    x = 1\n")
+        self.write_generated(
+            "src/mvcc.rs", header("system/stores/mvcc.py") + "\npub struct Mvcc;\n"
+        )
+        self.assertEqual(
+            (
+                [
+                    "system/stores/versioned.py: changed; generated from it: src/mvcc.rs",
+                    old_label(
+                        "system/stores/versioned.py", "class Versioned:\n    pass\n"
+                    ),
+                    "+++ system/stores/versioned.py (now)",
+                    "@@ -1,2 +1,2 @@",
+                    " class Versioned:",
+                    "-    pass",
+                    "+    x = 1",
+                    "src/mvcc.rs: no longer generated from system/stores/versioned.py, which changed",
+                ],
+                [],
+            ),
+            script.diff(self.root, []),
+        )
+
+    def test_source_whose_name_changed_case_is_shown_as_deleted(self) -> None:
+        """A recorded source whose file name now differs in upper and lower case is shown as deleted.
+
+        On a file system that ignores case (macOS, Windows), the old path still opens the renamed
+        file. Would fail if ``diff`` only asked whether the old path opens a file, so it said that
+        nothing changed although the check reports the source as missing.
+        """
+        self.update_cleanly()
+        (self.root / "system/stores/mvcc.py").rename(
+            self.root / "system/stores/MVCC.py"
+        )
+        self.assertEqual(
+            (
+                [
+                    "system/stores/mvcc.py: deleted; generated from it: src/mvcc.rs",
+                    old_label("system/stores/mvcc.py", "class MVCC:\n    pass\n"),
+                    "+++ system/stores/mvcc.py (deleted)",
+                    "@@ -1,2 +0,0 @@",
+                    "-class MVCC:",
+                    "-    pass",
+                ],
+                [],
+            ),
+            script.diff(self.root, []),
+        )
+
+    def test_source_in_the_first_line_spelled_in_another_case_is_an_error(
+        self,
+    ) -> None:
+        """A source named in a first line but not recorded, spelled in another case than its file, is an error.
+
+        Would fail if ``diff`` only asked whether the path opens a file, so on a file system that
+        ignores case it showed the file as a source not recorded, although the check reports it as
+        missing.
+        """
+        self.update_cleanly()
+        self.write("system/stores/versioned.py", "class Versioned:\n    pass\n")
+        self.write_generated(
+            "src/mvcc.rs",
+            header("system/stores/mvcc.py", "system/stores/Versioned.py")
+            + "\npub struct Mvcc;\n",
+        )
+        self.assertEqual(
+            (
+                [],
+                [
+                    "src/mvcc.rs: its source system/stores/Versioned.py is named in the first line but does not exist"
+                ],
+            ),
+            script.diff(self.root, []),
+        )
+
+    def test_source_path_too_long_for_the_file_system_does_not_crash(self) -> None:
+        """A source whose file name is longer than any file system allows is deleted or missing, without a crash.
+
+        The name has 300 characters; asking the system about such a path fails with "File name too
+        long". Named only in the first line, it is an error; as a recorded source (the manifest is
+        edited by hand), it is shown as deleted. Would fail if ``diff`` asked the system whether the
+        path is a file, so the error escaped and the command showed a traceback.
+        """
+        long: str = "system/stores/" + "a" * 300 + ".py"
+        self.update_cleanly()
+        with self.subTest(source="first line"):
+            self.write_generated(
+                "src/mvcc.rs",
+                header("system/stores/mvcc.py", long) + "\npub struct Mvcc;\n",
+            )
+            self.assertEqual(
+                (
+                    [],
+                    [
+                        f"src/mvcc.rs: its source {long} is named in the first line but does not exist"
+                    ],
+                ),
+                script.diff(self.root, []),
+            )
+        with self.subTest(source="recorded"):
+            manifest: dict = self.manifest()
+            manifest["files"][0]["sources"][0]["path"] = long
+            self.write_generated("GENERATED_FROM.json", json.dumps(manifest, indent=2))
+            self.write_generated("src/mvcc.rs", header(long) + "\npub struct Mvcc;\n")
+            self.assertEqual(
+                (
+                    [
+                        f"{long}: deleted; generated from it: src/mvcc.rs",
+                        old_label(long, "class MVCC:\n    pass\n"),
+                        f"+++ {long} (deleted)",
+                        "@@ -1,2 +0,0 @@",
+                        "-class MVCC:",
+                        "-    pass",
+                    ],
+                    [],
+                ),
+                script.diff(self.root, []),
+            )
+
+
+class DiffFirstLineTest(GeneratedRepositoryTest):
+    """Checks how ``diff`` reads the sources a first line names: none at all, one named twice, or no file to read."""
+
+    def test_deleted_generated_file_still_shows_the_change_of_its_source(self) -> None:
+        """A changed source of a generated file that was deleted (but is still in the manifest) is shown as usual.
+
+        The diff takes the sources from the manifest, so it needs no first line to read. Would fail if
+        ``diff`` read the first line of every file in the manifest without checking that the file is
+        there, so a file deleted while regenerating made it crash.
+        """
+        self.update_cleanly()
+        (self.generated / "src/mvcc.rs").unlink()
+        self.write("system/stores/mvcc.py", "class MVCC:\n    x = 1\n")
+        self.assertEqual((MVCC_DIFF, []), script.diff(self.root, []))
+
+    def test_first_line_without_source_gives_a_note_on_the_recorded_one(self) -> None:
+        """A first line changed to name no Python source, while the recorded source did not change, gives a note.
+
+        A first line that names no source is read, so the recorded source is no longer named. Would
+        fail if such a first line were taken for one that cannot be read, so ``diff`` said only that
+        nothing changed although the check reports the file as out of date.
+        """
+        self.update_cleanly()
+        self.write_generated("src/mvcc.rs", NO_SOURCE_HEADER + "\npub struct Mvcc;\n")
+        self.assertEqual(
+            (
+                [
+                    NOTHING_CHANGED,
+                    "src/mvcc.rs: no longer generated from system/stores/mvcc.py, which did not change",
+                ],
+                [],
+            ),
+            script.diff(self.root, []),
+        )
+
+    def test_source_named_twice_is_listed_once(self) -> None:
+        """A source that is not recorded and named twice in a first line names its generated file once in the heading.
+
+        Would fail if the sources of the first line were taken as they are, so the heading read
+        "generated from it: src/mvcc.rs, src/mvcc.rs".
+        """
+        self.update_cleanly()
+        self.write("system/stores/versioned.py", "class Versioned:\n    pass\n")
+        self.write_generated(
+            "src/mvcc.rs",
+            header(
+                "system/stores/mvcc.py",
+                "system/stores/versioned.py",
+                "system/stores/versioned.py",
+            )
+            + "\npub struct Mvcc;\n",
+        )
+        self.assertEqual(
+            (
+                [
+                    "system/stores/versioned.py: named in the first line, not recorded in the manifest; "
+                    "generated from it: src/mvcc.rs",
+                    "--- system/stores/versioned.py (not recorded)",
+                    "+++ system/stores/versioned.py (now)",
+                    "@@ -0,0 +1,2 @@",
+                    "+class Versioned:",
+                    "+    pass",
+                ],
+                [],
+            ),
+            script.diff(self.root, []),
+        )
+
+
+class DiffPathsTest(GeneratedRepositoryTest):
+    """Checks which generated files ``diff`` looks at: the paths given, unknown ones and duplicates."""
+
+    def test_only_the_given_files_are_shown(self) -> None:
+        """Given a generated file, ``diff`` shows only the changes of its sources.
+
+        Would fail if the paths given were ignored and all files of the manifest were shown.
+        """
+        self.write("system/stores/versioned.py", "class Versioned:\n    pass\n")
+        self.write_generated(
+            "src/versioned.rs",
+            header("system/stores/versioned.py") + "\npub struct Versioned;\n",
+        )
+        self.update_cleanly()
+        self.write("system/stores/mvcc.py", "class MVCC:\n    x = 1\n")
+        self.write("system/stores/versioned.py", "class Versioned:\n    x = 1\n")
+        self.assertEqual(
+            (
+                [
+                    "system/stores/versioned.py: changed; generated from it: src/versioned.rs",
+                    old_label(
+                        "system/stores/versioned.py", "class Versioned:\n    pass\n"
+                    ),
+                    "+++ system/stores/versioned.py (now)",
+                    "@@ -1,2 +1,2 @@",
+                    " class Versioned:",
+                    "-    pass",
+                    "+    x = 1",
+                ],
+                [],
+            ),
+            script.diff(self.root, ["src/versioned.rs"]),
+        )
+
+    def test_unknown_path_gives_the_error_and_no_diff(self) -> None:
+        """An unknown path while a source changed gives only the error, not the diff of all files.
+
+        No known file is left to compare, so there is also no line that nothing changed. Would fail
+        if no known path made ``diff`` fall back to all files of the manifest, so a mistyped path
+        showed changes of files that were not asked for, or if it claimed that no source changed,
+        although one did.
+        """
+        self.update_cleanly()
+        self.write("system/stores/mvcc.py", "class MVCC:\n    x = 1\n")
+        self.assertEqual(([], [UNKNOWN_PATH]), script.diff(self.root, ["src/nope.rs"]))
+
+    def test_known_and_unknown_path_give_the_diff_and_the_error(self) -> None:
+        """With one known and one unknown path, ``diff`` gives the diff of the known file and the error of the other.
+
+        Would fail if an unknown path kept the known one from being shown, or were silently dropped.
+        """
+        self.update_cleanly()
+        self.write("system/stores/mvcc.py", "class MVCC:\n    x = 1\n")
+        self.assertEqual(
+            (MVCC_DIFF, [UNKNOWN_PATH]),
+            script.diff(self.root, ["src/nope.rs", "src/mvcc.rs"]),
+        )
+
+    def test_duplicate_paths_are_listed_once(self) -> None:
+        """A path given twice names its file once in the heading, and an unknown path given twice gives one error.
+
+        Would fail if duplicates were kept, so the heading read "src/mvcc.rs, src/mvcc.rs" and the
+        error were printed twice.
+        """
+        self.update_cleanly()
+        self.write("system/stores/mvcc.py", "class MVCC:\n    x = 1\n")
+        self.assertEqual(
+            (MVCC_DIFF, [UNKNOWN_PATH]),
+            script.diff(
+                self.root, ["src/mvcc.rs", "src/nope.rs", "src/mvcc.rs", "src/nope.rs"]
+            ),
+        )
+
+
 class MainTest(GeneratedRepositoryTest):
     """Checks the command line: output and exit status.
 
@@ -1220,6 +2895,14 @@ class MainTest(GeneratedRepositoryTest):
         with contextlib.redirect_stdout(output):
             status: int = self.copy.main(list(arguments))
         return status, output.getvalue()
+
+    def run_diff(self, *paths: str) -> tuple[int, str, str]:
+        """Runs ``main`` with ``--diff`` and the given paths and returns its exit status, output and error output."""
+        output = io.StringIO()
+        errors = io.StringIO()
+        with contextlib.redirect_stdout(output), contextlib.redirect_stderr(errors):
+            status: int = self.copy.main(["--diff", *paths])
+        return status, output.getvalue(), errors.getvalue()
 
     def test_update_then_check_exits_with_zero(self) -> None:
         """``--update`` writes the manifest silently; the following check says all is up to date.
@@ -1284,17 +2967,90 @@ class MainTest(GeneratedRepositoryTest):
             self.run_main(),
         )
 
-    def test_both_update_modes_are_refused(self) -> None:
-        """``--update`` together with ``--update-dependencies`` is a usage error (exit status 2).
+    def test_two_modes_together_are_refused(self) -> None:
+        """``--update`` together with ``--update-dependencies`` or with ``--diff`` is a usage error (exit status 2).
 
-        Would fail if the two options were not mutually exclusive, so one of them was silently ignored.
+        Would fail if the options were not mutually exclusive, so one of them was silently ignored:
+        ``--diff --update`` would show the diff and leave the manifest unwritten, or write it.
         """
-        with contextlib.redirect_stderr(io.StringIO()) as errors:
-            with self.assertRaises(SystemExit) as raised:
-                self.copy.main(["--update", "--update-dependencies"])
-        self.assertEqual(2, raised.exception.code)
-        self.assertIn("not allowed with argument", errors.getvalue())
-        self.assertFalse(self.manifest_path.exists())
+        for arguments in [
+            ["--update", "--update-dependencies"],
+            ["--diff", "--update"],
+        ]:
+            with self.subTest(arguments=arguments):
+                with contextlib.redirect_stderr(io.StringIO()) as errors:
+                    with self.assertRaises(SystemExit) as raised:
+                        self.copy.main(arguments)
+                self.assertEqual(2, raised.exception.code)
+                self.assertIn("not allowed with argument", errors.getvalue())
+                self.assertFalse(self.manifest_path.exists())
+
+    def test_diff_without_change_exits_with_zero(self) -> None:
+        """``--diff`` without a changed source prints only the line saying so and exits with 0.
+
+        Would fail if the option were not wired to ``diff`` or nothing were printed.
+        """
+        self.assertEqual((0, ""), self.run_main("--update"))
+        self.assertEqual((0, NOTHING_CHANGED + "\n"), self.run_main("--diff"))
+
+    def test_diff_of_an_unknown_file_exits_with_one(self) -> None:
+        """``--diff`` of a file that is not in the manifest prints the error to stderr and exits with 1.
+
+        The standard output stays empty, as no known file is left to compare. Would fail if a
+        mistyped path were ignored, so the command exited with 0, or if the error went to the
+        standard output, where it would mix with the diff, or lost its ``error:``.
+        """
+        self.assertEqual((0, ""), self.run_main("--update"))
+        self.assertEqual(
+            (1, "", f"error: {UNKNOWN_PATH}\n"), self.run_diff("src/nope.rs")
+        )
+
+    def test_diff_with_a_missing_copy_exits_with_one(self) -> None:
+        """``--diff`` of a changed source whose copy is missing prints the recovery hint to stderr and exits with 1.
+
+        Would fail if the missing copy were treated as an empty old version, so every line looked new.
+        """
+        self.assertEqual((0, ""), self.run_main("--update"))
+        name: str = copy_name_of_file(self.root / "system/stores/mvcc.py")
+        (self.root / COPIES / name).unlink()
+        self.write("system/stores/mvcc.py", "class MVCC:\n    x = 1\n")
+        self.assertEqual(
+            (1, "", "error: " + missing_copy(name, "system/stores/mvcc.py") + "\n"),
+            self.run_diff("src/mvcc.rs"),
+        )
+
+    def test_diff_prints_the_diff_and_the_errors_apart(self) -> None:
+        """``--diff`` with one known and one unknown file prints the diff to stdout, the error to stderr, exits with 1.
+
+        Would fail if one error suppressed the diff of the files that are known, or if the diff
+        went to stderr.
+        """
+        self.assertEqual((0, ""), self.run_main("--update"))
+        self.write("system/stores/mvcc.py", "class MVCC:\n    x = 1\n")
+        self.assertEqual(
+            (1, "".join(line + "\n" for line in MVCC_DIFF), f"error: {UNKNOWN_PATH}\n"),
+            self.run_diff("src/mvcc.rs", "src/nope.rs"),
+        )
+
+    def test_diff_prints_non_ascii_text_to_an_ascii_console(self) -> None:
+        """``--diff`` prints a changed line with non-ASCII letters as UTF-8, also if the console's encoding is ASCII.
+
+        The console is a text stream that encodes as ASCII, as a Windows console or a C locale may.
+        Would fail if the diff were printed in the console's encoding, so the first letter outside
+        it raised ``UnicodeEncodeError`` and the command showed a traceback instead of the diff.
+        """
+        self.assertEqual((0, ""), self.run_main("--update"))
+        self.write("system/stores/mvcc.py", "class MVCC:\n    name = 'Müller'\n")
+        output = io.BytesIO()
+        console = io.TextIOWrapper(output, encoding="ascii")
+        with contextlib.redirect_stdout(console):
+            status: int = self.copy.main(["--diff"])
+        console.flush()
+        self.assertEqual(0, status)
+        self.assertEqual(
+            MVCC_DIFF[:-1] + ["+    name = 'Müller'"],
+            output.getvalue().decode("utf-8").splitlines(),
+        )
 
 
 if __name__ == "__main__":

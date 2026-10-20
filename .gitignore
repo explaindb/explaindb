@@ -24,3 +24,5 @@ docs/api/modules.rst
 
 # Rust build output
 /generated/rust/target/
+# hidden files an interrupted check_generated.py --update may leave next to the copies:
+/generated/python_sources/.*.partial

@@ -8,3 +8,8 @@ generated/rust/Cargo.lock -gitlab-generated -linguist-generated
 generated/rust/rust-toolchain.toml -gitlab-generated -linguist-generated
 # A test compares the benchmark report byte for byte with a fresh rendering, which has LF line endings:
 benchmarks/index.html text eol=lf
+# The copies of the Python sources the Rust code was generated from (see generated/python_sources/README.md): written
+# by .ci/check_generated.py --update, folded in merge request diffs; their README stays unfolded. Git never converts
+# the line endings of a copy, as its name is the hash of its exact bytes; the README is ordinary text.
+generated/python_sources/** gitlab-generated linguist-generated -text
+generated/python_sources/README.md -gitlab-generated -linguist-generated text=auto
