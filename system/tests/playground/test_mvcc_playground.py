@@ -94,6 +94,8 @@ class MakeStoreTest(unittest.TestCase):
             ),
             "no validation": (StoreWithoutValidation, None, "serializable"),
         }
+        # the table has a row for every mode and no other row; each mode's store has the class, validation method and
+        # isolation level of its row:
         self.assertEqual(set(MODES), set(expected))
         for mode, (store_class, brute_force, isolation_level) in expected.items():
             with self.subTest(mode=mode):
@@ -202,8 +204,11 @@ class ScenarioOutcomeTest(unittest.TestCase):
         self.assertEqual({s.name for s in SCENARIOS}, set(EXPECTED_OUTCOMES))
         for s in SCENARIOS:
             expected: dict[Mode, ExpectedOutcome] = EXPECTED_OUTCOMES[s.name]
+            # the scenario has a pinned outcome for every mode:
             with self.subTest(scenario=s.name):
                 self.assertEqual(set(MODES), set(expected))
+            # run the scenario to its end in each mode and compare the transactions' statuses and the verdict kind
+            # with the pinned ones:
             for mode in MODES:
                 with self.subTest(scenario=s.name, mode=mode):
                     result: RunState = run_to(
@@ -235,10 +240,13 @@ class VerdictTest(unittest.TestCase):
         Would fail if the verdict stopped after the order of the serialization points, did not name the order
         that matches and why the other one does not, or marked another operation than the read that differs.
         """
+        # run the phantom insert to its end without validation:
         s: Scenario = scenario_named("phantom insert")
         result: RunState = run_to(
             s.schedule, s.initial_state, "no validation", len(s.schedule)
         )
+        # the verdict: its kind and sentence; one line per order replayed, first the order of the serialization points
+        # T2|T1, in which T1's read differs, then T1|T2, which matches:
         self.assertEqual(
             Verdict(
                 "serializable in another order",
@@ -273,10 +281,13 @@ class VerdictTest(unittest.TestCase):
         Would fail if some order were wrongly accepted, the verdict left out the difference of an order, or marked
         another operation than the read that differs.
         """
+        # run write skew via phantom to its end without validation:
         s: Scenario = scenario_named("write skew via phantom (insert and delete)")
         result: RunState = run_to(
             s.schedule, s.initial_state, "no validation", len(s.schedule)
         )
+        # the verdict: no order matches; one line per order with its first difference, first the order of the
+        # serialization points T1|T2, in which T2's read (position 3) differs and is marked:
         self.assertEqual(
             Verdict(
                 "not serializable",
@@ -319,6 +330,7 @@ class VerdictTest(unittest.TestCase):
         Would fail if the verdict listed all 24 orders, counted the orders not shown wrongly, or marked and explained
         another read than T2's, the first one that differs in the order T1|T2|T3|T4.
         """
+        # T1 to T4 all begin, then all read all objects, then each in turn updates x and commits:
         transactions: tuple[int, ...] = (1, 2, 3, 4)
         schedule: Schedule = schedule_of(
             *((n, "begin") for n in transactions),
@@ -332,9 +344,13 @@ class VerdictTest(unittest.TestCase):
                 )
             ),
         )
+        # run to the end without validation: not serializable, with MAX_ORDER_LINES (6) lines of orders that differ
+        # plus one line that counts the others:
         result: RunState = run_to(schedule, INITIAL_X, "no validation", len(schedule))
         self.assertEqual("not serializable", result.verdict.kind)
         self.assertEqual(MAX_ORDER_LINES + 1, len(result.verdict.details))
+        # the first line is about the order of the serialization points, T1|T2|T3|T4; the last one counts the
+        # 24 - 6 = 18 orders not shown:
         self.assertEqual(
             "Order T1|T2|T3|T4: T2's read all would return {x: (a=1, b=1)}, but returned {x: (a=1, b=0)}.",
             result.verdict.details[0],
@@ -367,6 +383,8 @@ class VerdictTest(unittest.TestCase):
         """
         t_1: TransactionRecord = TransactionRecord("T1")
         t_2: TransactionRecord = TransactionRecord("T2")
+        # a difference in the final state only (no read differs): the run ended with x = (a=1, b=2), the serial replay
+        # with x = (a=1, b=1):
         difference: Difference = Difference(
             transaction=None,
             read=None,
@@ -446,6 +464,7 @@ class ExplanationTest(unittest.TestCase):
         Would fail if the explanation did not follow the check of the selected method, or confused the results at
         the read and now.
         """
+        # per case: the scenario, the mode, and the explanation expected at the position of the commit that fails:
         for name, mode, expected in (
             (
                 "lost update",
@@ -469,6 +488,7 @@ class ExplanationTest(unittest.TestCase):
             ),
         ):
             with self.subTest(scenario=name, mode=mode):
+                # run the scenario to its end; the failed commit is the only operation explained:
                 s: Scenario = scenario_named(name)
                 result: RunState = run_to(
                     s.schedule, s.initial_state, mode, len(s.schedule)
@@ -505,6 +525,8 @@ class ExplanationTest(unittest.TestCase):
             (2, "commit"),
         )
         result: RunState = run_to(schedule, INITIAL_X, "method 1", len(schedule))
+        # T2's commit (position 7) fails, as read a==0 now returns T1's z; read a==1 is not named, as without T2's
+        # own y it returns {x} both in the snapshot and now:
         self.assertEqual(
             {
                 7: "validation: read a==0 now returns {z: (a=0, b=0)}, but in the snapshot of T2's begin it returns {}"
@@ -553,6 +575,7 @@ class ExplanationTest(unittest.TestCase):
             (1, "commit"),
             (2, "commit"),
         )
+        # per method, the explanation of T2's failed commit (position 8): method 1 names read a==1, method 2 names y:
         for mode, expected in (
             (
                 "method 1",
@@ -633,8 +656,10 @@ class ExplanationTest(unittest.TestCase):
             (1, "commit"),
             (2, "commit"),
         )
+        # T3's commit is skipped, as the store aborted T3 at its update, but it still has its line in the log:
         result: RunState = run_to(schedule, INITIAL_X, "no validation", len(schedule))
         self.assertEqual("(commit: skipped)", result.log[6].text)
+        # the verdict marks T2's read a==1 at position 7, counting the skipped commit:
         self.assertEqual(
             Verdict(
                 "not serializable",
@@ -649,6 +674,7 @@ class ExplanationTest(unittest.TestCase):
             ),
             result.verdict,
         )
+        # both T3's aborted update (position 5) and T2's marked read (position 7) are explained:
         self.assertEqual(
             {
                 5: "T1 is writing y and has not committed yet",
@@ -681,6 +707,7 @@ class ExplanationTest(unittest.TestCase):
         Would fail if an abort of the transaction itself were explained like one by the store, or if the aborted
         T3 were replayed in the verdict.
         """
+        # write skew with T3 inserted after the two begins: T3 begins, updates z and aborts on its own:
         s: Scenario = scenario_named("write skew")
         schedule: Schedule = (
             s.schedule[:2]
@@ -689,6 +716,8 @@ class ExplanationTest(unittest.TestCase):
             )
             + s.schedule[2:]
         )
+        # run write skew with and without T3 to its end without validation;
+        # T3 changes neither the verdict nor its lines:
         with_t_3: RunState = run_to(
             schedule, s.initial_state, "no validation", len(schedule)
         )
@@ -699,6 +728,8 @@ class ExplanationTest(unittest.TestCase):
             (without_t_3.verdict.kind, without_t_3.verdict.details),
             (with_t_3.verdict.kind, with_t_3.verdict.details),
         )
+        # only T2's marked read a==1 is explained, at position 7
+        # (4 without T3's three operations); T3's own abort is not:
         self.assertEqual(
             {7: "in the order T1|T2 this read would return {x: (a=1, b=100)}"},
             with_t_3.explanations,
@@ -873,6 +904,7 @@ class ExplanationTest(unittest.TestCase):
         result: RunState = run_to(
             schedule, INITIAL_X, "snapshot isolation", len(schedule)
         )
+        # T1 aborts at its update of x (position 7), T2 and T3 commit; the explanation names T2:
         self.assertEqual(("aborted", "committed", "committed"), statuses(result))
         self.assertEqual(
             {7: "snapshot isolation: T2 changed x and committed after T1 began"},
@@ -896,6 +928,7 @@ class ExplanationTest(unittest.TestCase):
         Would fail if the explanation of a write abort handled only updates, or could not find the writer of a
         newest committed version that is a delete marker.
         """
+        # per case: T2's write of x, then T1's write of x:
         cases: dict[str, tuple[DataOperation, DataOperation]] = {
             "T1 deletes": (
                 DataOperation("update", "x", Row(1, 2)),
@@ -908,6 +941,7 @@ class ExplanationTest(unittest.TestCase):
         }
         for case, (write_of_t_2, write_of_t_1) in cases.items():
             with self.subTest(case=case):
+                # T2 writes x and commits after T1's begin; then T1 writes x:
                 schedule: Schedule = schedule_of(
                     (1, "begin"),
                     (2, "begin"),
@@ -918,6 +952,7 @@ class ExplanationTest(unittest.TestCase):
                 result: RunState = run_to(
                     schedule, INITIAL_X, "snapshot isolation", len(schedule)
                 )
+                # T1 aborts at its write (position 4), and the explanation names T2:
                 self.assertEqual(("aborted", "committed"), statuses(result))
                 self.assertEqual(
                     {
@@ -957,6 +992,7 @@ class ExplanationTest(unittest.TestCase):
         result: RunState = run_to(
             schedule, INITIAL_X, "snapshot isolation", len(schedule)
         )
+        # T1 aborts at its update (position 6), T2 has committed, T3 is still running; the explanation names T3:
         self.assertEqual(("aborted", "committed", "running"), statuses(result))
         self.assertEqual(
             {6: "T3 is writing x and has not committed yet"}, result.explanations
@@ -1098,6 +1134,7 @@ class RunToTest(unittest.TestCase):
         schedule: Schedule = schedule_of(
             (1, "begin"), (1, DataOperation("update", "x", Row(2, 0))), (1, "abort")
         )
+        # after T1's update (2 operations), x has its initial version and T1's work-in-progress version:
         after_update: RunState = run_to(schedule, INITIAL_X, "method 2", 2)
         self.assertEqual(
             ObjectState(
@@ -1107,6 +1144,7 @@ class RunToTest(unittest.TestCase):
             ),
             after_update.objects[0],
         )
+        # after T1's abort, the work-in-progress version is gone, and the verdict says that nothing committed:
         at_end: RunState = run_to(schedule, INITIAL_X, "method 2", len(schedule))
         self.assertEqual(
             (ObjectState("x", (Version(0, Row(1, 0), "initial"),)),), at_end.objects
@@ -1139,9 +1177,12 @@ class RunToTest(unittest.TestCase):
             (1, "commit"),
             (2, "commit"),
         )
+        # run the schedule up to operation 4, up to operation 5 (T1's commit) and to its end:
         after_4: RunState = run_to(schedule, INITIAL_X, "method 2", 4)
         after_5: RunState = run_to(schedule, INITIAL_X, "method 2", 5)
         at_end: RunState = run_to(schedule, INITIAL_X, "method 2", len(schedule))
+        # pending while T1 runs; final once T1 has committed, as the store already aborted T2; T2's skipped commit
+        # does not change it:
         self.assertEqual("pending", after_4.verdict.kind)
         self.assertEqual(
             Verdict(
@@ -1170,6 +1211,8 @@ class RunToTest(unittest.TestCase):
         Would fail if a work-in-progress delete were shown as an update or without its owner, or if a committed
         delete were not shown as a version of its own.
         """
+        # after T2's delete (4 operations), x has its initial version and
+        # T2's work-in-progress delete marker (row None):
         s: Scenario = scenario_named("concurrent delete")
         at_delete: RunState = run_to(s.schedule, s.initial_state, "method 2", 4)
         self.assertEqual(
@@ -1178,6 +1221,7 @@ class RunToTest(unittest.TestCase):
             ),
             at_delete.objects[0],
         )
+        # at the end, T2's delete marker is a committed version of its own, with T2's commit timestamp 3:
         at_end: RunState = run_to(
             s.schedule, s.initial_state, "method 2", len(s.schedule)
         )
@@ -1192,7 +1236,7 @@ class RunToTest(unittest.TestCase):
 class ChecksumTest(unittest.TestCase):
     """Validation method 1's checksums of the reads."""
 
-    def test_checksums_of_write_skew(self) -> None:
+    def test_checksums_of_write_skew_via_phantom(self) -> None:
         """After T1's commit, T2's read a==1 would return another result, so its checksum now differs.
 
         ```text
@@ -1211,15 +1255,23 @@ class ChecksumTest(unittest.TestCase):
         if a committed transaction still showed a checksum now, if an aborted one kept its checksums, or if a mode
         without checksums showed them.
         """
+        # after T1's commit (7 operations), T1 keeps the checksum of its read a==1 at the read, but has no checksum
+        # now (None), as it has committed:
         s: Scenario = scenario_named("write skew via phantom (insert and delete)")
         after_7: RunState = run_to(s.schedule, s.initial_state, "method 1", 7)
         t_1, t_2 = after_7.transactions
         self.assertEqual("a==1", t_1.checksums[0].clause)
         self.assertIsNone(t_1.checksums[0].now)
+        # T1's and T2's reads a==1 both returned {x}, so their checksums at the read are equal; since then T1 has
+        # committed y = (a=1, b=0), so T2's read a==1 now gives another checksum:
         self.assertEqual(t_1.checksums[0].at_read, t_2.checksums[0].at_read)
         self.assertNotEqual(t_2.checksums[0].at_read, t_2.checksums[0].now)
-        at_end: RunState = run_to(s.schedule, s.initial_state, "method 1", 8)
+        # at the end, T2 is aborted and the store has forgotten its reads, so it has no checksums:
+        at_end: RunState = run_to(
+            s.schedule, s.initial_state, "method 1", len(s.schedule)
+        )
         self.assertEqual((), at_end.transactions[1].checksums)
+        # method 2 computes no checksums:
         after_6: RunState = run_to(s.schedule, s.initial_state, "method 2", 6)
         self.assertEqual((), after_6.transactions[0].checksums)
 
@@ -1258,6 +1310,8 @@ class ErrorTest(unittest.TestCase):
         )
         for mode in MODES:
             with self.subTest(mode=mode):
+                # in every mode, the run stops at T1's delete of y, the 7th and last line of the log, and T1's commit
+                # is not run; the verdict is the error:
                 result: RunState = run_to(schedule, INITIAL_X, mode, len(schedule))
                 self.assertEqual(7, len(result.log))
                 self.assertEqual("delete y: raised KeyError: 'y'", result.log[-1].text)
@@ -1336,9 +1390,11 @@ class TransactionStateTest(unittest.TestCase):
         """
         s: Scenario = scenario_named("write skew via phantom (insert and delete)")
         result: RunState = run_to(s.schedule, s.initial_state, "method 2", 5)
+        # y exists only as T1's work-in-progress version, without a committed version:
         self.assertEqual(
             ObjectState("y", (), WorkInProgress("T1", Row(1, 0))), result.objects[1]
         )
+        # T1 (id 1) is running: it sees x and its own y, and lists its read a==1 and its write of y:
         self.assertEqual(
             TransactionState(
                 "T1",
@@ -1373,6 +1429,7 @@ class TransactionStateTest(unittest.TestCase):
         result: RunState = run_to(
             s.schedule, s.initial_state, "method 2", len(s.schedule)
         )
+        # T2 (id 2) is aborted: it sees nothing, but still lists its read a==1 and its delete of x:
         self.assertEqual(
             TransactionState("T2", 2, "aborted", (), ("a==1",), ("x",)),
             result.transactions[1],

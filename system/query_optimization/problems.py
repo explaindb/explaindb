@@ -187,7 +187,8 @@ class Problem(IntegerBitSequence):
         """
         An iterator that enumerates all problems of the given superset problem. It starts with the optionally passed
         start problem or with the least-significant-bit-singleton if no such argument was passed. Further, it stops when the
-        optionally given limit problem is reached, or when all problems were enumerated when no such argument was given.
+        optionally given stop problem is reached (which is not enumerated itself), or when all problems were enumerated
+        when no such argument was given.
         """
 
         def __init__(
@@ -199,7 +200,7 @@ class Problem(IntegerBitSequence):
             """
             :param superset_problem: The superset problem.
             :param start_problem: The optional problem to start the enumeration from.
-            :param stop_problem: The optional problem to stop the enumeration with.
+            :param stop_problem: The optional problem at which the enumeration stops; it is not enumerated itself.
             """
             self.superset_problem: Problem = superset_problem
 
@@ -244,7 +245,7 @@ class Problem(IntegerBitSequence):
         Enumerate all problems of the given superset problem.
         :param superset_problem: The problems whose problems are to be enumerated.
         :param start_problem: The optional problem to start the enumeration with.
-        :param stop_problem: The optional problem after which the enumeration will stop.
+        :param stop_problem: The optional problem at which the enumeration stops; it is not enumerated itself.
         :return: An iterator to traverse through all problems of the given superset problem.
         """
         return Problem.ProblemIterator(superset_problem, start_problem, stop_problem)

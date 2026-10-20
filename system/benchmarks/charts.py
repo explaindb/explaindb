@@ -24,8 +24,9 @@ The charts are plain SVG without scripts or external resources, meant to be inli
 elements carry CSS classes (``python``, ``rust``, ``line``, ``range``, ``marker``, ``bar``, ``axis``, ``grid``,
 ``label``, ``heading``), so the page sets the colours for light and dark mode; presentation attributes give light
 colours if the page's CSS is missing. Every drawn element also carries a ``data-testid`` naming its kind (e.g.
-``marker-python``, ``grid``, ``y-tick``), by which the tests select it. The module formats every number itself, so the same data always gives the same text on every machine. Each SVG element
-is written on a line of its own, so that a new measurement changes the page line by line.
+``marker-python``, ``grid``, ``y-tick``), by which the tests select it. The module formats every number itself, so
+the same data always gives the same text on every machine. Each SVG element is written on a line of its own, so
+that a new measurement changes the page line by line.
 """
 
 from __future__ import annotations

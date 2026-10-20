@@ -27,6 +27,26 @@ exist:
   does not see it."""`.
 - The history of a bug belongs in the commit message and the merge request.
 
+## Inline comments in tests
+
+Group the body of a test into steps and put a short block comment above each
+step, roughly every three to five lines, saying what the step does or checks.
+Do not comment every single line, and skip comments where the code or the
+docstring already says everything. A comment starts in lowercase (identifiers
+such as `T1` or `R0` keep their case), ends with a colon and stands above the
+step it describes. Example from `test_stores_basics.py`:
+
+```python
+# bulkload 100 (key, Stuff) pairs outside of any transaction:
+kvs.bulkload(self._create_fake_data().__iter__())
+self.assertTrue(kvs.size() == 100)
+
+# inspect the internal layout of every object: the key is a string, and the object has exactly
+# one committed version (no history yet, as nothing was updated):
+for key, value in kvs.key_value_store.items():
+    ...
+```
+
 ## Schedules of concurrent transactions
 
 When a docstring or comment describes interleaved transactions (typically in

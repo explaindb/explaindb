@@ -35,6 +35,7 @@ class FormatTest(unittest.TestCase):
         Would fail if the unit or the number of digits were chosen wrongly, the unit were chosen before rounding
         (``1000 ns``), or a normal space split number and unit.
         """
+        # durations from 0.1 ns to 2.5 s; 999.7 ns and 999.7 µs lie just below the next unit and round up into it:
         cases: dict[float, str] = {
             1e-10: "0.100\u00a0ns",
             4.02e-08: "40.2\u00a0ns",
@@ -44,6 +45,7 @@ class FormatTest(unittest.TestCase):
             7.28e-03: "7.28\u00a0ms",
             2.5: "2.50\u00a0s",
         }
+        # check each case in a subtest of its own, so that one failing case does not hide the others:
         for seconds, expected in cases.items():
             with self.subTest(seconds=seconds):
                 self.assertEqual(expected, charts.format_seconds(seconds))
@@ -61,6 +63,7 @@ class FormatTest(unittest.TestCase):
 
         Would fail if the label switched to the next unit too early or too late, e.g. ``0.1 µs`` or ``1000 ns``.
         """
+        # -7 and -6 lie on either side of the switch from ns to µs; the exponent 2 checks that 100 s stays in seconds:
         cases: dict[int, str] = {
             -9: "1\u00a0ns",
             -8: "10\u00a0ns",
@@ -80,6 +83,7 @@ class FormatTest(unittest.TestCase):
         Would fail if the switch happened at 10 instead, so that 9.96 became ``10.0×``, or small factors lost their
         decimal.
         """
+        # 9.96 and 9.94 lie on either side of the switch at 9.95:
         cases: dict[float, str] = {
             76.3: "76×",
             9.96: "10×",
@@ -101,9 +105,12 @@ class FormatTest(unittest.TestCase):
         decade, or an axis had a single decade, whose length of zero divides by zero in `LogAxis.position`.
         """
         cases: dict[tuple[float, float], list[int]] = {
+            # ends between powers of ten: the axis is extended to the power of ten below and above:
             (4e-8, 7e-3): list(range(-8, -1)),
+            # ends on powers of ten: the axis ends exactly there:
             (1e-6, 1e-3): [-6, -5, -4, -3],
             (100, 10_000): [2, 3, 4],
+            # values within one decade, and a single power of ten, still give an axis of two powers of ten:
             (2e-6, 3e-6): [-6, -5],
             (100, 100): [2, 3],
         }
@@ -120,16 +127,22 @@ class FormatTest(unittest.TestCase):
         number, the last tick were below the maximum, or a maximum on a tick got one more tick.
         """
         cases: dict[float, list[float]] = {
+            # a maximum between two ticks: the axis ends at the next tick above it:
             76.0: [0, 20, 40, 60, 80],
+            # maxima on a tick, with steps of 1, 0.5, 0.2 and 20: the axis ends at the maximum:
             4.0: [0, 1, 2, 3, 4],
             2.5: [0, 0.5, 1, 1.5, 2, 2.5],
             1.0: [0, 0.2, 0.4, 0.6, 0.8, 1],
             100.0: [0, 20, 40, 60, 80, 100],
+            # a large maximum between two ticks, with a step of 20 000:
             59114.0: [0, 20_000, 40_000, 60_000],
+            # a maximum a little above the tick 0.3 in floating point, which still ends the axis:
             0.1 * 3: [0, 0.1, 0.2, 0.3],
         }
         for maximum, expected in cases.items():
             with self.subTest(maximum=maximum):
+                # round the ticks to 9 decimals before comparing, as multiples of a step such as 0.1 are not exact
+                # in floating point:
                 ticks: list[float] = charts.linear_ticks(maximum)
                 self.assertEqual(expected, [round(t, 9) for t in ticks])
 

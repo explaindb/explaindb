@@ -82,6 +82,8 @@ def fake_results(quick: bool = False) -> dict[str, Any]:
         medians: tuple[float, float] = FAKE_MEDIANS[
             config.workload, config.method, config.objects
         ]
+        # one fingerprint per benchmark, shared by Python and Rust, as they did the same work; its commits are the
+        # benchmark's index and it has no aborts:
         fingerprint: Fingerprint = Fingerprint(
             index, 0, config.operations, index + 1, config.objects, 42 * index
         )
@@ -92,6 +94,7 @@ def fake_results(quick: bool = False) -> dict[str, Any]:
                     run.Measurement(language, config, seconds, [1, 2, 3], fingerprint)
                 )
             )
+    # shuffle the measurements with a fixed seed, so that `load_results` must bring them into the order of a full run:
     random.Random(16).shuffle(measurements)
     provenance: run.Provenance = run.Provenance(
         date="2026-01-02T03:04:05+00:00",
@@ -208,15 +211,18 @@ class LoadResultsTest(unittest.TestCase):
         Would fail if the pairs came in the order of the file, or Python and Rust were swapped.
         """
         data: dict[str, Any] = fake_results()
+        # the benchmarks in the order of the file, each once although it has two measurements:
         file_order: list[run.Config] = list(
             dict.fromkeys(run.Config(**m["config"]) for m in data["measurements"])
         )
         # the fake results are not in the order of a full run:
         self.assertNotEqual(run.configs(quick=False), file_order)
+        # write the fake results to a file and load them:
         with tempfile.TemporaryDirectory() as directory:
             results: report.Results = report.load_results(
                 write_results(Path(directory), data)
             )
+        # the pairs come in the order of a full run, each with the fake medians of Python and Rust in their places:
         self.assertEqual(run.configs(quick=False), list(results.pairs))
         for config, pair in results.pairs.items():
             with self.subTest(config=config):
@@ -227,6 +233,7 @@ class LoadResultsTest(unittest.TestCase):
                 self.assertEqual(
                     ("python", "rust"), (pair.python.language, pair.rust.language)
                 )
+        # the repetitions and the provenance are taken over from the file:
         self.assertEqual(3, results.repetitions)
         self.assertEqual(run.Provenance(**data["provenance"]), results.provenance)
 
@@ -237,6 +244,7 @@ class LoadResultsTest(unittest.TestCase):
         Would fail if a report could show a partial run, a benchmark of a quick run, or a comparison of different
         work.
         """
+        # a benchmark that a full run does not have: the first one with 5 objects and 5 operations:
         extra: run.Config = replace(FIRST, objects=5, operations=5)
         cases: list[BrokenResults] = [
             BrokenResults(
@@ -285,6 +293,7 @@ class LoadResultsTest(unittest.TestCase):
 
         Would fail if one of these values reached the charts, where NaN or 0 breaks the logarithmic axis.
         """
+        # a repetition count that is 0, a boolean or a string:
         cases: list[BrokenResults] = [
             BrokenResults(
                 f"repetitions {v!r}",
@@ -293,15 +302,18 @@ class LoadResultsTest(unittest.TestCase):
             )
             for v in (0, True, "7")
         ]
+        # a validation method that is a boolean instead of a whole number:
         cases.append(
             BrokenResults(
                 "method true", replaced("config", "method", True), "wrong type"
             )
         )
+        # two `seconds_per_operation` values or four pass counts for three repetitions:
         cases += [
             BrokenResults(f"{key} of length {n}", resized(key, n), "not 3 repetitions")
             for key, n in (("seconds_per_operation", 2), ("passes", 4))
         ]
+        # seconds that are NaN, infinite, 0, negative, outside `report.SECONDS_RANGE`, a string or a boolean:
         cases += [
             BrokenResults(
                 f"seconds {v!r}",
@@ -310,6 +322,7 @@ class LoadResultsTest(unittest.TestCase):
             )
             for v in (math.nan, math.inf, 0, -1e-6, 1e-13, 2e6, 10**400, "1e-06", True)
         ]
+        # pass counts that are 0, a fraction or a boolean:
         cases += [
             BrokenResults(
                 f"passes {v!r}",
@@ -318,6 +331,7 @@ class LoadResultsTest(unittest.TestCase):
             )
             for v in (0, 2.5, True)
         ]
+        # a fingerprint field that is a string or a boolean:
         cases += [
             BrokenResults(
                 f"fingerprint commits {v!r}",
@@ -335,6 +349,8 @@ class LoadResultsTest(unittest.TestCase):
         Would fail if the report crashed on such a file with a KeyError or TypeError instead of naming the file, or
         wrote a wrong value into the provenance on the page.
         """
+        # a missing or unknown key makes a lookup or a dataclass constructor fail with a message naming the key; a
+        # CPU that is a number and a dirty flag that is a string are of the wrong type:
         wrong_type: str = "a provenance field of the wrong type"
         cases: list[BrokenResults] = [
             BrokenResults(
@@ -353,6 +369,7 @@ class LoadResultsTest(unittest.TestCase):
                 "git_dirty 'no'", provenance_field("git_dirty", "no"), wrong_type
             ),
         ]
+        # zero cores, or a boolean instead of a number of cores:
         cases += [
             BrokenResults(
                 f"cores {v!r}",
@@ -373,6 +390,8 @@ class LoadResultsTest(unittest.TestCase):
                 self.subTest(seconds=seconds),
                 tempfile.TemporaryDirectory() as directory,
             ):
+                # set the first seconds value of Python's measurement of the first benchmark to the limit; the results
+                # load and keep it:
                 data: dict[str, Any] = fake_results()
                 replaced("seconds_per_operation", 0, seconds)(data)
                 results: report.Results = report.load_results(
@@ -397,6 +416,8 @@ class LoadResultsTest(unittest.TestCase):
 
         Would fail if a cut-off or wrong file stopped the report with a traceback instead of a message.
         """
+        # JSON cut off in the middle, which `json.loads` rejects, and
+        # a list, which cannot be indexed by the key ``repetitions``:
         for content, problem in (
             ('{"repetitions": 7,', "Expecting"),
             ("[]", "list indices"),
@@ -416,6 +437,8 @@ class ChartScaleTest(unittest.TestCase):
 
         Would fail if the time axis grew downwards, as SVG's y does, or an axis were offset or scaled wrongly.
         """
+        # a chart with a Python point at the first decade of both axes (100 objects, 10 ns) and a Rust point at the
+        # last ones (10 000 objects, 1 µs):
         chart: str = charts.line_chart(
             charts.Labels("scale", "Scale", "Two points."),
             [
@@ -425,6 +448,7 @@ class ChartScaleTest(unittest.TestCase):
             charts.LogAxis([2, 3, 4], str),
             charts.LogAxis([-8, -7, -6], charts.format_decade),
         )
+        # find the Python circle and the Rust square in the drawn chart:
         parser: PageParser = parse(chart)
         circle: dict[str, str] = next(
             e.attributes for e in parser.elements if e.test_id == "marker-python"
@@ -432,6 +456,7 @@ class ChartScaleTest(unittest.TestCase):
         square: dict[str, str] = next(
             e.attributes for e in parser.elements if e.test_id == "marker-rust"
         )
+        # the circle's centre lies at the bottom left corner of the plot:
         bottom: float = charts.LINE_CHART_HEIGHT - charts.LINE_CHART_BOTTOM
         self.assertEqual(
             (charts.LINE_CHART_LEFT, bottom), (float(circle["cx"]), float(circle["cy"]))
@@ -449,6 +474,7 @@ class ChartScaleTest(unittest.TestCase):
         Would fail if the scale did not start at 0 or ignored the last tick, so that bars were not comparable, or a
         label were placed at a fixed position, so that it overlapped a long bar or floated far from a short one.
         """
+        # one row with a Rust bar of 100 and a Python bar of 50; 100 is also the last tick of the axis:
         row: charts.BarRow = charts.BarRow(
             "row",
             [charts.Bar("rust", 100.0, "full"), charts.Bar("python", 50.0, "half")],
@@ -457,6 +483,7 @@ class ChartScaleTest(unittest.TestCase):
         parser: PageParser = parse(
             charts.bar_chart(labels, [charts.BarGroup("group", [row])], str, "value")
         )
+        # the bars in the order they are drawn, Rust's full bar first; the half bar is half as long:
         full, half = [
             e.attributes
             for e in parser.elements
@@ -465,12 +492,14 @@ class ChartScaleTest(unittest.TestCase):
         self.assertAlmostEqual(
             float(full["width"]) / 2, float(half["width"]), delta=0.1
         )
+        # the full bar ends at the rightmost grid line, the one of the last tick:
         last_grid_line: float = max(
             float(e.attributes["x1"]) for e in parser.elements if e.test_id == "grid"
         )
         self.assertAlmostEqual(
             float(full["x"]) + float(full["width"]), last_grid_line, delta=0.1
         )
+        # each bar's label starts (text-anchor start) 4 units to the right of the bar's end:
         bar_labels: list[Element] = [
             e for e in parser.elements if e.test_id == "bar-label"
         ]
@@ -508,10 +537,14 @@ class FakePageTest(unittest.TestCase):
         # the template may wrap a sentence anywhere; no-break spaces stay, as they are part of the numbers:
         text: str = re.sub(r"[ \n]+", " ", self.page)
         self.assertIn("Rust is between 2.0× and 70× as fast as Python.", text)
+        # the transactions chart's description, with the most transactions per second: Rust 1 / 80 µs,
+        # Python 1 / 300 µs (both read_only):
         self.assertIn(
             "Rust reaches up to 12\u202f500 transactions per second, Python up to 3\u202f333.",
             self.page,
         )
+        # the table row of read_write_contention with method 2: Python's median of 25 ms and its range from half to
+        # twice that, the same for Rust's 1 ms, the speed-up of 25×, and the fingerprint's 17 commits and 0 aborts:
         self.assertIn(
             "<tr><td>read_write_contention</td><td>2</td><td>1\u202f000</td>"
             "<td>25.0\u00a0ms</td><td>12.5\u00a0ms – 50.0\u00a0ms</td>"
@@ -562,12 +595,14 @@ class FakePageTest(unittest.TestCase):
         Would fail if the bars of the transactions chart took the other language's value, a speed-up were
         inverted, or a description mixed up the languages.
         """
+        # the labels of all bars, in the transactions chart and in the speed-up chart:
         labels: list[str] = [
             e.text for e in self.parser.elements if e.test_id == "bar-label"
         ]
         self.assertIn("Rust 12\u202f500", labels)
         self.assertIn("Python 3\u202f333", labels)
         self.assertIn("70×", labels)
+        # the description of each chart by its id, which the SVG names in aria-describedby:
         descriptions: dict[str, str] = {
             s.element.attributes["aria-describedby"]: s.desc.text
             for s in self.parser.svgs
@@ -586,6 +621,7 @@ class FakePageTest(unittest.TestCase):
         Would fail if a field were left out, two fields swapped their values, or the flag for uncommitted changes
         were flipped.
         """
+        # the description list of the fake provenance: one line per field, in this order:
         rows: list[str] = [
             "<dt>Date</dt><dd>2026-01-02T03:04:05+00:00</dd>",
             "<dt>CPU</dt><dd>Test CPU</dd>",
@@ -598,6 +634,7 @@ class FakePageTest(unittest.TestCase):
             "<dt>Uncommitted changes</dt><dd>yes</dd>",
         ]
         self.assertIn("\n".join(rows), self.page)
+        # the same results without uncommitted changes show ``no``:
         data: dict[str, Any] = fake_results()
         data["provenance"]["git_dirty"] = False
         page: str = report.render(report.parse_results(data))
@@ -610,6 +647,7 @@ class FakePageTest(unittest.TestCase):
 
         Would fail if a range bar were drawn from the median, or its ends were swapped or scaled wrongly.
         """
+        # the Python markers and range bars of the micro charts, one of each per point and in the same order:
         circles: list[Element] = [
             e for e in self.parser.elements if e.test_id == "marker-python"
         ]
@@ -638,8 +676,10 @@ class FakePageTest(unittest.TestCase):
         rust: list[Element] = [
             e for e in self.parser.elements if e.test_id == "marker-rust"
         ]
+        # 4 micro charts with 3 store sizes each give 12 points per language:
         self.assertEqual(["circle"] * 12, [e.tag for e in python])
         self.assertEqual(["rect"] * 12, [e.tag for e in rust])
+        # each Rust marker is as wide as high:
         for square in rust:
             self.assertEqual(square.attributes["width"], square.attributes["height"])
 
@@ -650,12 +690,14 @@ class FakePageTest(unittest.TestCase):
         Would fail if a new chart element came without one, so that a test would have to select it by its CSS class
         or its text, or if an id were misspelled.
         """
+        # every element inside an SVG, except the SVG itself and its title and description:
         drawn: list[Element] = [
             e
             for e in self.parser.elements
             if e.tag not in ("svg", "title", "desc")
             and any(a.tag == "svg" for a in e.ancestors)
         ]
+        # none of them lacks a data-testid, and together they use exactly these kinds:
         self.assertEqual([], [e.tag for e in drawn if not e.test_id])
         self.assertEqual(
             {
@@ -687,6 +729,7 @@ class FakePageTest(unittest.TestCase):
         """
         # the labels of 10 ns (10**-8) to 10 ms (10**-2):
         expected: list[str] = [charts.format_decade(e) for e in range(-8, -1)]
+        # the four SVGs in the section of the micro-benchmarks each label their time axis with all these decades:
         micro: list[Svg] = [
             s for s in self.parser.svgs if s.element.inside("chart-micro")
         ]
@@ -718,11 +761,15 @@ class FakePageTest(unittest.TestCase):
         escaped, or a value were substituted into the template a second time.
         """
         data: dict[str, Any] = fake_results()
+        # a CPU with markup characters, and an operating system that looks like placeholders of the template:
         data["provenance"].update(cpu='A<b>&"c', os="$table_rows ${x}")
         page: str = report.render(report.parse_results(data))
+        # the CPU appears once, escaped once, and never unescaped:
         self.assertEqual(1, page.count("<dd>A&lt;b&gt;&amp;&quot;c</dd>"))
         self.assertNotIn("A<b>", page)
         self.assertNotIn("&amp;lt;", page)
+        # the 6 charts and the 18 table rows are still markup, and the placeholders in the operating system are
+        # written as they are, not filled:
         self.assertEqual(6, page.count("<svg "))
         self.assertEqual(18, page.count("<tr><td>"))
         self.assertIn("<dd>$table_rows ${x}</dd>", page)
@@ -757,10 +804,12 @@ class PageStructureTest(unittest.TestCase):
 
         Would fail if a chart or section went missing from the template or the table lost or duplicated rows.
         """
+        # `svgs_inside` and `by_test_id` also check that each section is on the page exactly once:
         self.assertEqual(4, len(self.svgs_inside("chart-micro")))
         self.assertEqual(1, len(self.svgs_inside("chart-tps")))
         self.assertEqual(1, len(self.svgs_inside("chart-speedup")))
         self.by_test_id("results-table")
+        # the rows in the table's body, i.e. without the header row:
         body_rows: list[Element] = [
             e
             for e in self.parser.elements
@@ -802,10 +851,12 @@ class PageStructureTest(unittest.TestCase):
         Would fail if two charts got the same chart id, so that a label pointed at the wrong chart, or a chart named
         a label, gradient or link target that is not on the page.
         """
+        # count how often each id occurs on the page; none occurs twice:
         ids: Counter[str] = Counter(
             e.attributes["id"] for e in self.parser.elements if "id" in e.attributes
         )
         self.assertEqual([], [i for i, count in ids.items() if count > 1])
+        # collect every id the page refers to: in ``url(#…)``, in the aria attributes and in links within the page:
         references: list[str] = re.findall(r"url\(#([^)]+)\)", self.page)
         for element in self.parser.elements:
             for name in ("aria-labelledby", "aria-describedby"):
@@ -813,6 +864,7 @@ class PageStructureTest(unittest.TestCase):
             for name in ("href", "xlink:href"):
                 if element.attributes.get(name, "").startswith("#"):
                     references.append(element.attributes[name][1:])
+        # at least the two aria references of each of the 6 charts, and each one names an existing id:
         self.assertGreaterEqual(len(references), 12)
         self.assertEqual([], [r for r in references if r not in ids])
 
@@ -823,10 +875,13 @@ class PageStructureTest(unittest.TestCase):
         Would fail if a script, a web font, an image or a style sheet from elsewhere were added to the template,
         which the page promises not to have.
         """
+        # no element that runs or embeds anything:
         embedding: set[str] = {"script", "link", "iframe", "object", "embed", "img"}
         self.assertEqual(
             [], [e.tag for e in self.parser.elements if e.tag in embedding]
         )
+        # no attribute that links to anything but an id on the page,
+        # and no ``url(…)`` or ``@import`` that loads from elsewhere:
         linking: tuple[str, ...] = ("src", "srcset", "href", "xlink:href", "action")
         outside: list[str] = [
             e.attributes[name]
@@ -845,8 +900,10 @@ class PageStructureTest(unittest.TestCase):
         special spaces showed up garbled, or the policy were removed or moved out of the head, where browsers ignore
         it, so that a script injected through a value would run.
         """
+        # the byte position of the charset declaration in the UTF-8 encoded page:
         position: int = self.page.encode("utf-8").find(b'<meta charset="utf-8">')
         self.assertTrue(0 <= position < 1024, position)
+        # exactly one Content-Security-Policy, directly inside the head, that allows nothing by default:
         policies: list[Element] = [
             e
             for e in self.parser.elements
@@ -890,6 +947,7 @@ class CommittedPageTest(unittest.TestCase):
         """
         lines: list[str] = committed_page().splitlines()
         self.assertEqual([], [n for n, line in enumerate(lines, 1) if len(line) > 400])
+        # from a line that starts with <svg up to and including the line </svg>, each line opens at most one element:
         in_chart: bool = False
         for number, line in enumerate(lines, 1):
             in_chart = in_chart or line.startswith("<svg")
@@ -906,10 +964,12 @@ class CommittedPageTest(unittest.TestCase):
         existing folder or wrote another encoding than UTF-8.
         """
         with tempfile.TemporaryDirectory() as directory:
+            # write the fake results and let `main` write their page into a folder that does not exist yet:
             results: Path = write_results(Path(directory), fake_results())
             output: Path = Path(directory) / "new" / "page.html"
             with contextlib.redirect_stderr(io.StringIO()):
                 report.main(["--results", str(results), "--output", str(output)])
+            # the written file is the page that `render` makes of these results:
             written: str = output.read_text(encoding="utf-8")
             expected: str = report.render(report.load_results(results))
         self.assertEqual(expected, written)
@@ -927,6 +987,7 @@ class CommittedPageTest(unittest.TestCase):
             # the same file under another name, a hard link:
             output: Path = Path(directory) / "link.json"
             os.link(results, output)
+            # `main` stops with an argparse error, which exits with status 2, and leaves the results unchanged:
             errors: io.StringIO = io.StringIO()
             with contextlib.redirect_stderr(errors):
                 with self.assertRaises(SystemExit) as caught:
@@ -942,8 +1003,10 @@ class CommittedPageTest(unittest.TestCase):
         Would fail if a report of a quick run, with a third of the micro-benchmarks, could replace the page.
         """
         with tempfile.TemporaryDirectory() as directory:
+            # the results of a quick run, with only the smallest store size of the micro-benchmarks:
             results: Path = write_results(Path(directory), fake_results(quick=True))
             output: Path = Path(directory) / "page.html"
+            # `main` stops with an argparse error, which exits with status 2:
             errors: io.StringIO = io.StringIO()
             with contextlib.redirect_stderr(errors):
                 with self.assertRaises(SystemExit) as caught:
@@ -965,9 +1028,11 @@ class ReportHintTest(unittest.TestCase):
         Would fail if the paths were compared without resolving them, the hint wrote the page of a trial run over
         the committed page or its results, or a path with a space or a leading "-" broke the command.
         """
+        # the default results, given as an absolute or a relative path:
         for path in (run.RESULTS, Path(os.path.relpath(run.RESULTS))):
             with self.subTest(path=str(path)):
                 self.assertEqual(run.REPORT_COMMAND, run.report_hint(path))
+        # results elsewhere: the page goes next to them with the suffix .html, and a path with a space is quoted:
         self.assertEqual(
             f"{run.REPORT_COMMAND} --results=/trials/fast.json --output=/trials/fast.html",
             run.report_hint(Path("/trials/fast.json")),
@@ -1002,9 +1067,12 @@ class ReportHintTest(unittest.TestCase):
             with self.subTest(quick=quick), tempfile.TemporaryDirectory() as directory:
                 output: Path = Path(directory) / "results.json"
                 errors: io.StringIO = io.StringIO()
+                # `run.run` is replaced by a stub, so no benchmark runs; `main` writes the stub's results and prints
+                # its messages to stderr:
                 with mock.patch.object(run, "run", return_value={"repetitions": 3}):
                     with contextlib.redirect_stderr(errors):
                         run.main(["--output", str(output)] + ["--quick"] * quick)
+                # after a full run, the hint follows the line naming the written file:
                 expected: list[str] = [f"wrote {output}"]
                 if not quick:
                     hint: str = run.report_hint(output)

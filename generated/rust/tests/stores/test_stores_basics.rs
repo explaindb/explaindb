@@ -40,7 +40,8 @@ where
 {
     let input_data: Vec<(String, Stuff)> = create_fake_data(100);
     let mut store: S = S::default();
-    // the store takes ownership of the objects, so load a copy and keep the input for comparison
+    // bulkload 100 (key, Stuff) pairs outside of any transaction; the store takes ownership of the objects, so load
+    // a copy and keep the input for comparison:
     store.bulkload(input_data.clone()).unwrap();
 
     assert_eq!(store.size(), 100);
@@ -48,6 +49,9 @@ where
     let keys: Vec<&String> = store.key_value_store().keys().collect();
     let input_keys: Vec<&String> = input_data.iter().map(|(key, _)| key).collect();
     assert_eq!(keys, input_keys);
+
+    // check each object's versions against the input; timestamp 0 makes the loaded version visible to every
+    // transaction:
     for (key, value) in &input_data {
         let entry: &KvStoreEntry<Stuff> = &store.key_value_store()[key];
         assert_eq!(
@@ -74,11 +78,14 @@ fn test_key_value_store_basics() {
 /// transaction ids 1, 2, ... in this order.
 #[test]
 fn test_transactional_key_value_store() {
+    // a new store is empty:
     let mut store: TransactionalKeyValueStore<Stuff> = TransactionalKeyValueStore::new();
     assert_eq!(store.size(), 0);
     assert!(store.state.td.is_empty());
     assert!(store.state.committed_transactions_trace.is_empty());
     assert_eq!(store.state.journal.size(), 0);
+
+    // the transaction id counter starts at 1; each call returns the current value and then increments it:
     assert_eq!(store.state.ta_id, 1);
     assert_eq!(store.next_ta_id(), 1);
     assert_eq!(store.next_ta_id(), 2);
@@ -112,9 +119,11 @@ fn test_begin_transaction() {
     assert_eq!(td_entry.committed_timestamp, None);
     assert_eq!(td_entry.committed_transactions_at_begin, 0);
 
+    // start a second TA, then commit TA 1 while TA 2 is still running:
     store.begin_transaction();
-
     store.commit_transaction(ta_id).unwrap();
+
+    // TA 1's own commit does not change the number it stored at its begin:
     assert_eq!(store.state.td[&ta_id].committed_transactions_at_begin, 0);
 
     // a transaction that begins after one commit sees a trace of length 1 (Python: index 0):
@@ -161,7 +170,8 @@ fn test_journaling() {
     );
 
     store.commit_transaction(ta_id).unwrap();
-    // check commit: transaction ids 1 and 2 are taken, so the commit timestamp is 3
+    // check commit; transaction ids and commit timestamps share one counter, so after the two begins (ids 1 and 2)
+    // the commit of TA 1 gets timestamp 3:
     assert_eq!(store.state.journal.size(), 2);
     assert_eq!(
         store.state.journal.get(&ta_id).unwrap(),

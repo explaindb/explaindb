@@ -206,10 +206,10 @@
       "path": "tests/stores/test_store_anomalies.rs"
     },
     {
-      "sha256": "sha256:da93cbb68692a89a",
+      "sha256": "sha256:06cedd07b9c90079",
       "sources": [
         {
-          "sha256": "sha256:b7d608e57967c6c5",
+          "sha256": "sha256:f9860d5fb7fb5e73",
           "path": "system/tests/stores/test_stores_basics.py"
         }
       ],
