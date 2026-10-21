@@ -15,7 +15,7 @@ babel==2.18.0
 beautifulsoup4==4.15.0
 black==26.5.1
 bleach==6.4.0
-certifi==2026.7.22
+certifi==2026.10.19
 cffi==2.1.1
 charset-normalizer==3.5.1
 click==8.5.0
@@ -90,7 +90,7 @@ pandocfilters==1.5.1
 parso==0.8.7
 pathspec==1.1.1
 pexpect==4.9.0 ; sys_platform != 'emscripten' and sys_platform != 'win32'
-pillow==12.3.0
+pillow==13.0.0
 platformdirs==4.11.6
 prometheus-client==0.26.0
 prompt-toolkit==3.0.53
