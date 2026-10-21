@@ -200,21 +200,21 @@ SCENARIOS: tuple[Scenario, ...] = (
     ),
     make_scenario(
         "read-only anomaly (Fekete et al.)",
-        "Checking account x and savings account y, the balance in a: T1 deposits 20 into y; T2 withdraws 10 from x "
-        "and pays a fee of 1, as it saw no deposit (x becomes -11); the read-only T3 sees the deposit but not the "
-        "withdrawal.",
-        {"x": Row(0, 0), "y": Row(0, 0)},
+        "Checking account x and savings account y, the account number in a (1 and 2) and the balance in b: T1 reads "
+        "only y and deposits 20 into it; T2 reads both, withdraws 10 from x and pays a fee of 1, as it saw no "
+        "deposit (x's balance becomes -11); the read-only T3 sees the deposit but not the withdrawal.",
+        {"x": Row(1, 0), "y": Row(2, 0)},
         [
             (2, "begin"),
             (2, DataOperation("read")),
             (1, "begin"),
-            (1, DataOperation("read")),
-            (1, DataOperation("update", "y", Row(20, 0))),
+            (1, DataOperation("read", a_equals=2)),
+            (1, DataOperation("update", "y", Row(2, 20))),
             (1, "commit"),
             (3, "begin"),
             (3, DataOperation("read")),
             (3, "commit"),
-            (2, DataOperation("update", "x", Row(-11, 0))),
+            (2, DataOperation("update", "x", Row(1, -11))),
             (2, "commit"),
         ],
     ),
