@@ -154,9 +154,9 @@ pub enum Validation {
 /// read), and a transaction that writes an object which another transaction is still writing is aborted.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum IsolationLevel {
-    /// At its commit, the store checks whether a transaction that committed in the meantime changed something this
-    /// transaction read; if so, it is aborted (see [`Validation`]). The write skew anomaly is detected and avoided
-    /// (Python: `"serializable"`, the default).
+    /// At the commit of a transaction that wrote something, the store checks whether a transaction that committed in
+    /// the meantime changed something it read; if so, it is aborted (see [`Validation`]). The write skew anomaly is
+    /// detected and avoided (Python: `"serializable"`, the default).
     #[default]
     Serializable,
     /// Reads are not checked. Instead, a transaction that writes an object is aborted at once if another
@@ -256,8 +256,9 @@ impl<V> MvccState<V> {
         })
     }
 
-    /// Gets the version of object `object_id` visible at `timestamp` under snapshot isolation (Python:
-    /// `_get_visible_object_version`). The timestamp is the id of the reading transaction or a commit timestamp.
+    /// Gets the version of object `object_id` visible at `timestamp`, i.e. in the snapshot of the transaction with
+    /// that id (Python: `_get_visible_object_version`). The timestamp is the id of the reading transaction or a
+    /// commit timestamp.
     ///
     /// This is the work-in-progress version written by the transaction with id `timestamp`, if it has one and
     /// `ignore_wip` is not set; otherwise the most recent committed version whose validity started before
@@ -419,14 +420,12 @@ fn selected<V>(where_clause: Option<&dyn Clause<V>>, object: Option<&V>) -> bool
 /// `TransactionalKeyValueStore`, formerly known as `MVCCStore`).
 ///
 /// The store supports two isolation levels, see [`IsolationLevel`]. In both, a transaction reads the snapshot of its
-/// begin plus its own writes (snapshot read; older comments in this file that say "under snapshot isolation" for
-/// reading, e.g. at [`MvccState::get_visible_object_version`], mean this snapshot read, which both levels use). In
-/// both, a transaction that writes an object which another transaction is still writing (not yet committed) is
-/// aborted. In addition:
+/// begin plus its own writes (snapshot read). In both, a transaction that writes an object which another transaction
+/// is still writing (not yet committed) is aborted. In addition:
 ///
-/// - serializable (default): at its commit, a validation phase checks whether a transaction that committed in the
-///   meantime changed something this transaction read, and aborts it on a conflict (see [`Validation`] for the two
-///   methods). The write skew anomaly is detected and avoided.
+/// - serializable (default): at the commit of a transaction that wrote something, a validation phase checks whether
+///   a transaction that committed in the meantime changed something it read, and aborts it on a conflict (see
+///   [`Validation`] for the two methods). The write skew anomaly is detected and avoided.
 /// - snapshot isolation: reads are not checked. Instead, a transaction that writes an object is aborted at once if
 ///   another transaction changed that object and committed after the writer began. Together with the rule above,
 ///   of two concurrent transactions that write the same object, the later writer is aborted at once (first updater

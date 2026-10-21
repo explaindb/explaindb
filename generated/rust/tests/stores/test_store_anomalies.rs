@@ -148,7 +148,7 @@ fn test_update_multiple_objects_in_ta() {
 ///                                     committed version "4242" = (45, 45)
 /// read a == 4243 -> sees "4242" = (4243, 4243)
 /// ```
-fn check_store_snapshot_isolation_ta_self_modification<S>()
+fn check_snapshot_read_sees_own_wip_version<S>()
 where
     S: TransactionalStore<Value = Stuff> + Default,
 {
@@ -202,17 +202,18 @@ where
         });
     assert_eq!(store.key_value_store()[object_id].committed.len(), 2);
 
-    // read the same object again: snapshot isolation returns the transaction's own version
+    // read the same object again: the snapshot read still returns the transaction's own wip version, not the newer
+    // committed one:
     let result_reread: Vec<(String, Stuff)> =
         store.read_objects(ta_id, Some(where_clause), true).unwrap();
     assert_eq!(result_reread, [(object_id.to_string(), new_version)]);
 }
 
 /// A transaction of a [`TransactionalKeyValueStore`] reads its own change, see
-/// [`check_store_snapshot_isolation_ta_self_modification`].
+/// [`check_snapshot_read_sees_own_wip_version`].
 #[test]
-fn test_store_snapshot_isolation_ta_self_modification() {
-    check_store_snapshot_isolation_ta_self_modification::<TransactionalKeyValueStore<Stuff>>();
+fn test_snapshot_read_sees_own_wip_version() {
+    check_snapshot_read_sees_own_wip_version::<TransactionalKeyValueStore<Stuff>>();
 }
 
 /// Checks that the store `S` returns the version of an object that is visible at a timestamp: the most recent
@@ -220,7 +221,7 @@ fn test_store_snapshot_isolation_ta_self_modification() {
 /// their validity, the read fails with [`StoreError::VersionsNotOrdered`].
 ///
 /// The test writes the committed versions (valid from 0, 5 and 8) directly into the store.
-fn check_snapshot_isolation_read_correct_version<S>()
+fn check_snapshot_read_returns_correct_version<S>()
 where
     S: TransactionalStore<Value = Stuff> + Default,
 {
@@ -267,10 +268,10 @@ where
 }
 
 /// A [`TransactionalKeyValueStore`] reads the version visible at a timestamp, see
-/// [`check_snapshot_isolation_read_correct_version`].
+/// [`check_snapshot_read_returns_correct_version`].
 #[test]
-fn test_snapshot_isolation_read_correct_version() {
-    check_snapshot_isolation_read_correct_version::<TransactionalKeyValueStore<Stuff>>();
+fn test_snapshot_read_returns_correct_version() {
+    check_snapshot_read_returns_correct_version::<TransactionalKeyValueStore<Stuff>>();
 }
 
 /// Checks that a transaction of the store `S` keeps seeing its snapshot while another transaction updates and
@@ -346,8 +347,8 @@ where
     assert_eq!(store.key_value_store()[object_id].wip, None);
     assert_eq!(store.key_value_store()[object_id].committed.len(), 2);
 
-    // t_1 must not see the new value even though t_2 has committed: t_1 runs under snapshot isolation, so its reads
-    // are repeatable
+    // t_1 must not see the new value even though t_2 has committed: t_1 still sees the old object in its snapshot
+    // read, so its reads are repeatable
     let result_reread: Vec<(String, Stuff)> = store
         .read_objects(ta_id_1, Some(Rc::clone(&where_clause)), true)
         .unwrap();
@@ -1424,9 +1425,9 @@ fn test_validation_ignores_concurrent_write_outside_read_predicate_with_method_2
 /// commit -> succeeds
 /// ```
 ///
-/// t_i writes nothing, so it is validated against its own snapshot, in which nothing changed. The same schedule
-/// with a write of t_i aborts, see [`check_validation_detects_lost_update_on_read_object`]. Python runs this test
-/// with both validation methods; it runs here once per method.
+/// t_i writes nothing, so the validation passes without checking its reads. The same schedule with a write of t_i
+/// aborts, see [`check_validation_detects_lost_update_on_read_object`]. Python runs this test with both validation
+/// methods; it runs here once per method.
 fn check_read_only_transaction_commits_despite_concurrent_change_of_read_object<S>(
     validation: Validation,
 ) where
@@ -1449,7 +1450,7 @@ fn check_read_only_transaction_commits_despite_concurrent_change_of_read_object<
     store.update_object("A", Stuff { a: 7, b: 0 }, t_j).unwrap();
     store.commit_transaction(t_j).unwrap();
 
-    // snapshot isolation: t_i still sees the old version of A:
+    // snapshot read: t_i still sees the old version of A:
     let result_reread: Vec<(String, Stuff)> = store
         .read_objects(t_i, Some(Rc::new(WhereClause::new("a", "==", 42))), true)
         .unwrap();
@@ -1951,6 +1952,70 @@ fn test_snapshot_isolation_level_aborts_write_to_object_committed_after_begin() 
 
         // t_i left no wip entry on x:
         assert_eq!(store.key_value_store()[object_id].wip, None, "{case}");
+    }
+}
+
+/// Under snapshot isolation, a write to an object that another transaction is still writing and that a third
+/// transaction committed after the writer began is aborted with the reason of the uncommitted writer.
+///
+/// ```text
+/// t_i                     t_j                     t_k
+/// begin
+///                         begin
+///                         update A
+///                         commit
+///                                                 begin
+///                                                 update A
+/// update or delete A
+/// -> aborted: another transaction is currently modifying A
+/// ```
+///
+/// `update_object` and `delete_object` check for a wip version of another transaction first and only then for a
+/// commit after the writer began. t_k may write A, as it began after t_j's commit. The playground test
+/// `test_uncommitted_writer_is_checked_before_snapshot_isolation` in
+/// `system/tests/playground/test_mvcc_playground.py` explains the same order. Checked for t_i updating and deleting
+/// A.
+#[test]
+fn test_snapshot_isolation_level_reports_wip_writer_before_commit_after_begin() {
+    for write_i in [WriteKind::Update, WriteKind::Delete] {
+        let case: String = format!("write_i = {write_i:?}");
+        let mut store: TransactionalKeyValueStore<Stuff> =
+            TransactionalKeyValueStore::with_isolation_level(
+                Validation::WriteSets,
+                IsolationLevel::SnapshotIsolation,
+            )
+            .unwrap();
+        let object_id: &str = "A";
+        store.put(object_id, Stuff { a: 1, b: 0 }).unwrap();
+
+        // t_i begins, then t_j updates A and commits after t_i began:
+        let t_i: u64 = store.begin_transaction();
+        let t_j: u64 = store.begin_transaction();
+        write(WriteKind::Update, &mut store, object_id, t_j).unwrap();
+        store.commit_transaction(t_j).unwrap();
+
+        // t_k begins after t_j's commit, so it may update A and holds a wip version of A:
+        let t_k: u64 = store.begin_transaction();
+        write(WriteKind::Update, &mut store, object_id, t_k).unwrap();
+
+        // t_i writes A: both rules apply, the uncommitted writer t_k is reported:
+        assert_eq!(
+            write(write_i, &mut store, object_id, t_i),
+            Err(StoreError::TransactionAborted(
+                "another transaction is currently modifying object A already".to_string()
+            )),
+            "{case}"
+        );
+
+        // t_k's wip version of A is untouched:
+        assert_eq!(
+            store.key_value_store()[object_id]
+                .wip
+                .as_ref()
+                .map(|wip| wip.start_validity),
+            Some(t_k),
+            "{case}"
+        );
     }
 }
 

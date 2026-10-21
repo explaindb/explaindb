@@ -42,7 +42,7 @@
           "path": "system/stores/VersionedKeyValueStore.py"
         },
         {
-          "sha256": "sha256:765a244eb8e91938",
+          "sha256": "sha256:6e1b948423ee5801",
           "path": "system/stores/MVCC.py"
         },
         {
@@ -97,10 +97,10 @@
       "path": "src/stores.rs"
     },
     {
-      "sha256": "sha256:c5b5a1fdbdcfecd9",
+      "sha256": "sha256:8b90d4c462b4769e",
       "sources": [
         {
-          "sha256": "sha256:765a244eb8e91938",
+          "sha256": "sha256:6e1b948423ee5801",
           "path": "system/stores/MVCC.py"
         },
         {
@@ -140,7 +140,7 @@
           "path": "system/tests/query_processing/test_query_processing.py"
         },
         {
-          "sha256": "sha256:86bf8c13f3e16536",
+          "sha256": "sha256:816f476c8c9abd71",
           "path": "system/tests/stores/test_store_anomalies.py"
         }
       ],
@@ -155,7 +155,7 @@
       "sha256": "sha256:d9bc71b7e1ada1e4",
       "sources": [
         {
-          "sha256": "sha256:9a2f9b82050fdfa0",
+          "sha256": "sha256:b3b3c0a126ec67d6",
           "path": "system/tests/indexes/test_indexing.py"
         }
       ],
@@ -185,7 +185,7 @@
       "sha256": "sha256:0aa34a04701ff488",
       "sources": [
         {
-          "sha256": "sha256:765a244eb8e91938",
+          "sha256": "sha256:6e1b948423ee5801",
           "path": "system/stores/MVCC.py"
         },
         {
@@ -196,10 +196,10 @@
       "path": "tests/stores/mvcc.rs"
     },
     {
-      "sha256": "sha256:c1463a8a6932d995",
+      "sha256": "sha256:ebe5d11f53dfecdf",
       "sources": [
         {
-          "sha256": "sha256:86bf8c13f3e16536",
+          "sha256": "sha256:816f476c8c9abd71",
           "path": "system/tests/stores/test_store_anomalies.py"
         }
       ],
