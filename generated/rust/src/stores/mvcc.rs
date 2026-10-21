@@ -160,9 +160,9 @@ pub enum IsolationLevel {
     #[default]
     Serializable,
     /// Reads are not checked. Instead, a transaction that writes an object is aborted at once if another
-    /// transaction changed that object and committed after the writer began. Together with the rule above, of two
-    /// concurrent transactions that write the same object, the later writer is aborted at once (first updater
-    /// wins). Lost updates cannot happen, but write skew can (Python: `"snapshot isolation"`).
+    /// transaction changed that object and committed after the writer began. Together with the rule above, this
+    /// means: if two concurrent transactions write the same object, the one that writes second is aborted at once
+    /// ("first updater wins"). Lost updates cannot happen, but write skew can (Python: `"snapshot isolation"`).
     SnapshotIsolation,
 }
 
@@ -300,7 +300,9 @@ impl<V> MvccState<V> {
             return Ok(None);
         }
 
-        // the committed versions must be ordered by their commit timestamps:
+        // the committed versions must be in strictly increasing order of their start of validity, which for a
+        // committed version is the commit timestamp of the transaction that wrote it (not its begin), or 0 for a
+        // version written outside a transaction:
         if entry
             .committed
             .windows(2)
@@ -309,8 +311,8 @@ impl<V> MvccState<V> {
             return Err(StoreError::VersionsNotOrdered(object_id.to_string()));
         }
 
-        // the most recent version that was committed (not started!) before this snapshot; delete markers count
-        // as versions, too:
+        // the newest committed version whose start of validity (its commit timestamp, see above) is less than
+        // `timestamp`; delete markers count as versions, too, as a delete newer than the visible update must hide it:
         let visible: Option<&VersionEntry<V>> = entry
             .committed
             .iter()
@@ -416,8 +418,12 @@ fn selected<V>(where_clause: Option<&dyn Clause<V>>, object: Option<&V>) -> bool
     }
 }
 
-/// A fully transactional versioned key-value store: a transaction may change any number of objects (Python:
-/// `TransactionalKeyValueStore`, formerly known as `MVCCStore`).
+/// A fully transactional versioned key-value store using multi-version concurrency control, MVCC for short
+/// (Python: `TransactionalKeyValueStore`).
+///
+/// A typical key-value store is transactional only for a single key, i.e. each insert, update or delete of one key
+/// is atomic. This store goes further: a transaction may read and write many keys, and all its writes become
+/// visible together at its commit or not at all.
 ///
 /// The store supports two isolation levels, see [`IsolationLevel`]. In both, a transaction reads the snapshot of its
 /// begin plus its own writes (snapshot read). In both, a transaction that writes an object which another transaction
@@ -428,8 +434,8 @@ fn selected<V>(where_clause: Option<&dyn Clause<V>>, object: Option<&V>) -> bool
 ///   [`Validation`] for the two methods). The write skew anomaly is detected and avoided.
 /// - snapshot isolation: reads are not checked. Instead, a transaction that writes an object is aborted at once if
 ///   another transaction changed that object and committed after the writer began. Together with the rule above,
-///   of two concurrent transactions that write the same object, the later writer is aborted at once (first updater
-///   wins). Lost updates cannot happen, but write skew can.
+///   this means: if two concurrent transactions write the same object, the one that writes second is aborted at
+///   once ("first updater wins"). Lost updates cannot happen, but write skew can.
 ///
 /// Note: a blind write (one that does not read the object first) to an object that another transaction changed and
 /// committed since the writer began is aborted under snapshot isolation, but can commit under serializable. The
@@ -687,9 +693,12 @@ pub fn read_objects_default<S: TransactionalStore + ?Sized>(
 
 /// Updates (or inserts) object `object_id` to `updated_object` in transaction `ta_id` (Python: `update_object`).
 ///
-/// Writes a [`JournalEntry::Update`], stores the object as the work-in-progress version of the object and adds the
-/// object id to the transaction's write set. Under the isolation level snapshot isolation, also aborts the
-/// transaction if another transaction changed the object and committed after the transaction began.
+/// A missing object id creates a new entry, and writing a deleted object stores a new version of it. Fails if the
+/// transaction has committed already. Aborts the transaction if another transaction holds a work-in-progress
+/// version of the object; under the isolation level snapshot isolation, also if another transaction changed the
+/// object and committed after the transaction began. Otherwise writes a [`JournalEntry::Update`], stores the object
+/// as the work-in-progress version of the object (a second write by the same transaction replaces it; the committed
+/// versions stay untouched) and adds the object id to the transaction's write set.
 ///
 /// # Errors
 ///
@@ -737,8 +746,10 @@ pub fn update_object_default<S: TransactionalStore + ?Sized>(
         },
     );
 
-    // 2. now update the actual store, append-only: the committed versions stay untouched, as other
-    // transactions may still read them
+    // 2. now update the actual store: the committed versions stay untouched, as other transactions may still read
+    // them in their snapshots; the new version goes into the wip slot (replacing an earlier write of ta_id), and
+    // the list of committed versions only grows (in contrast to PostgreSQL, which marks the old version as
+    // outdated by writing into its header)
     let new_entry: VersionEntry<S::Value> = VersionEntry {
         start_validity: ta_id,
         version: Version::Update(updated_object),
@@ -767,9 +778,11 @@ pub fn update_object_default<S: TransactionalStore + ?Sized>(
 
 /// Deletes object `object_id` in transaction `ta_id` (Python: `delete_object`).
 ///
-/// Writes a [`JournalEntry::Delete`], adds a delete marker as the work-in-progress version of the object and adds
-/// the object id to the transaction's write set. Under the isolation level snapshot isolation, also aborts the
-/// transaction if another transaction changed the object and committed after the transaction began.
+/// Fails if the transaction has committed already or the object is not in the store. Aborts the transaction if
+/// another transaction holds a work-in-progress version of the object; under the isolation level snapshot isolation,
+/// also if another transaction changed the object and committed after the transaction began. Otherwise writes a
+/// [`JournalEntry::Delete`], adds a delete marker as the work-in-progress version of the object and adds the object
+/// id to the transaction's write set.
 ///
 /// # Errors
 ///
@@ -940,22 +953,27 @@ pub fn validate_transaction_default<S: TransactionalStore + ?Sized>(
     }
 
     if state.validation == Validation::BruteForce {
-        // method 1 (brute force): run each read of ta_id again, against the current committed state of the store
-        // rather than the snapshot of ta_id, and compare the checksums. Equal checksums mean the read returns the
-        // same objects with the same contents as before. Comparing only the object ids would not do, as the
-        // contents may have changed.
+        // method 1 (brute force): run each read of ta_id again, on the committed state at the commit timestamp of
+        // ta_id rather than on the snapshot that ta_id read, and compare the checksums. Equal checksums mean the
+        // read returns the same objects with the same contents as before, so what other transactions committed in
+        // the meantime does not affect this read. Comparing only the object ids would not do, as the contents may
+        // have changed.
         //
         // Per object, compared to what ta_id read (the cases of Python's comment):
         // 1.     not modified by another transaction meanwhile: no conflict;
-        // 2a.    modified, but selected neither before nor now: no conflict, ta_id never saw it;
-        // 2b.i.  modified, selected before and now: conflict if its content changed (unchanged content gives the
-        //        same checksum and passes);
+        // 2a.    modified (updated, inserted or deleted), but selected neither before nor now: no conflict, ta_id
+        //        never saw it and would not see it now, and the checksum does not cover it;
+        // 2b.i.  modified, selected before and now: conflict if its content changed (non-repeatable read).
+        //        Unchanged content gives the same checksum and passes, as the read returns the same result; method 2
+        //        likewise skips versions that compare equal with ==. Equal content with a different `Debug` text
+        //        changes the checksum and only causes an unnecessary abort (see `checksum`);
         // 2b.ii. modified, selected before but not now (updated or deleted): conflict;
-        // 2c.    modified, not selected before but now: conflict (phantom or non-repeatable read).
+        // 2c.    inserted or updated to match the where clause, not selected before but now: conflict (phantom).
         // Every conflict changes the checksum: an object appears, disappears or changes its content in the result.
         for read_clause in &td_entry.read_clauses {
-            // ignore_wip is false, as in Python (its default): at a new commit timestamp, no work-in-progress
-            // version can be visible anyway
+            // ignore_wip is false, as in Python (its default): the read at the commit timestamp sees the newest
+            // committed version of every object and no work-in-progress version, as no transaction id equals a
+            // commit timestamp
             let now: Snapshot<S::Value> = store.read_snapshot(
                 commit_timestamp,
                 read_clause.where_clause.as_deref(),
@@ -1013,8 +1031,8 @@ pub fn validate_transaction_default<S: TransactionalStore + ?Sized>(
 /// the transaction's work-in-progress versions committed versions with the commit timestamp as start of their
 /// validity.
 ///
-/// This must run serially: if two validations overlapped, each could miss the versions the other installs, e.g.
-/// write skew:
+/// This must run serially, otherwise the write skew anomaly can go undetected. E.g., both transactions pass
+/// validation and commit in this schedule, although each one read an object that the other one wrote:
 ///
 /// ```text
 /// T1                              T2
@@ -1029,6 +1047,13 @@ pub fn validate_transaction_default<S: TransactionalStore + ?Sized>(
 ///                                 makes its versions visible
 /// makes its versions visible
 /// ```
+///
+/// Under serializable, with serial commits, T1 is validated and installs its versions first. Afterwards, the
+/// validation of T2 sees the new value of t written by T1, which T2 read, so T2 fails validation and is aborted.
+///
+/// With overlapping commits (e.g. in several threads), the validation of T2 may run before T1 has installed its
+/// versions, so it does not see them. To validate transactions in parallel, an extra mechanism that detects such
+/// cases is needed.
 ///
 /// # Errors
 ///
@@ -1105,7 +1130,8 @@ pub fn commit_transaction_default<S: TransactionalStore + ?Sized>(
         entry.committed.push(wip);
     }
 
-    // mark the transaction as committed and trace it:
+    // mark the transaction as committed and append it to the trace of committed transactions; validation method 2
+    // uses it to find the transactions that committed after a transaction began:
     td_entry.committed_timestamp = Some(commit_timestamp);
     committed_transactions_trace.push(ta_id);
     Ok(())

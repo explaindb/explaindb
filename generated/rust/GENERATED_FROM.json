@@ -42,7 +42,7 @@
           "path": "system/stores/VersionedKeyValueStore.py"
         },
         {
-          "sha256": "sha256:6e1b948423ee5801",
+          "sha256": "sha256:b5d197d23017f44a",
           "path": "system/stores/MVCC.py"
         },
         {
@@ -97,10 +97,10 @@
       "path": "src/stores.rs"
     },
     {
-      "sha256": "sha256:8b90d4c462b4769e",
+      "sha256": "sha256:b842355a247e8c61",
       "sources": [
         {
-          "sha256": "sha256:6e1b948423ee5801",
+          "sha256": "sha256:b5d197d23017f44a",
           "path": "system/stores/MVCC.py"
         },
         {
@@ -185,7 +185,7 @@
       "sha256": "sha256:0aa34a04701ff488",
       "sources": [
         {
-          "sha256": "sha256:6e1b948423ee5801",
+          "sha256": "sha256:b5d197d23017f44a",
           "path": "system/stores/MVCC.py"
         },
         {
