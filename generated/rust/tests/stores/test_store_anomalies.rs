@@ -25,7 +25,7 @@
 use std::cell::Cell;
 use std::rc::Rc;
 
-use crate::common::{Account, CountingWhereClause, Stuff, create_fake_data, update};
+use crate::common::{Account, CountingWhereClause, Stuff, create_fake_data, delete_marker, update};
 use explaindb::{
     Clause, IsolationLevel, JournalEntry, KvStoreEntry, ReadClause, StoreError,
     TransactionalKeyValueStore, TransactionalStore, TrueClause, Validation, Version, VersionEntry,
@@ -272,6 +272,63 @@ where
 #[test]
 fn test_snapshot_read_returns_correct_version() {
     check_snapshot_read_returns_correct_version::<TransactionalKeyValueStore<Stuff>>();
+}
+
+/// Checks that a snapshot read of the store `S` of an object that was updated at 0, deleted at 5 and re-inserted at
+/// 8 returns the version written at 0 up to and including timestamp 5, `None` from 6 up to and including 8, and the
+/// re-inserted value after 8; a version is visible only to timestamps strictly greater than its start.
+fn check_snapshot_read_after_delete_and_reinsert<S>()
+where
+    S: TransactionalStore<Value = Stuff> + Default,
+{
+    let mut store: S = S::default();
+    let object_id: &str = "4242";
+
+    // build a list of committed versions with a delete marker between two updates and force it into the store:
+    store.key_value_store_mut().insert(
+        object_id.to_string(),
+        KvStoreEntry {
+            committed: vec![
+                update(0, Stuff { a: 45, b: 45 }),
+                delete_marker(5),
+                update(8, Stuff { a: 49, b: 45 }),
+            ],
+            wip: None,
+        },
+    );
+
+    // before and at the delete, the first version is visible:
+    assert_eq!(
+        store.get_visible_object_version(object_id, 1, false),
+        Ok(Some(&Stuff { a: 45, b: 45 }))
+    );
+    assert_eq!(
+        store.get_visible_object_version(object_id, 5, false),
+        Ok(Some(&Stuff { a: 45, b: 45 }))
+    );
+
+    // after the delete and at the re-insert, the delete marker hides the first version:
+    assert_eq!(
+        store.get_visible_object_version(object_id, 6, false),
+        Ok(None)
+    );
+    assert_eq!(
+        store.get_visible_object_version(object_id, 8, false),
+        Ok(None)
+    );
+
+    // after the re-insert, the re-inserted version is visible:
+    assert_eq!(
+        store.get_visible_object_version(object_id, 9, false),
+        Ok(Some(&Stuff { a: 49, b: 45 }))
+    );
+}
+
+/// A [`TransactionalKeyValueStore`] reads an object that was deleted and re-inserted, see
+/// [`check_snapshot_read_after_delete_and_reinsert`].
+#[test]
+fn test_snapshot_read_after_delete_and_reinsert() {
+    check_snapshot_read_after_delete_and_reinsert::<TransactionalKeyValueStore<Stuff>>();
 }
 
 /// Checks that a transaction of the store `S` keeps seeing its snapshot while another transaction updates and
