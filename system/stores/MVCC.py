@@ -252,17 +252,15 @@ class TransactionalKeyValueStore(VersionedKeyValueStore, ACIDStore):
         # several committed versions (updates and delete markers) may be older than <timestamp>; the newest of
         # them is the visible one, so we search from the newest version backwards and take the first one committed
         # before <timestamp>; start_validity of a committed version is its commit timestamp (see above); delete
-        # markers are kept here, as a delete newer than the visible update must hide it (checked below):
+        # markers are kept here, as a delete newer than the visible update must hide it (checked below); a plain
+        # loop is faster here than filter() or a generator, as an object usually has only a few versions:
         last_committed_version_visible_to_TA_id: (
             VersionedKeyValueStore.VersionEntry | None
-        ) = next(
-            (
-                entry
-                for entry in reversed(committed_object_versions)
-                if entry.start_validity < timestamp
-            ),
-            None,
-        )
+        ) = None
+        for entry in reversed(committed_object_versions):
+            if entry.start_validity < timestamp:
+                last_committed_version_visible_to_TA_id = entry
+                break
 
         # all committed versions are newer than <timestamp>, e.g. the object was inserted by a transaction that
         # committed after <timestamp>: the object does not exist in this snapshot

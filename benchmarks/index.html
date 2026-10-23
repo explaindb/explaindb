@@ -124,7 +124,7 @@ Python and Rust differ.</p>
 <div class="panels"><div class="panel">
 <svg class="line-chart" viewBox="0 0 260 230" role="img" aria-labelledby="micro-bulkload-title" aria-describedby="micro-bulkload-desc" font-family="system-ui, -apple-system, &#x27;Segoe UI&#x27;, Roboto, Helvetica, Arial, sans-serif" font-size="12">
 <title id="micro-bulkload-title">bulkload</title>
-<desc id="micro-bulkload-desc">With 10 000 objects: Python 2.95 µs, Rust 40.4 ns per operation. All numbers are in the table below.</desc>
+<desc id="micro-bulkload-desc">With 10 000 objects: Python 3.01 µs, Rust 40.3 ns per operation. All numbers are in the table below.</desc>
 <text class="heading" data-testid="heading" x="56" y="18" text-anchor="start">bulkload</text>
 <line class="grid" data-testid="grid" x1="56" y1="190" x2="234" y2="190" stroke="#dddddd"/>
 <text class="label" data-testid="y-tick" x="51" y="194" text-anchor="end">10 ns</text>
@@ -147,26 +147,26 @@ Python and Rust differ.</p>
 <line class="grid" data-testid="grid" x1="234" y1="30" x2="234" y2="190" stroke="#dddddd"/>
 <text class="label" data-testid="x-tick" x="234" y="206" text-anchor="middle">10 000</text>
 <text class="label" data-testid="axis-title" x="145" y="224" text-anchor="middle">objects in the store</text>
-<polyline class="line python" data-testid="line-python" points="56,124.3 145,124.5 234,124.1" fill="none" stroke="#0072B2" stroke-width="2"/>
-<line class="range python" data-testid="range-python" x1="56" y1="124.4" x2="56" y2="124.2" stroke="#0072B2"/>
-<circle class="marker python" data-testid="marker-python" cx="56" cy="124.3" r="4" fill="#0072B2"/>
-<line class="range python" data-testid="range-python" x1="145" y1="124.6" x2="145" y2="124.2" stroke="#0072B2"/>
-<circle class="marker python" data-testid="marker-python" cx="145" cy="124.5" r="4" fill="#0072B2"/>
-<line class="range python" data-testid="range-python" x1="234" y1="124.4" x2="234" y2="123.7" stroke="#0072B2"/>
-<circle class="marker python" data-testid="marker-python" cx="234" cy="124.1" r="4" fill="#0072B2"/>
-<polyline class="line rust" data-testid="line-rust" points="56,174.3 145,173.5 234,173.8" fill="none" stroke="#D55E00" stroke-width="2"/>
-<line class="range rust" data-testid="range-rust" x1="56" y1="174.5" x2="56" y2="174.2" stroke="#D55E00"/>
-<rect class="marker rust" data-testid="marker-rust" x="52.5" y="170.8" width="7" height="7" fill="#D55E00"/>
-<line class="range rust" data-testid="range-rust" x1="145" y1="173.6" x2="145" y2="173.4" stroke="#D55E00"/>
-<rect class="marker rust" data-testid="marker-rust" x="141.5" y="170" width="7" height="7" fill="#D55E00"/>
-<line class="range rust" data-testid="range-rust" x1="234" y1="174.4" x2="234" y2="173" stroke="#D55E00"/>
-<rect class="marker rust" data-testid="marker-rust" x="230.5" y="170.3" width="7" height="7" fill="#D55E00"/>
+<polyline class="line python" data-testid="line-python" points="56,124.1 145,124.2 234,123.9" fill="none" stroke="#0072B2" stroke-width="2"/>
+<line class="range python" data-testid="range-python" x1="56" y1="124.1" x2="56" y2="123.9" stroke="#0072B2"/>
+<circle class="marker python" data-testid="marker-python" cx="56" cy="124.1" r="4" fill="#0072B2"/>
+<line class="range python" data-testid="range-python" x1="145" y1="124.4" x2="145" y2="123.5" stroke="#0072B2"/>
+<circle class="marker python" data-testid="marker-python" cx="145" cy="124.2" r="4" fill="#0072B2"/>
+<line class="range python" data-testid="range-python" x1="234" y1="124" x2="234" y2="123" stroke="#0072B2"/>
+<circle class="marker python" data-testid="marker-python" cx="234" cy="123.9" r="4" fill="#0072B2"/>
+<polyline class="line rust" data-testid="line-rust" points="56,173.7 145,172.1 234,173.9" fill="none" stroke="#D55E00" stroke-width="2"/>
+<line class="range rust" data-testid="range-rust" x1="56" y1="173.9" x2="56" y2="173.1" stroke="#D55E00"/>
+<rect class="marker rust" data-testid="marker-rust" x="52.5" y="170.2" width="7" height="7" fill="#D55E00"/>
+<line class="range rust" data-testid="range-rust" x1="145" y1="172.4" x2="145" y2="171.8" stroke="#D55E00"/>
+<rect class="marker rust" data-testid="marker-rust" x="141.5" y="168.6" width="7" height="7" fill="#D55E00"/>
+<line class="range rust" data-testid="range-rust" x1="234" y1="174" x2="234" y2="173.5" stroke="#D55E00"/>
+<rect class="marker rust" data-testid="marker-rust" x="230.5" y="170.4" width="7" height="7" fill="#D55E00"/>
 </svg>
 </div>
 <div class="panel">
 <svg class="line-chart" viewBox="0 0 260 230" role="img" aria-labelledby="micro-get-title" aria-describedby="micro-get-desc" font-family="system-ui, -apple-system, &#x27;Segoe UI&#x27;, Roboto, Helvetica, Arial, sans-serif" font-size="12">
 <title id="micro-get-title">get</title>
-<desc id="micro-get-desc">With 10 000 objects: Python 226 ns, Rust 15.2 ns per operation. All numbers are in the table below.</desc>
+<desc id="micro-get-desc">With 10 000 objects: Python 221 ns, Rust 14.6 ns per operation. All numbers are in the table below.</desc>
 <text class="heading" data-testid="heading" x="56" y="18" text-anchor="start">get</text>
 <line class="grid" data-testid="grid" x1="56" y1="190" x2="234" y2="190" stroke="#dddddd"/>
 <text class="label" data-testid="y-tick" x="51" y="194" text-anchor="end">10 ns</text>
@@ -189,26 +189,26 @@ Python and Rust differ.</p>
 <line class="grid" data-testid="grid" x1="234" y1="30" x2="234" y2="190" stroke="#dddddd"/>
 <text class="label" data-testid="x-tick" x="234" y="206" text-anchor="middle">10 000</text>
 <text class="label" data-testid="axis-title" x="145" y="224" text-anchor="middle">objects in the store</text>
-<polyline class="line python" data-testid="line-python" points="56,154.5 145,154 234,153.9" fill="none" stroke="#0072B2" stroke-width="2"/>
-<line class="range python" data-testid="range-python" x1="56" y1="154.7" x2="56" y2="154.2" stroke="#0072B2"/>
-<circle class="marker python" data-testid="marker-python" cx="56" cy="154.5" r="4" fill="#0072B2"/>
-<line class="range python" data-testid="range-python" x1="145" y1="154.3" x2="145" y2="153.8" stroke="#0072B2"/>
-<circle class="marker python" data-testid="marker-python" cx="145" cy="154" r="4" fill="#0072B2"/>
-<line class="range python" data-testid="range-python" x1="234" y1="154.3" x2="234" y2="152.9" stroke="#0072B2"/>
-<circle class="marker python" data-testid="marker-python" cx="234" cy="153.9" r="4" fill="#0072B2"/>
-<polyline class="line rust" data-testid="line-rust" points="56,186.5 145,186.3 234,185.2" fill="none" stroke="#D55E00" stroke-width="2"/>
-<line class="range rust" data-testid="range-rust" x1="56" y1="186.6" x2="56" y2="186.5" stroke="#D55E00"/>
-<rect class="marker rust" data-testid="marker-rust" x="52.5" y="183" width="7" height="7" fill="#D55E00"/>
-<line class="range rust" data-testid="range-rust" x1="145" y1="186.3" x2="145" y2="184.9" stroke="#D55E00"/>
-<rect class="marker rust" data-testid="marker-rust" x="141.5" y="182.8" width="7" height="7" fill="#D55E00"/>
-<line class="range rust" data-testid="range-rust" x1="234" y1="185.9" x2="234" y2="185" stroke="#D55E00"/>
-<rect class="marker rust" data-testid="marker-rust" x="230.5" y="181.7" width="7" height="7" fill="#D55E00"/>
+<polyline class="line python" data-testid="line-python" points="56,154.1 145,154.2 234,154.1" fill="none" stroke="#0072B2" stroke-width="2"/>
+<line class="range python" data-testid="range-python" x1="56" y1="154.3" x2="56" y2="153.5" stroke="#0072B2"/>
+<circle class="marker python" data-testid="marker-python" cx="56" cy="154.1" r="4" fill="#0072B2"/>
+<line class="range python" data-testid="range-python" x1="145" y1="154.4" x2="145" y2="153.6" stroke="#0072B2"/>
+<circle class="marker python" data-testid="marker-python" cx="145" cy="154.2" r="4" fill="#0072B2"/>
+<line class="range python" data-testid="range-python" x1="234" y1="154.4" x2="234" y2="153.6" stroke="#0072B2"/>
+<circle class="marker python" data-testid="marker-python" cx="234" cy="154.1" r="4" fill="#0072B2"/>
+<polyline class="line rust" data-testid="line-rust" points="56,185.6 145,186.1 234,185.6" fill="none" stroke="#D55E00" stroke-width="2"/>
+<line class="range rust" data-testid="range-rust" x1="56" y1="186" x2="56" y2="185.3" stroke="#D55E00"/>
+<rect class="marker rust" data-testid="marker-rust" x="52.5" y="182.1" width="7" height="7" fill="#D55E00"/>
+<line class="range rust" data-testid="range-rust" x1="145" y1="186.2" x2="145" y2="186" stroke="#D55E00"/>
+<rect class="marker rust" data-testid="marker-rust" x="141.5" y="182.6" width="7" height="7" fill="#D55E00"/>
+<line class="range rust" data-testid="range-rust" x1="234" y1="186" x2="234" y2="185.4" stroke="#D55E00"/>
+<rect class="marker rust" data-testid="marker-rust" x="230.5" y="182.1" width="7" height="7" fill="#D55E00"/>
 </svg>
 </div>
 <div class="panel">
 <svg class="line-chart" viewBox="0 0 260 230" role="img" aria-labelledby="micro-read-title" aria-describedby="micro-read-desc" font-family="system-ui, -apple-system, &#x27;Segoe UI&#x27;, Roboto, Helvetica, Arial, sans-serif" font-size="12">
 <title id="micro-read-title">read</title>
-<desc id="micro-read-desc">With 10 000 objects: Python 7.37 ms, Rust 166 µs per operation. All numbers are in the table below.</desc>
+<desc id="micro-read-desc">With 10 000 objects: Python 6.12 ms, Rust 162 µs per operation. All numbers are in the table below.</desc>
 <text class="heading" data-testid="heading" x="56" y="18" text-anchor="start">read</text>
 <line class="grid" data-testid="grid" x1="56" y1="190" x2="234" y2="190" stroke="#dddddd"/>
 <text class="label" data-testid="y-tick" x="51" y="194" text-anchor="end">10 ns</text>
@@ -231,26 +231,26 @@ Python and Rust differ.</p>
 <line class="grid" data-testid="grid" x1="234" y1="30" x2="234" y2="190" stroke="#dddddd"/>
 <text class="label" data-testid="x-tick" x="234" y="206" text-anchor="middle">10 000</text>
 <text class="label" data-testid="axis-title" x="145" y="224" text-anchor="middle">objects in the store</text>
-<polyline class="line python" data-testid="line-python" points="56,87 145,60.4 234,33.5" fill="none" stroke="#0072B2" stroke-width="2"/>
-<line class="range python" data-testid="range-python" x1="56" y1="87.1" x2="56" y2="86.9" stroke="#0072B2"/>
-<circle class="marker python" data-testid="marker-python" cx="56" cy="87" r="4" fill="#0072B2"/>
-<line class="range python" data-testid="range-python" x1="145" y1="60.5" x2="145" y2="60.3" stroke="#0072B2"/>
-<circle class="marker python" data-testid="marker-python" cx="145" cy="60.4" r="4" fill="#0072B2"/>
-<line class="range python" data-testid="range-python" x1="234" y1="33.6" x2="234" y2="32.6" stroke="#0072B2"/>
-<circle class="marker python" data-testid="marker-python" cx="234" cy="33.5" r="4" fill="#0072B2"/>
-<polyline class="line rust" data-testid="line-rust" points="56,131.7 145,105 234,77.5" fill="none" stroke="#D55E00" stroke-width="2"/>
-<line class="range rust" data-testid="range-rust" x1="56" y1="132" x2="56" y2="131.6" stroke="#D55E00"/>
-<rect class="marker rust" data-testid="marker-rust" x="52.5" y="128.2" width="7" height="7" fill="#D55E00"/>
-<line class="range rust" data-testid="range-rust" x1="145" y1="105.2" x2="145" y2="104.9" stroke="#D55E00"/>
-<rect class="marker rust" data-testid="marker-rust" x="141.5" y="101.5" width="7" height="7" fill="#D55E00"/>
-<line class="range rust" data-testid="range-rust" x1="234" y1="77.9" x2="234" y2="75" stroke="#D55E00"/>
-<rect class="marker rust" data-testid="marker-rust" x="230.5" y="74" width="7" height="7" fill="#D55E00"/>
+<polyline class="line python" data-testid="line-python" points="56,89.2 145,62.7 234,35.7" fill="none" stroke="#0072B2" stroke-width="2"/>
+<line class="range python" data-testid="range-python" x1="56" y1="89.3" x2="56" y2="89.1" stroke="#0072B2"/>
+<circle class="marker python" data-testid="marker-python" cx="56" cy="89.2" r="4" fill="#0072B2"/>
+<line class="range python" data-testid="range-python" x1="145" y1="62.7" x2="145" y2="62.6" stroke="#0072B2"/>
+<circle class="marker python" data-testid="marker-python" cx="145" cy="62.7" r="4" fill="#0072B2"/>
+<line class="range python" data-testid="range-python" x1="234" y1="35.8" x2="234" y2="32.7" stroke="#0072B2"/>
+<circle class="marker python" data-testid="marker-python" cx="234" cy="35.7" r="4" fill="#0072B2"/>
+<polyline class="line rust" data-testid="line-rust" points="56,131 145,104.8 234,77.7" fill="none" stroke="#D55E00" stroke-width="2"/>
+<line class="range rust" data-testid="range-rust" x1="56" y1="131.1" x2="56" y2="130.6" stroke="#D55E00"/>
+<rect class="marker rust" data-testid="marker-rust" x="52.5" y="127.5" width="7" height="7" fill="#D55E00"/>
+<line class="range rust" data-testid="range-rust" x1="145" y1="105" x2="145" y2="104.6" stroke="#D55E00"/>
+<rect class="marker rust" data-testid="marker-rust" x="141.5" y="101.3" width="7" height="7" fill="#D55E00"/>
+<line class="range rust" data-testid="range-rust" x1="234" y1="77.9" x2="234" y2="77.1" stroke="#D55E00"/>
+<rect class="marker rust" data-testid="marker-rust" x="230.5" y="74.2" width="7" height="7" fill="#D55E00"/>
 </svg>
 </div>
 <div class="panel">
 <svg class="line-chart" viewBox="0 0 260 230" role="img" aria-labelledby="micro-update_commit-title" aria-describedby="micro-update_commit-desc" font-family="system-ui, -apple-system, &#x27;Segoe UI&#x27;, Roboto, Helvetica, Arial, sans-serif" font-size="12">
 <title id="micro-update_commit-title">update_commit</title>
-<desc id="micro-update_commit-desc">With 10 000 objects: Python 8.11 µs, Rust 353 ns per operation. All numbers are in the table below.</desc>
+<desc id="micro-update_commit-desc">With 10 000 objects: Python 8.23 µs, Rust 359 ns per operation. All numbers are in the table below.</desc>
 <text class="heading" data-testid="heading" x="56" y="18" text-anchor="start">update_commit</text>
 <line class="grid" data-testid="grid" x1="56" y1="190" x2="234" y2="190" stroke="#dddddd"/>
 <text class="label" data-testid="y-tick" x="51" y="194" text-anchor="end">10 ns</text>
@@ -273,20 +273,20 @@ Python and Rust differ.</p>
 <line class="grid" data-testid="grid" x1="234" y1="30" x2="234" y2="190" stroke="#dddddd"/>
 <text class="label" data-testid="x-tick" x="234" y="206" text-anchor="middle">10 000</text>
 <text class="label" data-testid="axis-title" x="145" y="224" text-anchor="middle">objects in the store</text>
-<polyline class="line python" data-testid="line-python" points="56,112.7 145,111.8 234,112.4" fill="none" stroke="#0072B2" stroke-width="2"/>
-<line class="range python" data-testid="range-python" x1="56" y1="112.9" x2="56" y2="112.6" stroke="#0072B2"/>
-<circle class="marker python" data-testid="marker-python" cx="56" cy="112.7" r="4" fill="#0072B2"/>
-<line class="range python" data-testid="range-python" x1="145" y1="112.2" x2="145" y2="110.9" stroke="#0072B2"/>
-<circle class="marker python" data-testid="marker-python" cx="145" cy="111.8" r="4" fill="#0072B2"/>
-<line class="range python" data-testid="range-python" x1="234" y1="112.4" x2="234" y2="110" stroke="#0072B2"/>
-<circle class="marker python" data-testid="marker-python" cx="234" cy="112.4" r="4" fill="#0072B2"/>
-<polyline class="line rust" data-testid="line-rust" points="56,149.9 145,148.6 234,148.7" fill="none" stroke="#D55E00" stroke-width="2"/>
-<line class="range rust" data-testid="range-rust" x1="56" y1="150" x2="56" y2="149.8" stroke="#D55E00"/>
-<rect class="marker rust" data-testid="marker-rust" x="52.5" y="146.4" width="7" height="7" fill="#D55E00"/>
-<line class="range rust" data-testid="range-rust" x1="145" y1="148.7" x2="145" y2="148.3" stroke="#D55E00"/>
-<rect class="marker rust" data-testid="marker-rust" x="141.5" y="145.1" width="7" height="7" fill="#D55E00"/>
-<line class="range rust" data-testid="range-rust" x1="234" y1="148.9" x2="234" y2="146.9" stroke="#D55E00"/>
-<rect class="marker rust" data-testid="marker-rust" x="230.5" y="145.2" width="7" height="7" fill="#D55E00"/>
+<polyline class="line python" data-testid="line-python" points="56,112.8 145,112.6 234,112.3" fill="none" stroke="#0072B2" stroke-width="2"/>
+<line class="range python" data-testid="range-python" x1="56" y1="112.9" x2="56" y2="112.5" stroke="#0072B2"/>
+<circle class="marker python" data-testid="marker-python" cx="56" cy="112.8" r="4" fill="#0072B2"/>
+<line class="range python" data-testid="range-python" x1="145" y1="112.7" x2="145" y2="112.4" stroke="#0072B2"/>
+<circle class="marker python" data-testid="marker-python" cx="145" cy="112.6" r="4" fill="#0072B2"/>
+<line class="range python" data-testid="range-python" x1="234" y1="112.5" x2="234" y2="112" stroke="#0072B2"/>
+<circle class="marker python" data-testid="marker-python" cx="234" cy="112.3" r="4" fill="#0072B2"/>
+<polyline class="line rust" data-testid="line-rust" points="56,149.6 145,148.8 234,148.5" fill="none" stroke="#D55E00" stroke-width="2"/>
+<line class="range rust" data-testid="range-rust" x1="56" y1="149.6" x2="56" y2="149.5" stroke="#D55E00"/>
+<rect class="marker rust" data-testid="marker-rust" x="52.5" y="146.1" width="7" height="7" fill="#D55E00"/>
+<line class="range rust" data-testid="range-rust" x1="145" y1="148.9" x2="145" y2="148.4" stroke="#D55E00"/>
+<rect class="marker rust" data-testid="marker-rust" x="141.5" y="145.3" width="7" height="7" fill="#D55E00"/>
+<line class="range rust" data-testid="range-rust" x1="234" y1="148.7" x2="234" y2="147.9" stroke="#D55E00"/>
+<rect class="marker rust" data-testid="marker-rust" x="230.5" y="145" width="7" height="7" fill="#D55E00"/>
 </svg>
 </div></div>
 <figcaption>Time per operation over the size of the store; both axes are logarithmic and all four charts share
@@ -300,7 +300,7 @@ operations take about the same time at every size.</figcaption>
 &nbsp; <span class="rust">■ Rust</span></p>
 <svg class="bar-chart" viewBox="0 0 360 324" role="img" aria-labelledby="tps-title" aria-describedby="tps-desc" font-family="system-ui, -apple-system, &#x27;Segoe UI&#x27;, Roboto, Helvetica, Arial, sans-serif" font-size="12">
 <title id="tps-title">Transactions per second</title>
-<desc id="tps-desc">Rust reaches up to 59 424 transactions per second, Python up to 1 387. All numbers are in the table below.</desc>
+<desc id="tps-desc">Rust reaches up to 57 931 transactions per second, Python up to 1 649. All numbers are in the table below.</desc>
 <line class="grid" data-testid="grid" x1="67.5" y1="26" x2="67.5" y2="95" stroke="#dddddd"/>
 <line class="grid" data-testid="grid" x1="67.5" y1="118" x2="67.5" y2="187" stroke="#dddddd"/>
 <line class="grid" data-testid="grid" x1="67.5" y1="210" x2="67.5" y2="279" stroke="#dddddd"/>
@@ -319,37 +319,37 @@ operations take about the same time at every size.</figcaption>
 <text class="label" data-testid="x-tick" x="258.7" y="300" text-anchor="middle">60 000</text>
 <text class="heading" data-testid="heading" x="0" y="22" text-anchor="start">read_only</text>
 <text class="label" data-testid="row-label" x="61.5" y="46.5" text-anchor="end">method 1</text>
-<rect class="bar python" data-testid="bar-python" x="67.5" y="28" width="2.1" height="13" fill="#0072B2"/>
-<text class="label" data-testid="bar-label" x="73.6" y="38" text-anchor="start">Python 656</text>
-<rect class="bar rust" data-testid="bar-rust" x="67.5" y="44" width="53.2" height="13" fill="#D55E00"/>
-<text class="label" data-testid="bar-label" x="124.7" y="54" text-anchor="start">Rust 16 688</text>
+<rect class="bar python" data-testid="bar-python" x="67.5" y="28" width="2.5" height="13" fill="#0072B2"/>
+<text class="label" data-testid="bar-label" x="74" y="38" text-anchor="start">Python 782</text>
+<rect class="bar rust" data-testid="bar-rust" x="67.5" y="44" width="51.9" height="13" fill="#D55E00"/>
+<text class="label" data-testid="bar-label" x="123.5" y="54" text-anchor="start">Rust 16 298</text>
 <text class="label" data-testid="row-label" x="61.5" y="82.5" text-anchor="end">method 2</text>
-<rect class="bar python" data-testid="bar-python" x="67.5" y="64" width="4.4" height="13" fill="#0072B2"/>
-<text class="label" data-testid="bar-label" x="75.9" y="74" text-anchor="start">Python 1 387</text>
-<rect class="bar rust" data-testid="bar-rust" x="67.5" y="80" width="150.2" height="13" fill="#D55E00"/>
-<text class="label" data-testid="bar-label" x="221.7" y="90" text-anchor="start">Rust 47 120</text>
+<rect class="bar python" data-testid="bar-python" x="67.5" y="64" width="5.3" height="13" fill="#0072B2"/>
+<text class="label" data-testid="bar-label" x="76.8" y="74" text-anchor="start">Python 1 649</text>
+<rect class="bar rust" data-testid="bar-rust" x="67.5" y="80" width="142.8" height="13" fill="#D55E00"/>
+<text class="label" data-testid="bar-label" x="214.3" y="90" text-anchor="start">Rust 44 816</text>
 <text class="heading" data-testid="heading" x="0" y="114" text-anchor="start">read_write_disjoint</text>
 <text class="label" data-testid="row-label" x="61.5" y="138.5" text-anchor="end">method 1</text>
-<rect class="bar python" data-testid="bar-python" x="67.5" y="120" width="1.4" height="13" fill="#0072B2"/>
-<text class="label" data-testid="bar-label" x="72.9" y="130" text-anchor="start">Python 440</text>
-<rect class="bar rust" data-testid="bar-rust" x="67.5" y="136" width="60.7" height="13" fill="#D55E00"/>
-<text class="label" data-testid="bar-label" x="132.2" y="146" text-anchor="start">Rust 19 051</text>
+<rect class="bar python" data-testid="bar-python" x="67.5" y="120" width="1.7" height="13" fill="#0072B2"/>
+<text class="label" data-testid="bar-label" x="73.2" y="130" text-anchor="start">Python 536</text>
+<rect class="bar rust" data-testid="bar-rust" x="67.5" y="136" width="58.9" height="13" fill="#D55E00"/>
+<text class="label" data-testid="bar-label" x="130.5" y="146" text-anchor="start">Rust 18 496</text>
 <text class="label" data-testid="row-label" x="61.5" y="174.5" text-anchor="end">method 2</text>
-<rect class="bar python" data-testid="bar-python" x="67.5" y="156" width="4.1" height="13" fill="#0072B2"/>
-<text class="label" data-testid="bar-label" x="75.6" y="166" text-anchor="start">Python 1 292</text>
-<rect class="bar rust" data-testid="bar-rust" x="67.5" y="172" width="189.4" height="13" fill="#D55E00"/>
-<text class="label" data-testid="bar-label" x="260.9" y="182" text-anchor="start">Rust 59 424</text>
+<rect class="bar python" data-testid="bar-python" x="67.5" y="156" width="4.9" height="13" fill="#0072B2"/>
+<text class="label" data-testid="bar-label" x="76.5" y="166" text-anchor="start">Python 1 551</text>
+<rect class="bar rust" data-testid="bar-rust" x="67.5" y="172" width="184.6" height="13" fill="#D55E00"/>
+<text class="label" data-testid="bar-label" x="256.1" y="182" text-anchor="start">Rust 57 931</text>
 <text class="heading" data-testid="heading" x="0" y="206" text-anchor="start">read_write_contention</text>
 <text class="label" data-testid="row-label" x="61.5" y="230.5" text-anchor="end">method 1</text>
-<rect class="bar python" data-testid="bar-python" x="67.5" y="212" width="1.4" height="13" fill="#0072B2"/>
-<text class="label" data-testid="bar-label" x="72.9" y="222" text-anchor="start">Python 445</text>
-<rect class="bar rust" data-testid="bar-rust" x="67.5" y="228" width="54.8" height="13" fill="#D55E00"/>
-<text class="label" data-testid="bar-label" x="126.3" y="238" text-anchor="start">Rust 17 191</text>
+<rect class="bar python" data-testid="bar-python" x="67.5" y="212" width="1.7" height="13" fill="#0072B2"/>
+<text class="label" data-testid="bar-label" x="73.2" y="222" text-anchor="start">Python 538</text>
+<rect class="bar rust" data-testid="bar-rust" x="67.5" y="228" width="52.1" height="13" fill="#D55E00"/>
+<text class="label" data-testid="bar-label" x="123.6" y="238" text-anchor="start">Rust 16 337</text>
 <text class="label" data-testid="row-label" x="61.5" y="266.5" text-anchor="end">method 2</text>
-<rect class="bar python" data-testid="bar-python" x="67.5" y="248" width="4.2" height="13" fill="#0072B2"/>
-<text class="label" data-testid="bar-label" x="75.7" y="258" text-anchor="start">Python 1 326</text>
-<rect class="bar rust" data-testid="bar-rust" x="67.5" y="264" width="167.3" height="13" fill="#D55E00"/>
-<text class="label" data-testid="bar-label" x="238.9" y="274" text-anchor="start">Rust 52 513</text>
+<rect class="bar python" data-testid="bar-python" x="67.5" y="248" width="5" height="13" fill="#0072B2"/>
+<text class="label" data-testid="bar-label" x="76.5" y="258" text-anchor="start">Python 1 565</text>
+<rect class="bar rust" data-testid="bar-rust" x="67.5" y="264" width="162.5" height="13" fill="#D55E00"/>
+<text class="label" data-testid="bar-label" x="234.1" y="274" text-anchor="start">Rust 51 005</text>
 <line class="axis" data-testid="axis" x1="67.5" y1="26" x2="67.5" y2="95" stroke="#888888"/>
 <line class="axis" data-testid="axis" x1="67.5" y1="118" x2="67.5" y2="187" stroke="#888888"/>
 <line class="axis" data-testid="axis" x1="67.5" y1="210" x2="67.5" y2="279" stroke="#888888"/>
@@ -407,65 +407,65 @@ Python bars are short; their values are written next to them.</figcaption>
 <text class="label" data-testid="x-tick" x="325.7" y="524" text-anchor="middle">80×</text>
 <text class="heading" data-testid="heading" x="0" y="22" text-anchor="start">bulkload</text>
 <text class="label" data-testid="row-label" x="61.5" y="38.5" text-anchor="end">100</text>
-<rect class="bar rust" data-testid="bar-rust" x="67.5" y="28" width="241.8" height="13" fill="#D55E00"/>
-<text class="label" data-testid="bar-label" x="313.4" y="38" text-anchor="start">75×</text>
+<rect class="bar rust" data-testid="bar-rust" x="67.5" y="28" width="235.4" height="13" fill="#D55E00"/>
+<text class="label" data-testid="bar-label" x="306.9" y="38" text-anchor="start">73×</text>
 <text class="label" data-testid="row-label" x="61.5" y="58.5" text-anchor="end">1 000</text>
-<rect class="bar rust" data-testid="bar-rust" x="67.5" y="48" width="221.6" height="13" fill="#D55E00"/>
-<text class="label" data-testid="bar-label" x="293.1" y="58" text-anchor="start">69×</text>
+<rect class="bar rust" data-testid="bar-rust" x="67.5" y="48" width="201.6" height="13" fill="#D55E00"/>
+<text class="label" data-testid="bar-label" x="273.2" y="58" text-anchor="start">62×</text>
 <text class="label" data-testid="row-label" x="61.5" y="78.5" text-anchor="end">10 000</text>
-<rect class="bar rust" data-testid="bar-rust" x="67.5" y="68" width="235.4" height="13" fill="#D55E00"/>
-<text class="label" data-testid="bar-label" x="306.9" y="78" text-anchor="start">73×</text>
+<rect class="bar rust" data-testid="bar-rust" x="67.5" y="68" width="241.5" height="13" fill="#D55E00"/>
+<text class="label" data-testid="bar-label" x="313" y="78" text-anchor="start">75×</text>
 <text class="heading" data-testid="heading" x="0" y="102" text-anchor="start">get</text>
 <text class="label" data-testid="row-label" x="61.5" y="118.5" text-anchor="end">100</text>
-<rect class="bar rust" data-testid="bar-rust" x="67.5" y="108" width="51.1" height="13" fill="#D55E00"/>
-<text class="label" data-testid="bar-label" x="122.7" y="118" text-anchor="start">16×</text>
+<rect class="bar rust" data-testid="bar-rust" x="67.5" y="108" width="48.8" height="13" fill="#D55E00"/>
+<text class="label" data-testid="bar-label" x="120.3" y="118" text-anchor="start">15×</text>
 <text class="label" data-testid="row-label" x="61.5" y="138.5" text-anchor="end">1 000</text>
-<rect class="bar rust" data-testid="bar-rust" x="67.5" y="128" width="52.3" height="13" fill="#D55E00"/>
-<text class="label" data-testid="bar-label" x="123.8" y="138" text-anchor="start">16×</text>
+<rect class="bar rust" data-testid="bar-rust" x="67.5" y="128" width="50.8" height="13" fill="#D55E00"/>
+<text class="label" data-testid="bar-label" x="122.3" y="138" text-anchor="start">16×</text>
 <text class="label" data-testid="row-label" x="61.5" y="158.5" text-anchor="end">10 000</text>
-<rect class="bar rust" data-testid="bar-rust" x="67.5" y="148" width="48" height="13" fill="#D55E00"/>
-<text class="label" data-testid="bar-label" x="119.5" y="158" text-anchor="start">15×</text>
+<rect class="bar rust" data-testid="bar-rust" x="67.5" y="148" width="48.9" height="13" fill="#D55E00"/>
+<text class="label" data-testid="bar-label" x="120.4" y="158" text-anchor="start">15×</text>
 <text class="heading" data-testid="heading" x="0" y="182" text-anchor="start">read</text>
 <text class="label" data-testid="row-label" x="61.5" y="198.5" text-anchor="end">100</text>
-<rect class="bar rust" data-testid="bar-rust" x="67.5" y="188" width="153.3" height="13" fill="#D55E00"/>
-<text class="label" data-testid="bar-label" x="224.9" y="198" text-anchor="start">48×</text>
+<rect class="bar rust" data-testid="bar-rust" x="67.5" y="188" width="119.6" height="13" fill="#D55E00"/>
+<text class="label" data-testid="bar-label" x="191.1" y="198" text-anchor="start">37×</text>
 <text class="label" data-testid="row-label" x="61.5" y="218.5" text-anchor="end">1 000</text>
-<rect class="bar rust" data-testid="bar-rust" x="67.5" y="208" width="152.2" height="13" fill="#D55E00"/>
-<text class="label" data-testid="bar-label" x="223.7" y="218" text-anchor="start">47×</text>
+<rect class="bar rust" data-testid="bar-rust" x="67.5" y="208" width="122.2" height="13" fill="#D55E00"/>
+<text class="label" data-testid="bar-label" x="193.7" y="218" text-anchor="start">38×</text>
 <text class="label" data-testid="row-label" x="61.5" y="238.5" text-anchor="end">10 000</text>
-<rect class="bar rust" data-testid="bar-rust" x="67.5" y="228" width="143.3" height="13" fill="#D55E00"/>
-<text class="label" data-testid="bar-label" x="214.8" y="238" text-anchor="start">44×</text>
+<rect class="bar rust" data-testid="bar-rust" x="67.5" y="228" width="121.7" height="13" fill="#D55E00"/>
+<text class="label" data-testid="bar-label" x="193.3" y="238" text-anchor="start">38×</text>
 <text class="heading" data-testid="heading" x="0" y="262" text-anchor="start">update_commit</text>
 <text class="label" data-testid="row-label" x="61.5" y="278.5" text-anchor="end">100</text>
-<rect class="bar rust" data-testid="bar-rust" x="67.5" y="268" width="80" height="13" fill="#D55E00"/>
-<text class="label" data-testid="bar-label" x="151.5" y="278" text-anchor="start">25×</text>
+<rect class="bar rust" data-testid="bar-rust" x="67.5" y="268" width="77" height="13" fill="#D55E00"/>
+<text class="label" data-testid="bar-label" x="148.5" y="278" text-anchor="start">24×</text>
 <text class="label" data-testid="row-label" x="61.5" y="298.5" text-anchor="end">1 000</text>
-<rect class="bar rust" data-testid="bar-rust" x="67.5" y="288" width="77.4" height="13" fill="#D55E00"/>
-<text class="label" data-testid="bar-label" x="148.9" y="298" text-anchor="start">24×</text>
+<rect class="bar rust" data-testid="bar-rust" x="67.5" y="288" width="72.9" height="13" fill="#D55E00"/>
+<text class="label" data-testid="bar-label" x="144.4" y="298" text-anchor="start">23×</text>
 <text class="label" data-testid="row-label" x="61.5" y="318.5" text-anchor="end">10 000</text>
-<rect class="bar rust" data-testid="bar-rust" x="67.5" y="308" width="74.1" height="13" fill="#D55E00"/>
+<rect class="bar rust" data-testid="bar-rust" x="67.5" y="308" width="74" height="13" fill="#D55E00"/>
 <text class="label" data-testid="bar-label" x="145.6" y="318" text-anchor="start">23×</text>
 <text class="heading" data-testid="heading" x="0" y="342" text-anchor="start">read_only</text>
 <text class="label" data-testid="row-label" x="61.5" y="358.5" text-anchor="end">method 1</text>
-<rect class="bar rust" data-testid="bar-rust" x="67.5" y="348" width="82" height="13" fill="#D55E00"/>
-<text class="label" data-testid="bar-label" x="153.6" y="358" text-anchor="start">25×</text>
+<rect class="bar rust" data-testid="bar-rust" x="67.5" y="348" width="67.3" height="13" fill="#D55E00"/>
+<text class="label" data-testid="bar-label" x="138.8" y="358" text-anchor="start">21×</text>
 <text class="label" data-testid="row-label" x="61.5" y="378.5" text-anchor="end">method 2</text>
-<rect class="bar rust" data-testid="bar-rust" x="67.5" y="368" width="109.6" height="13" fill="#D55E00"/>
-<text class="label" data-testid="bar-label" x="181.2" y="378" text-anchor="start">34×</text>
+<rect class="bar rust" data-testid="bar-rust" x="67.5" y="368" width="87.7" height="13" fill="#D55E00"/>
+<text class="label" data-testid="bar-label" x="159.2" y="378" text-anchor="start">27×</text>
 <text class="heading" data-testid="heading" x="0" y="402" text-anchor="start">read_write_disjoint</text>
 <text class="label" data-testid="row-label" x="61.5" y="418.5" text-anchor="end">method 1</text>
-<rect class="bar rust" data-testid="bar-rust" x="67.5" y="408" width="139.6" height="13" fill="#D55E00"/>
-<text class="label" data-testid="bar-label" x="211.1" y="418" text-anchor="start">43×</text>
+<rect class="bar rust" data-testid="bar-rust" x="67.5" y="408" width="111.3" height="13" fill="#D55E00"/>
+<text class="label" data-testid="bar-label" x="182.8" y="418" text-anchor="start">34×</text>
 <text class="label" data-testid="row-label" x="61.5" y="438.5" text-anchor="end">method 2</text>
-<rect class="bar rust" data-testid="bar-rust" x="67.5" y="428" width="148.4" height="13" fill="#D55E00"/>
-<text class="label" data-testid="bar-label" x="219.9" y="438" text-anchor="start">46×</text>
+<rect class="bar rust" data-testid="bar-rust" x="67.5" y="428" width="120.5" height="13" fill="#D55E00"/>
+<text class="label" data-testid="bar-label" x="192" y="438" text-anchor="start">37×</text>
 <text class="heading" data-testid="heading" x="0" y="462" text-anchor="start">read_write_contention</text>
 <text class="label" data-testid="row-label" x="61.5" y="478.5" text-anchor="end">method 1</text>
-<rect class="bar rust" data-testid="bar-rust" x="67.5" y="468" width="124.8" height="13" fill="#D55E00"/>
-<text class="label" data-testid="bar-label" x="196.3" y="478" text-anchor="start">39×</text>
+<rect class="bar rust" data-testid="bar-rust" x="67.5" y="468" width="98" height="13" fill="#D55E00"/>
+<text class="label" data-testid="bar-label" x="169.5" y="478" text-anchor="start">30×</text>
 <text class="label" data-testid="row-label" x="61.5" y="498.5" text-anchor="end">method 2</text>
-<rect class="bar rust" data-testid="bar-rust" x="67.5" y="488" width="127.8" height="13" fill="#D55E00"/>
-<text class="label" data-testid="bar-label" x="199.3" y="498" text-anchor="start">40×</text>
+<rect class="bar rust" data-testid="bar-rust" x="67.5" y="488" width="105.2" height="13" fill="#D55E00"/>
+<text class="label" data-testid="bar-label" x="176.7" y="498" text-anchor="start">33×</text>
 <line class="axis" data-testid="axis" x1="67.5" y1="26" x2="67.5" y2="83" stroke="#888888"/>
 <line class="axis" data-testid="axis" x1="67.5" y1="106" x2="67.5" y2="163" stroke="#888888"/>
 <line class="axis" data-testid="axis" x1="67.5" y1="186" x2="67.5" y2="243" stroke="#888888"/>
@@ -490,24 +490,24 @@ and the commits and aborts of one pass. On a narrow screen, the table scrolls si
 <th scope="col">Rust range</th><th scope="col">Speed-up</th><th scope="col">Commits</th>
 <th scope="col">Aborts</th></tr></thead>
 <tbody>
-<tr><td>bulkload</td><td>2</td><td>100</td><td>2.91 µs</td><td>2.89 µs – 2.94 µs</td><td>38.9 ns</td><td>38.3 ns – 39.2 ns</td><td>75×</td><td>0</td><td>0</td></tr>
-<tr><td>bulkload</td><td>2</td><td>1 000</td><td>2.86 µs</td><td>2.83 µs – 2.94 µs</td><td>41.6 ns</td><td>41.1 ns – 42.1 ns</td><td>69×</td><td>0</td><td>0</td></tr>
-<tr><td>bulkload</td><td>2</td><td>10 000</td><td>2.95 µs</td><td>2.89 µs – 3.05 µs</td><td>40.4 ns</td><td>38.5 ns – 43.4 ns</td><td>73×</td><td>0</td><td>0</td></tr>
-<tr><td>get</td><td>2</td><td>100</td><td>214 ns</td><td>211 ns – 219 ns</td><td>13.5 ns</td><td>13.4 ns – 13.5 ns</td><td>16×</td><td>0</td><td>0</td></tr>
-<tr><td>get</td><td>2</td><td>1 000</td><td>224 ns</td><td>219 ns – 227 ns</td><td>13.8 ns</td><td>13.7 ns – 15.5 ns</td><td>16×</td><td>0</td><td>0</td></tr>
-<tr><td>get</td><td>2</td><td>10 000</td><td>226 ns</td><td>218 ns – 245 ns</td><td>15.2 ns</td><td>14.2 ns – 15.5 ns</td><td>15×</td><td>0</td><td>0</td></tr>
-<tr><td>read</td><td>2</td><td>100</td><td>72.8 µs</td><td>72.4 µs – 73.6 µs</td><td>1.53 µs</td><td>1.50 µs – 1.55 µs</td><td>48×</td><td>1</td><td>0</td></tr>
-<tr><td>read</td><td>2</td><td>1 000</td><td>726 µs</td><td>720 µs – 731 µs</td><td>15.4 µs</td><td>15.2 µs – 15.5 µs</td><td>47×</td><td>1</td><td>0</td></tr>
-<tr><td>read</td><td>2</td><td>10 000</td><td>7.37 ms</td><td>7.31 ms – 7.99 ms</td><td>166 µs</td><td>160 µs – 205 µs</td><td>44×</td><td>1</td><td>0</td></tr>
-<tr><td>update_commit</td><td>2</td><td>100</td><td>7.89 µs</td><td>7.81 µs – 7.96 µs</td><td>318 ns</td><td>315 ns – 323 ns</td><td>25×</td><td>1 000</td><td>0</td></tr>
-<tr><td>update_commit</td><td>2</td><td>1 000</td><td>8.57 µs</td><td>8.30 µs – 9.22 µs</td><td>357 ns</td><td>352 ns – 367 ns</td><td>24×</td><td>1 000</td><td>0</td></tr>
-<tr><td>update_commit</td><td>2</td><td>10 000</td><td>8.11 µs</td><td>8.10 µs – 10.0 µs</td><td>353 ns</td><td>347 ns – 412 ns</td><td>23×</td><td>1 000</td><td>0</td></tr>
-<tr><td>read_only</td><td>1</td><td>1 000</td><td>1.52 ms</td><td>1.52 ms – 1.54 ms</td><td>59.9 µs</td><td>58.7 µs – 61.4 µs</td><td>25×</td><td>1 000</td><td>0</td></tr>
-<tr><td>read_only</td><td>2</td><td>1 000</td><td>721 µs</td><td>718 µs – 726 µs</td><td>21.2 µs</td><td>20.9 µs – 21.9 µs</td><td>34×</td><td>1 000</td><td>0</td></tr>
-<tr><td>read_write_disjoint</td><td>1</td><td>1 000</td><td>2.27 ms</td><td>2.27 ms – 2.29 ms</td><td>52.5 µs</td><td>51.3 µs – 53.5 µs</td><td>43×</td><td>1 000</td><td>0</td></tr>
-<tr><td>read_write_disjoint</td><td>2</td><td>1 000</td><td>774 µs</td><td>770 µs – 779 µs</td><td>16.8 µs</td><td>16.3 µs – 17.2 µs</td><td>46×</td><td>1 000</td><td>0</td></tr>
-<tr><td>read_write_contention</td><td>1</td><td>1 000</td><td>2.25 ms</td><td>2.23 ms – 2.26 ms</td><td>58.2 µs</td><td>57.0 µs – 58.7 µs</td><td>39×</td><td>500</td><td>500</td></tr>
-<tr><td>read_write_contention</td><td>2</td><td>1 000</td><td>754 µs</td><td>749 µs – 762 µs</td><td>19.0 µs</td><td>18.6 µs – 19.4 µs</td><td>40×</td><td>500</td><td>500</td></tr>
+<tr><td>bulkload</td><td>2</td><td>100</td><td>2.97 µs</td><td>2.95 µs – 3.00 µs</td><td>40.7 ns</td><td>40.3 ns – 42.9 ns</td><td>73×</td><td>0</td><td>0</td></tr>
+<tr><td>bulkload</td><td>2</td><td>1 000</td><td>2.93 µs</td><td>2.89 µs – 3.13 µs</td><td>46.9 ns</td><td>45.5 ns – 48.0 ns</td><td>62×</td><td>0</td><td>0</td></tr>
+<tr><td>bulkload</td><td>2</td><td>10 000</td><td>3.01 µs</td><td>2.98 µs – 3.27 µs</td><td>40.3 ns</td><td>40.0 ns – 41.5 ns</td><td>75×</td><td>0</td><td>0</td></tr>
+<tr><td>get</td><td>2</td><td>100</td><td>221 ns</td><td>218 ns – 233 ns</td><td>14.7 ns</td><td>14.1 ns – 15.0 ns</td><td>15×</td><td>0</td><td>0</td></tr>
+<tr><td>get</td><td>2</td><td>1 000</td><td>220 ns</td><td>217 ns – 232 ns</td><td>14.0 ns</td><td>13.9 ns – 14.1 ns</td><td>16×</td><td>0</td><td>0</td></tr>
+<tr><td>get</td><td>2</td><td>10 000</td><td>221 ns</td><td>216 ns – 232 ns</td><td>14.6 ns</td><td>14.1 ns – 14.8 ns</td><td>15×</td><td>0</td><td>0</td></tr>
+<tr><td>read</td><td>2</td><td>100</td><td>60.2 µs</td><td>59.9 µs – 61.0 µs</td><td>1.63 µs</td><td>1.61 µs – 1.68 µs</td><td>37×</td><td>1</td><td>0</td></tr>
+<tr><td>read</td><td>2</td><td>1 000</td><td>596 µs</td><td>592 µs – 599 µs</td><td>15.7 µs</td><td>15.4 µs – 16.0 µs</td><td>38×</td><td>1</td><td>0</td></tr>
+<tr><td>read</td><td>2</td><td>10 000</td><td>6.12 ms</td><td>6.06 ms – 7.93 ms</td><td>162 µs</td><td>160 µs – 172 µs</td><td>38×</td><td>1</td><td>0</td></tr>
+<tr><td>update_commit</td><td>2</td><td>100</td><td>7.84 µs</td><td>7.81 µs – 8.06 µs</td><td>329 ns</td><td>328 ns – 332 ns</td><td>24×</td><td>1 000</td><td>0</td></tr>
+<tr><td>update_commit</td><td>2</td><td>1 000</td><td>7.96 µs</td><td>7.92 µs – 8.13 µs</td><td>352 ns</td><td>348 ns – 363 ns</td><td>23×</td><td>1 000</td><td>0</td></tr>
+<tr><td>update_commit</td><td>2</td><td>10 000</td><td>8.23 µs</td><td>8.09 µs – 8.38 µs</td><td>359 ns</td><td>353 ns – 379 ns</td><td>23×</td><td>1 000</td><td>0</td></tr>
+<tr><td>read_only</td><td>1</td><td>1 000</td><td>1.28 ms</td><td>1.27 ms – 1.33 ms</td><td>61.4 µs</td><td>59.9 µs – 63.2 µs</td><td>21×</td><td>1 000</td><td>0</td></tr>
+<tr><td>read_only</td><td>2</td><td>1 000</td><td>606 µs</td><td>603 µs – 621 µs</td><td>22.3 µs</td><td>21.9 µs – 22.5 µs</td><td>27×</td><td>1 000</td><td>0</td></tr>
+<tr><td>read_write_disjoint</td><td>1</td><td>1 000</td><td>1.86 ms</td><td>1.84 ms – 1.89 ms</td><td>54.1 µs</td><td>53.3 µs – 55.8 µs</td><td>34×</td><td>1 000</td><td>0</td></tr>
+<tr><td>read_write_disjoint</td><td>2</td><td>1 000</td><td>645 µs</td><td>634 µs – 687 µs</td><td>17.3 µs</td><td>17.2 µs – 17.6 µs</td><td>37×</td><td>1 000</td><td>0</td></tr>
+<tr><td>read_write_contention</td><td>1</td><td>1 000</td><td>1.86 ms</td><td>1.85 ms – 1.86 ms</td><td>61.2 µs</td><td>60.5 µs – 62.9 µs</td><td>30×</td><td>500</td><td>500</td></tr>
+<tr><td>read_write_contention</td><td>2</td><td>1 000</td><td>639 µs</td><td>635 µs – 646 µs</td><td>19.6 µs</td><td>19.1 µs – 20.2 µs</td><td>33×</td><td>500</td><td>500</td></tr>
 </tbody>
 </table>
 </div>
@@ -522,14 +522,14 @@ depend on the machine; they were measured once on the machine below.</p>
 
 <h2>Machine</h2>
 <dl data-testid="provenance">
-<dt>Date</dt><dd>2026-10-19T17:20:14+00:00</dd>
+<dt>Date</dt><dd>2026-10-23T13:21:43+00:00</dd>
 <dt>CPU</dt><dd>Apple M3 Max</dd>
 <dt>Cores</dt><dd>16</dd>
 <dt>Architecture</dt><dd>arm64</dd>
 <dt>Operating system</dt><dd>macOS-14.4.1</dd>
 <dt>Python</dt><dd>3.12.2</dd>
 <dt>Rust</dt><dd>rustc 1.98.1 (48a229cea 2026-09-01)</dd>
-<dt>Commit</dt><dd>5bd69bd11766e3004b4889d7140c958fa2dddde6</dd>
+<dt>Commit</dt><dd>57b25a4249d2f1496c9e320969aa54585468d749</dd>
 <dt>Uncommitted changes</dt><dd>no</dd>
 </dl>
 
