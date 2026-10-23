@@ -225,6 +225,45 @@ class StoreTestAnomalies(AbstractUnitTest):
         with self.assertRaisesRegex(RuntimeError, "not ordered"):
             tkvs._get_visible_object_version(object_id, 6)
 
+    def test_snapshot_read_after_delete_and_reinsert(self):
+        """A snapshot read of an object that was updated at 0, deleted at 5 and re-inserted at 8 returns the version
+        written at 0 up to and including timestamp 5, None from 6 up to and including 8, and the re-inserted value
+        after 8; a version is visible only to timestamps strictly greater than its start.
+        """
+
+        tkvs = TransactionalKeyValueStore()
+
+        object_id: str = "4242"
+
+        # build a committed list with a delete marker between two updates and force it into the store:
+        tkvs.key_value_store[object_id] = VersionedKeyValueStore.KVStoreEntry(
+            committed=[
+                VersionedKeyValueStore.UpdateEntry(
+                    start_validity=0, value=StoreTestAnomalies.Stuff(45, 45)
+                ),
+                VersionedKeyValueStore.DeleteEntry(start_validity=5),
+                VersionedKeyValueStore.UpdateEntry(
+                    start_validity=8, value=StoreTestAnomalies.Stuff(49, 45)
+                ),
+            ]
+        )
+
+        # before and at the delete, the first version is visible:
+        ret = tkvs._get_visible_object_version(object_id, 1)
+        self.assertEqual(ret, StoreTestAnomalies.Stuff(45, 45))
+        ret = tkvs._get_visible_object_version(object_id, 5)
+        self.assertEqual(ret, StoreTestAnomalies.Stuff(45, 45))
+
+        # after the delete and at the re-insert, the delete marker hides the first version:
+        ret = tkvs._get_visible_object_version(object_id, 6)
+        self.assertIsNone(ret)
+        ret = tkvs._get_visible_object_version(object_id, 8)
+        self.assertIsNone(ret)
+
+        # after the re-insert, the re-inserted version is visible:
+        ret = tkvs._get_visible_object_version(object_id, 9)
+        self.assertEqual(ret, StoreTestAnomalies.Stuff(49, 45))
+
     def test_read_write_conflict(self):
         """A TA keeps seeing its snapshot while another TA updates and commits the object it read; when the first TA
         then writes and tries to commit, validation aborts it. A TA that begins after that commit sees the new
