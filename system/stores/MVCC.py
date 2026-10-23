@@ -249,26 +249,25 @@ class TransactionalKeyValueStore(VersionedKeyValueStore, ACIDStore):
                 "committed object versions are not ordered by their validity start"
             )
 
-        # keep only the committed versions that were committed before <timestamp>:
-        visible_version_to_TA_id_list: list[VersionedKeyValueStore.UpdateEntry] = list(
-            filter(
-                # start_validity of a committed version is its commit timestamp (see above); delete markers are
-                # kept here, as a delete newer than the visible update must hide it (checked below):
-                lambda entry: entry.start_validity < timestamp,
-                committed_object_versions,
-            )
+        # several committed versions (updates and delete markers) may be older than <timestamp>; the newest of
+        # them is the visible one, so we search from the newest version backwards and take the first one committed
+        # before <timestamp>; start_validity of a committed version is its commit timestamp (see above); delete
+        # markers are kept here, as a delete newer than the visible update must hide it (checked below):
+        last_committed_version_visible_to_TA_id: (
+            VersionedKeyValueStore.VersionEntry | None
+        ) = next(
+            (
+                entry
+                for entry in reversed(committed_object_versions)
+                if entry.start_validity < timestamp
+            ),
+            None,
         )
 
         # all committed versions are newer than <timestamp>, e.g. the object was inserted by a transaction that
         # committed after <timestamp>: the object does not exist in this snapshot
-        if len(visible_version_to_TA_id_list) == 0:
+        if last_committed_version_visible_to_TA_id is None:
             return None
-
-        # several committed versions (updates and delete markers) may be older than <timestamp>; the newest of
-        # them, i.e. the last one in the list, is the visible one:
-        last_committed_version_visible_to_TA_id: VersionedKeyValueStore.UpdateEntry = (
-            visible_version_to_TA_id_list[-1]
-        )
 
         # if the last committed version was deleted, we return None:
         if isinstance(
