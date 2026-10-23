@@ -33,6 +33,7 @@ from system.playground.mvcc_playground import (
     Mode,
     RunState,
     Verdict,
+    Version,
     run_to,
 )
 from system.playground.mvcc_scenarios import SCENARIOS, Scenario, make_scenario
@@ -110,24 +111,20 @@ CELL_COLOURS: dict[str, str] = {
 # theme's stripes for every other row or for the row under the mouse would hide the boxes' tints, so the rule for tr
 # is more specific than those of PyCharm (table tr:nth-child(even)) and JupyterLab (.jp-RenderedHTMLCommon tbody
 # tr:nth-child(odd) and tbody tr:hover); a row's own background (style attribute) still wins. Lines separate the cells
-# of the tables; "div" makes the rule more specific than a theme's rule for td that removes borders:
+# of the tables, and a padding keeps the text of a cell off these lines; "div" makes the rule more specific than a
+# theme's rule for td that removes borders or padding:
 BOX_STYLE: str = (
     "<style>.mvcc-box {border:1px solid rgba(128,128,128,0.5); background:rgba(128,128,128,0.08); padding:6px; "
     "margin:6px 0} "
     "div.mvcc-box table tr:nth-child(n), div.mvcc-box table tr:hover {background:transparent} "
     "div.mvcc-box table {border-collapse:collapse} "
-    "div.mvcc-box th, div.mvcc-box td {border:1px solid rgba(128,128,128,0.5)}</style>"
+    "div.mvcc-box th, div.mvcc-box td {border:1px solid rgba(128,128,128,0.5); padding:2px 8px}</style>"
 )
 # the header row and the column "time" of the schedule grid: grey (stronger than a planned operation, fainter than a
 # skipped one, so that the three stand apart):
 HEADER_STYLE: dict[str, str] = {"background": "rgba(128,128,128,0.25)"}
 # the frame of the operation that ran last in the schedule grid, a grey that shows on light and dark pages:
 FRAME: str = "2px solid #808080"
-# a committed version in the store table, framed so that the versions of a key stand apart (a grey that shows on light
-# and dark pages):
-VERSION_BOX: str = (
-    "border:1px solid #bbbbbb; padding:1px 4px; margin-right:4px; white-space:nowrap"
-)
 
 
 def next_operations(schedule: Schedule) -> dict[int, list[str]]:
@@ -240,27 +237,47 @@ def checksums_html(checksums: tuple[Checksum, ...], wrote: bool) -> str:
     return "<br>".join(lines)
 
 
-def state_html(run_state: RunState) -> str:
-    """Shows the versions in the store, the transactions and the verdict as coloured HTML tables.
+def committed_list(committed: tuple[Version, ...]) -> str:
+    """Shows the committed versions of an object as a list like ``committed`` of its entry in the store, e.g.
+    ``[ts 0: (a=1, b=0), ts 3: (a=1, b=1) T1]``.
 
-    @return: the store, the transactions and the verdict, each in a box, as HTML
+    @param committed: the committed versions, oldest first
+    @return: the list as text, ``[]`` if there is no committed version
     """
-    # one row per key: the key, its committed versions oldest first, each in a box, and the version being written:
+    return "[" + ", ".join(str(version) for version in committed) + "]"
+
+
+def store_html(run_state: RunState) -> str:
+    """Shows the versions in the store as an HTML table.
+
+    @return: the store, in a box, as HTML
+    """
+    # one row per key: the key, the list of its committed versions oldest first, and the version being written:
     store_rows: list[str] = []
     for obj in run_state.objects:
-        versions: str = "".join(
-            f'<span style="{VERSION_BOX}">{html.escape(str(version))}</span>'
-            for version in obj.committed
-        )
         work_in_progress: str = (
             f'<td style="background:{STATUS_COLOURS["running"]}">{html.escape(str(obj.work_in_progress))}</td>'
             if obj.work_in_progress
             else "<td></td>"
         )
-        # an insert still in progress, or one whose transaction aborted, has no committed version:
+        # an insert still in progress, or one whose transaction aborted, has no committed version (``[]``):
         store_rows.append(
-            f"<tr><td><b>{html.escape(obj.object_id)}</b></td><td>{versions or 'none'}</td>{work_in_progress}</tr>"
+            f"<tr><td><b>{html.escape(obj.object_id)}</b></td>"
+            f"<td>{html.escape(committed_list(obj.committed))}</td>{work_in_progress}</tr>"
         )
+    return (
+        '<div class="mvcc-box"><b>Store</b><table>'
+        "<tr><th>key</th><th>committed (oldest first)</th><th>wip</th></tr>"
+        + "".join(store_rows)
+        + "</table></div>"
+    )
+
+
+def state_html(run_state: RunState) -> str:
+    """Shows the transactions and the verdict as coloured HTML tables.
+
+    @return: the transactions and the verdict, each in a box, as HTML
+    """
     # validation method 1 checks checksums; the column appears once a transaction has read in that mode:
     with_checksums: bool = any(
         transaction.checksums for transaction in run_state.transactions
@@ -292,10 +309,7 @@ def state_html(run_state: RunState) -> str:
         )
     checksums_header: str = "<th>checksums (method 1)</th>" if with_checksums else ""
     return (
-        '<div class="mvcc-box"><b>Store</b><table>'
-        "<tr><th>key</th><th>committed versions (oldest first)</th><th>work in progress</th></tr>"
-        + "".join(store_rows)
-        + '</table></div><div class="mvcc-box"><b>Transactions</b><table>'
+        '<div class="mvcc-box"><b>Transactions</b><table>'
         "<tr><th>transaction</th><th>status</th><th>snapshot + own writes</th><th>read</th><th>wrote</th>"
         f"{checksums_header}</tr>"
         + "".join(transaction_rows)
@@ -363,6 +377,7 @@ class MvccPlayground:  # pylint: disable=too-many-instance-attributes
         self.grid = widgets.GridBox()
         # the buttons of the operations in schedule order, for clicking them in tests:
         self.cells: list[widgets.Button] = []
+        self.store = widgets.HTML()
         self.state = widgets.HTML()
         # choosing a scenario loads it; a different transaction offers other operations; the mode changes the run
         # (the other inputs are only read when "add" is clicked):
@@ -379,6 +394,8 @@ class MvccPlayground:  # pylint: disable=too-many-instance-attributes
                 self.description,
                 # the modes on a row of their own, as four buttons next to the scenario dropdown get too wide:
                 self.mode,
+                # the versions in the store, above the controls that edit the schedule:
+                self.store,
                 # the controls that edit the schedule, in a box apart from the schedule (the style is for all boxes):
                 widgets.VBox(
                     [
@@ -439,7 +456,7 @@ class MvccPlayground:  # pylint: disable=too-many-instance-attributes
         self.refresh()
 
     def refresh(self, edited: bool = False) -> None:
-        """Updates the choices, the buttons, the schedule grid and the state after any change.
+        """Updates the choices, the buttons, the schedule grid, the store and the state after any change.
 
         @param edited: True if the schedule was changed by hand, so that it no longer is the chosen scenario
         """
@@ -485,6 +502,7 @@ class MvccPlayground:  # pylint: disable=too-many-instance-attributes
                 self.position == len(self.schedule) or run_state.verdict.kind == "error"
             )
             self.show_grid(run_state, schedule)
+            self.store.value = store_html(run_state)
             self.state.value = state_html(run_state)
         finally:
             self.refreshing = False

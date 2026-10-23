@@ -129,20 +129,28 @@ class Version:
     writer: str
 
     def __str__(self) -> str:
-        """Shows the version with its commit timestamp and its writer, e.g. ``ts 3 T1: (a=1, b=1)``."""
-        return f"ts {self.commit_timestamp} {self.writer}: {'deleted' if self.row is None else self.row}"
+        """Shows the version with its commit timestamp (the start of its validity in the store), its value and its
+        writer, e.g. ``ts 3: (a=1, b=1) T1`` or ``ts 4: deleted T2``; an initial object has no writer:
+        ``ts 0: (a=1, b=0)``.
+        """
+        value: str = "deleted" if self.row is None else str(self.row)
+        writer: str = "" if self.writer == "initial" else f" {self.writer}"
+        return f"ts {self.commit_timestamp}: {value}{writer}"
 
 
 @dataclass(frozen=True)
 class WorkInProgress:
-    """The work-in-progress version of an object: the transaction writing it and the value (None for a delete)."""
+    """The work-in-progress version of an object: the transaction id of its writer, which the store keeps as the
+    start of its validity until the commit, the value (None for a delete) and the transaction writing it.
+    """
 
-    owner: str
+    TA_id: int
     row: Row | None
+    owner: str
 
     def __str__(self) -> str:
-        """Shows who is writing which version, e.g. ``T2: deleted``."""
-        return f"{self.owner}: {'deleted' if self.row is None else self.row}"
+        """Shows the version with its writer's transaction id and its writer, e.g. ``ts 2: deleted T2``."""
+        return f"ts {self.TA_id}: {'deleted' if self.row is None else self.row} {self.owner}"
 
 
 @dataclass(frozen=True)
@@ -260,12 +268,13 @@ def object_states(
         if wip is not None:
             # a work-in-progress version carries the transaction id of its writer as its start:
             work_in_progress = WorkInProgress(
-                names[wip.start_validity],
+                wip.start_validity,
                 (
                     wip.value
                     if isinstance(wip, VersionedKeyValueStore.UpdateEntry)
                     else None
                 ),
+                names[wip.start_validity],
             )
         states.append(ObjectState(object_id, committed, work_in_progress))
     return tuple(states)
@@ -650,11 +659,14 @@ def abort_explanation(
             writer = newest_writer(store, run, key)
             if returned_by(where, before):
                 return (
-                    f"validation: {writer} changed {key}, which {read} returns in the snapshot of "
-                    f"{record.name}'s begin"
+                    f"validation: {writer} wrote {key} and committed after {record.name} began, and "
+                    f"{record.name}'s {read} returned {key} (without {record.name}'s own writes)"
                 )
             if returned_by(where, after):
-                return f"validation: {writer} changed {key}, which {read} returns now"
+                return (
+                    f"validation: {writer} wrote {key} and committed after {record.name} began, and "
+                    f"{record.name}'s {read} would now return {key} (without {record.name}'s own writes)"
+                )
     # the store aborted the commit, so one of the checks above, which follow the store's validation, found the reason:
     raise AssertionError(f"no reason found for the abort at position {position}")
 

@@ -34,7 +34,7 @@ from pathlib import Path
 
 import ipywidgets as widgets
 
-from system.playground.mvcc_playground import run_to
+from system.playground.mvcc_playground import Version, run_to
 from system.playground.mvcc_scenarios import schedule_of
 from system.playground.mvcc_widgets import (
     BOX_STYLE,
@@ -47,6 +47,7 @@ from system.playground.mvcc_widgets import (
     STATUS_COLOURS,
     VERDICT_COLOURS,
     MvccPlayground,
+    committed_list,
     next_operations,
 )
 from system.playground.schedules import DataOperation, Row
@@ -152,7 +153,7 @@ assert BOX_RULE, "BOX_STYLE has no rule for .mvcc-box with a background"
 BOX_BACKGROUND: str = BOX_RULE.group(1)
 # every background the playground puts behind text, by name, as the tints that lie on the page, the lowest first: the
 # grid lies on the page, the tables and the verdict in a box, and a changed checksum in a transaction's row. It
-# follows the nesting of state_html and show_grid; a tint added in either belongs here as well:
+# follows the nesting of store_html, state_html and show_grid; a tint added in any of them belongs here as well:
 BACKGROUNDS: dict[str, tuple[str, ...]] = {
     **{
         f"status {kind}": (BOX_BACKGROUND, colour)
@@ -187,10 +188,10 @@ def assert_in_boxes(test: unittest.TestCase, playground: MvccPlayground) -> None
         if isinstance(widget, widgets.HTML):
             shown.append(widget.value)
     test.assertTrue(any(BOX_STYLE in value for value in shown))
-    for title in ("Store", "Transactions"):
-        test.assertIn(
-            f'<div class="mvcc-box"><b>{title}</b><table>', playground.state.value
-        )
+    test.assertIn('<div class="mvcc-box"><b>Store</b><table>', playground.store.value)
+    test.assertIn(
+        '<div class="mvcc-box"><b>Transactions</b><table>', playground.state.value
+    )
 
 
 class PaletteTest(unittest.TestCase):
@@ -267,6 +268,7 @@ class PaletteTest(unittest.TestCase):
         )
         self.assertIsNone(text_colour.search(BOX_STYLE))
         # the store, the transactions with the changed checksum, and the verdict:
+        self.assertIsNone(text_colour.search(playground.store.value))
         self.assertIsNone(text_colour.search(playground.state.value))
         # at the end T2 is aborted and the column "why" explains it:
         playground.cells[-1].click()
@@ -351,6 +353,24 @@ class NextOperationsTest(unittest.TestCase):
 
 class MvccPlaygroundTest(unittest.TestCase):
     """The playground's widgets, driven through their values and button clicks."""
+
+    def test_store_is_above_the_controls_that_edit_the_schedule(self) -> None:
+        """The playground shows the store directly after the mode and above the controls that edit the schedule; the
+        transactions and the verdict come last.
+
+        Would fail if the store were shown below the controls or together with the transactions.
+        """
+        playground = MvccPlayground()
+        children: tuple[widgets.Widget, ...] = playground.widget.children
+        # the store directly after the mode, and the controls directly after the store:
+        store_index: int = children.index(playground.store)
+        self.assertIs(playground.mode, children[store_index - 1])
+        self.assertIn(
+            "<b>Edit schedule</b>", children[store_index + 1].children[0].value
+        )
+        # the transactions and the verdict come last, without the store:
+        self.assertIs(playground.state, children[-1])
+        self.assertNotIn("<b>Store</b>", playground.state.value)
 
     def test_choose_scenario(self) -> None:
         """Choosing a scenario, also again after an edit, loads it before its first operation; an edit, or choosing
@@ -459,8 +479,20 @@ class MvccPlaygroundTest(unittest.TestCase):
         assert_in_boxes(self, MvccPlayground())
         self.assertIn("div.mvcc-box table {border-collapse:collapse}", BOX_STYLE)
         self.assertIn(
-            "div.mvcc-box th, div.mvcc-box td {border:1px solid rgba(128,128,128,0.5)}",
+            "div.mvcc-box th, div.mvcc-box td {border:1px solid rgba(128,128,128,0.5);",
             BOX_STYLE,
+        )
+
+    def test_table_cells_leave_space_beside_their_text(self) -> None:
+        """The cells of the store's and the transactions' tables leave a space between their text and their lines.
+
+        Would fail if the cells had no padding, so that the text touched the lines, if the rule lost its ``div``
+        prefix, so that a theme's rule for td without a padding were as specific, or if the tables were not in a box
+        or the style were not shown.
+        """
+        assert_in_boxes(self, MvccPlayground())
+        self.assertRegex(
+            BOX_STYLE, r"div\.mvcc-box th, div\.mvcc-box td \{[^}]*padding:2px 8px[;}]"
         )
 
     def test_verdict_box(self) -> None:
@@ -538,7 +570,8 @@ class MvccPlaygroundTest(unittest.TestCase):
         self.assertNotIn(differs, backgrounds(playground))
         self.assertEqual(
             {
-                9: "validation: T1 changed x, which read a==1 returns in the snapshot of T2's begin"
+                9: "validation: T1 wrote x and committed after T2 began, "
+                "and T2's read a==1 returned x (without T2's own writes)"
             },
             {
                 position: text
@@ -885,8 +918,9 @@ class MvccPlaygroundTest(unittest.TestCase):
         )
 
     def test_store_table(self) -> None:
-        """At the end of lost update with method 2 (the default mode), the store shows both committed versions of x,
-        each with its timestamp and its writer, and nobody writing x.
+        """At the end of lost update with method 2 (the default mode), the store shows both committed versions of x
+        as a list, each with its commit timestamp (the start of its validity) and, except for the initial one, its
+        writer, and nobody writing x.
 
         ```text
         T1                          T2
@@ -904,15 +938,112 @@ class MvccPlaygroundTest(unittest.TestCase):
         """
         playground = loaded("lost update")
         playground.cells[-1].click()
+        # the columns are named after the fields of the store's entry:
+        self.assertIn(
+            "<tr><th>key</th><th>committed (oldest first)</th><th>wip</th></tr>",
+            playground.store.value,
+        )
         # the cells of the store's row for x, after the cell with the key:
-        row: str = playground.state.value.split("<tr><td><b>x</b></td>")[1]
+        row: str = playground.store.value.split("<tr><td><b>x</b></td>")[1]
         row = row.split("</tr>")[0]
-        self.assertIn("ts 0 initial: (a=1, b=0)</span>", row)
-        self.assertIn("ts 3 T1: (a=1, b=1)</span>", row)
+        self.assertIn("<td>[ts 0: (a=1, b=0), ts 3: (a=1, b=1) T1]</td>", row)
         # T2's commit was aborted in validation, which removed its work-in-progress version: no version of T2 and
         # nobody writing:
         self.assertNotIn("T2", row)
         self.assertTrue(row.endswith("<td></td>"), row)
+
+    def test_store_table_shows_an_insert_in_progress(self) -> None:
+        """While T1 inserts z, the store shows z with the empty list of committed versions and, in the column "wip",
+        T1's version with T1's transaction id 1 as the start of its validity.
+
+        ```text
+        T1
+        begin
+        update z ← (a=1, b=0)
+        ```
+
+        Would fail if a key without a committed version showed anything but ``[]``, or if its version being written
+        were missing or showed another timestamp than the id of its writer.
+        """
+        # T1 begins and inserts z, which is not in the store yet:
+        playground = MvccPlayground()
+        add(playground, 0, "begin")
+        playground.key.value = "z"
+        playground.a.value, playground.b.value = 1, 0
+        add(playground, 0, "update")
+        # the cells of the store's row for z, after the cell with the key:
+        row: str = playground.store.value.split("<tr><td><b>z</b></td>")[1]
+        row = row.split("</tr>")[0]
+        self.assertEqual(
+            "<td>[]</td>"
+            f'<td style="background:{STATUS_COLOURS["running"]}">ts 1: (a=1, b=0) T1</td>',
+            row,
+        )
+
+    def test_store_table_shows_the_transaction_id_of_a_version_being_written(
+        self,
+    ) -> None:
+        """In the read-only anomaly, T2 begins first and gets id 1, T1 gets id 2: while T1 writes y, the column "wip"
+        shows T1's version with T1's id 2; after T1's commit, the version is committed with T1's commit timestamp 3.
+
+        ```text
+        T1                          T2                          T3
+                                    begin
+                                    read all → {x, y}
+        begin
+        read a==2 → {y}
+        update y ← (a=2, b=20)                                                <- operation 5: T1 writes y
+        commit                                                                <- operation 6: T1 commits
+                                                                begin
+                                                                ...
+        ```
+
+        Would fail if the version being written showed the number in its writer's name or the commit timestamp instead
+        of its writer's transaction id.
+        """
+        playground = loaded("read-only anomaly (Fekete et al.)")
+        # after T1's update of y, T1's version is being written, with T1's id 2:
+        playground.cells[4].click()
+        row: str = playground.store.value.split("<tr><td><b>y</b></td>")[1]
+        row = row.split("</tr>")[0]
+        self.assertEqual(
+            "<td>[ts 0: (a=2, b=0)]</td>"
+            f'<td style="background:{STATUS_COLOURS["running"]}">ts 2: (a=2, b=20) T1</td>',
+            row,
+        )
+        # after T1's commit, the version is committed with T1's commit timestamp 3, and nobody writes y:
+        playground.cells[5].click()
+        row = playground.store.value.split("<tr><td><b>y</b></td>")[1]
+        row = row.split("</tr>")[0]
+        self.assertEqual(
+            "<td>[ts 0: (a=2, b=0), ts 3: (a=2, b=20) T1]</td><td></td>", row
+        )
+
+    def test_committed_list(self) -> None:
+        """The committed versions are shown as a list, oldest first, each with its commit timestamp, its value or
+        "deleted", and its writer, except for an initial object; an object without a committed version shows the
+        empty list.
+
+        Would fail if a delete marker were shown with a value, if an initial object were shown with the writer
+        "initial", if the brackets or commas were misplaced, or if the empty list were shown as anything but ``[]``.
+        """
+        # no committed version:
+        self.assertEqual("[]", committed_list(()))
+        # a single initial version, without a writer:
+        self.assertEqual(
+            "[ts 0: (a=1, b=0)]", committed_list((Version(0, Row(1, 0), "initial"),))
+        )
+        # an update, a delete marker and an update that re-inserts the object:
+        self.assertEqual(
+            "[ts 0: (a=1, b=0), ts 4: deleted T2, ts 7: (a=2, b=0) T3]",
+            committed_list(
+                (
+                    Version(0, Row(1, 0), "initial"),
+                    Version(4, None, "T2"),
+                    Version(7, Row(2, 0), "T3"),
+                )
+            ),
+        )
 
     def test_snapshot_plus_own_writes(self) -> None:
         """In lost update, after T1 updated x but before it commits, the column "snapshot + own writes" shows T1's

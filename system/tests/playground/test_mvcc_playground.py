@@ -478,13 +478,17 @@ class ExplanationTest(unittest.TestCase):
                 "lost update",
                 "method 2",
                 {
-                    7: "validation: T1 changed x, which read all returns in the snapshot of T2's begin"
+                    7: "validation: T1 wrote x and committed after T2 began, "
+                    "and T2's read all returned x (without T2's own writes)"
                 },
             ),
             (
                 "phantom insert",
                 "method 2",
-                {6: "validation: T2 changed y, which read a==1 returns now"},
+                {
+                    6: "validation: T2 wrote y and committed after T1 began, "
+                    "and T1's read a==1 would now return y (without T1's own writes)"
+                },
             ),
         ):
             with self.subTest(scenario=name, mode=mode):
@@ -584,7 +588,8 @@ class ExplanationTest(unittest.TestCase):
             ),
             (
                 "method 2",
-                "validation: T1 changed y, which read a==1 returns in the snapshot of T2's begin",
+                "validation: T1 wrote y and committed after T2 began, "
+                "and T2's read a==1 returned y (without T2's own writes)",
             ),
         ):
             with self.subTest(mode=mode):
@@ -796,7 +801,49 @@ class ExplanationTest(unittest.TestCase):
         result: RunState = run_to(schedule, INITIAL_X, "method 2", len(schedule))
         self.assertEqual(
             {
-                6: "validation: T2 changed x, which read a==1 returns in the snapshot of T1's begin"
+                6: "validation: T2 wrote x and committed after T1 began, "
+                "and T1's read a==1 returned x (without T1's own writes)"
+            },
+            result.explanations,
+        )
+
+    def test_method_2_leaves_out_own_writes_for_a_read_that_returns_it_now(
+        self,
+    ) -> None:
+        """With method 2, T1 wrote x itself before its read a==2, which returned T1's own x; as in the store's check,
+        the read is taken without T1's own write: it does not return x in the snapshot of T1's begin, but returns the
+        x that T2 committed since.
+
+        Initially x = (a=1, b=0):
+
+        ```text
+        T1                          T2
+        begin
+                                    begin
+                                    update x ← (a=2, b=0)
+                                    commit
+        update x ← (a=2, b=5)
+        read a==2 → {x}
+        commit -> aborted
+        ```
+
+        Would fail if the explanation took the read in the snapshot of T1's begin with T1's own write, with which it
+        returns x there, or if the message did not say that T1's own writes are left out.
+        """
+        schedule: Schedule = schedule_of(
+            (1, "begin"),
+            (2, "begin"),
+            (2, DataOperation("update", "x", Row(2, 0))),
+            (2, "commit"),
+            (1, DataOperation("update", "x", Row(2, 5))),
+            (1, DataOperation("read", a_equals=2)),
+            (1, "commit"),
+        )
+        result: RunState = run_to(schedule, INITIAL_X, "method 2", len(schedule))
+        self.assertEqual(
+            {
+                6: "validation: T2 wrote x and committed after T1 began, "
+                "and T1's read a==2 would now return x (without T1's own writes)"
             },
             result.explanations,
         )
@@ -840,7 +887,10 @@ class ExplanationTest(unittest.TestCase):
             schedule, (StoredObject("x", Row(0, 0)),), "method 2", len(schedule)
         )
         self.assertEqual(
-            {9: "validation: T3 changed x, which read a==1 returns now"},
+            {
+                9: "validation: T3 wrote x and committed after T1 began, "
+                "and T1's read a==1 would now return x (without T1's own writes)"
+            },
             result.explanations,
         )
 
@@ -1140,7 +1190,7 @@ class RunToTest(unittest.TestCase):
             ObjectState(
                 "x",
                 (Version(0, Row(1, 0), "initial"),),
-                WorkInProgress("T1", Row(2, 0)),
+                WorkInProgress(1, Row(2, 0), "T1"),
             ),
             after_update.objects[0],
         )
@@ -1217,10 +1267,12 @@ class RunToTest(unittest.TestCase):
         at_delete: RunState = run_to(s.schedule, s.initial_state, "method 2", 4)
         self.assertEqual(
             ObjectState(
-                "x", (Version(0, Row(1, 0), "initial"),), WorkInProgress("T2", None)
+                "x", (Version(0, Row(1, 0), "initial"),), WorkInProgress(2, None, "T2")
             ),
             at_delete.objects[0],
         )
+        # the playground shows the delete marker being written with T2's transaction id 2:
+        self.assertEqual("ts 2: deleted T2", str(at_delete.objects[0].work_in_progress))
         # at the end, T2's delete marker is a committed version of its own, with T2's commit timestamp 3:
         at_end: RunState = run_to(
             s.schedule, s.initial_state, "method 2", len(s.schedule)
@@ -1392,7 +1444,7 @@ class TransactionStateTest(unittest.TestCase):
         result: RunState = run_to(s.schedule, s.initial_state, "method 2", 5)
         # y exists only as T1's work-in-progress version, without a committed version:
         self.assertEqual(
-            ObjectState("y", (), WorkInProgress("T1", Row(1, 0))), result.objects[1]
+            ObjectState("y", (), WorkInProgress(1, Row(1, 0), "T1")), result.objects[1]
         )
         # T1 (id 1) is running: it sees x and its own y, and lists its read a==1 and its write of y:
         self.assertEqual(

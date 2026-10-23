@@ -13,7 +13,7 @@ attrs==26.1.0
 autopep8==2.3.2
 babel==2.18.0
 beautifulsoup4==4.15.0
-black==26.5.1
+black==26.10.1
 bleach==6.4.0
 certifi==2026.10.19
 cffi==2.1.1
