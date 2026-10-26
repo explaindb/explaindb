@@ -72,6 +72,14 @@ topic and points to the code that implements it. The launch badge opens a notebo
 |---|---|---|
 | [Z-Order-Curve](notebooks/Z-Order-Curve.ipynb) | Z-codes (Morton codes): mapping 2-D data to 1-D while preserving locality | [![Open Z-Order-Curve on Binder](https://mybinder.org/badge_logo.svg)](https://mybinder.org/v2/gh/explaindb/explaindb/main?urlpath=lab/tree/notebooks/Z-Order-Curve.ipynb) |
 
+## Visualizations
+
+Standalone animations in [`visualizations/`](visualizations); open the HTML file in a browser.
+
+| Visualization | Topic |
+|---|---|
+| [validation-interval-to-point](visualizations/validation-interval-to-point.html) | MVCC validation under the isolation level serializable: a transaction that passes validation shrinks from its interval [begin, commit] to a single point in time, a read-only transaction to its begin; the points form an equivalent serial schedule |
+
 ## What's Inside the `system/` Package
 
 A small DBMS written for reading, not for speed. Interfaces in

@@ -1357,6 +1357,175 @@ class StoreTestAnomalies(AbstractUnitTest):
                     with self.assertRaises(TransactionAbortedException):
                         tkvs.commit_transaction(t_i)
 
+    def test_validation_replays_interval_to_point_example(self):
+        """The store produces the outcome of the example schedule shown in
+        visualizations/validation-interval-to-point.html: all TAs commit except T2, whose validation fails.
+
+        ts  T1        T2        T3        R1        T4        T5        R2
+        1   begin
+            r A, w B
+        2             begin
+                      r B, w C
+        3                       begin
+                                r C, w A
+        4                                 begin
+                                          r A, B
+        5   commit
+        6                                           begin
+                                                    r B, w D
+        7                       commit
+        8             commit
+                      -> abort
+        9                                 commit
+        10                                                    begin
+                                                              r A, w B
+        11                                                              begin
+                                                                        r D
+        12                                          commit
+        13                                                    commit
+        14                                                              commit
+
+        All TAs share one timestamp counter, so the TA ids and commit timestamps are those of the page. Each TA reads
+        its snapshot as of begin. T2 aborts because T1 committed a write to B, which T2 read, between T2's begin and
+        commit. T4 and T5 read objects that were changed before they began, and R1 and R2 are read-only. Checked for
+        both validation methods.
+        """
+        # the objects and their (distinct) values of attribute a, used to read each object by a WHERE clause:
+        object_numbers: dict[str, int] = {"A": 1, "B": 2, "C": 3, "D": 4}
+        # the read set and the write set of each TA, as on the page:
+        reads_and_writes: dict[str, tuple[list[str], list[str]]] = {
+            "T1": (["A"], ["B"]),
+            "T2": (["B"], ["C"]),
+            "T3": (["C"], ["A"]),
+            "R1": (["A", "B"], []),
+            "T4": (["B"], ["D"]),
+            "T5": (["A"], ["B"]),
+            "R2": (["D"], []),
+        }
+        schedule: list[tuple[str, str]] = [
+            ("begin", "T1"),
+            ("begin", "T2"),
+            ("begin", "T3"),
+            ("begin", "R1"),
+            ("commit", "T1"),
+            ("begin", "T4"),
+            ("commit", "T3"),
+            ("commit", "T2"),
+            ("commit", "R1"),
+            ("begin", "T5"),
+            ("begin", "R2"),
+            ("commit", "T4"),
+            ("commit", "T5"),
+            ("commit", "R2"),
+        ]
+
+        for use_brute_force_validation in [False, True]:
+            with self.subTest(use_brute_force_validation=use_brute_force_validation):
+                tkvs: TransactionalKeyValueStore = TransactionalKeyValueStore(
+                    use_brute_force_validation=use_brute_force_validation
+                )
+                # put the initial versions outside of any TA, which consumes no timestamp:
+                for object_id, number in object_numbers.items():
+                    tkvs.put(object_id, StoreTestAnomalies.Stuff(number, 0))
+
+                TA_ids: dict[str, int] = {}
+                reads: dict[str, list[tuple[str, object]]] = {}
+                commit_timestamps: dict[str, int | None] = {}
+
+                def read_all(
+                    name: str, collect: bool = True
+                ) -> list[tuple[str, object]]:
+                    """Returns what TA <name> reads for all objects of its read set; adds these reads to its read set
+                    for validation only if <collect> is True."""
+                    return [
+                        item
+                        for object_id in reads_and_writes[name][0]
+                        for item in tkvs.read_objects(
+                            TA_ids[name],
+                            WHERE_Clause("a", "==", object_numbers[object_id]),
+                            collect_read_clause=collect,
+                        )
+                    ]
+
+                for event, name in schedule:
+                    if event == "begin":
+                        # begin, then read, then write; each write sets b to the writer's TA id:
+                        TA_id: int = tkvs.begin_transaction()
+                        TA_ids[name] = TA_id
+                        reads[name] = read_all(name)
+                        for object_id in reads_and_writes[name][1]:
+                            tkvs.update_object(
+                                object_id,
+                                StoreTestAnomalies.Stuff(
+                                    object_numbers[object_id], TA_id
+                                ),
+                                TA_id,
+                            )
+                    elif name == "T2":
+                        # just before its commit, T2 still reads its snapshot as of begin, although T1 has changed B
+                        # since (this check read stays out of the read set, so validation sees only the reads of the
+                        # page); T2 then fails the validation:
+                        self.assertEqual(read_all(name, collect=False), reads[name])
+                        with self.assertRaises(TransactionAbortedException):
+                            tkvs.commit_transaction(TA_ids[name])
+                    else:
+                        # just before its commit, the TA still reads its snapshot as of begin, although other TAs
+                        # may have committed since (again a check read outside of the read set):
+                        self.assertEqual(read_all(name, collect=False), reads[name])
+                        tkvs.commit_transaction(TA_ids[name])
+                        commit_timestamps[name] = tkvs.TD[
+                            TA_ids[name]
+                        ].committed_timestamp
+
+                # TA ids and commit timestamps are those of the page; T2's abort consumed timestamp 8:
+                self.assertEqual(
+                    TA_ids,
+                    {"T1": 1, "T2": 2, "T3": 3, "R1": 4, "T4": 6, "T5": 10, "R2": 11},
+                )
+                self.assertEqual(
+                    commit_timestamps,
+                    {"T1": 5, "T3": 7, "R1": 9, "T4": 12, "T5": 13, "R2": 14},
+                )
+                self.assertEqual(
+                    tkvs.committed_transactions_trace, [1, 3, 4, 6, 10, 11]
+                )
+
+                # every TA read its snapshot as of begin: T4 sees T1's B, T5 sees T3's A, all others the initial
+                # versions:
+                self.assertEqual(
+                    reads,
+                    {
+                        "T1": [("A", StoreTestAnomalies.Stuff(1, 0))],
+                        "T2": [("B", StoreTestAnomalies.Stuff(2, 0))],
+                        "T3": [("C", StoreTestAnomalies.Stuff(3, 0))],
+                        "R1": [
+                            ("A", StoreTestAnomalies.Stuff(1, 0)),
+                            ("B", StoreTestAnomalies.Stuff(2, 0)),
+                        ],
+                        "T4": [("B", StoreTestAnomalies.Stuff(2, 1))],
+                        "T5": [("A", StoreTestAnomalies.Stuff(1, 3))],
+                        "R2": [("D", StoreTestAnomalies.Stuff(4, 0))],
+                    },
+                )
+
+                # the final state of the database: the newest committed version of every object must equal the state
+                # after running the serial order R1, T1, T3, R2, T4, T5 one TA after another (the page shows it as the
+                # marker "DB state" after T5); every write sets b to the id of the writing TA, so b tells who wrote
+                # last: A was written last by T3 (id 3), B by T5 (id 10), D by T4 (id 6); C keeps its initial version
+                # (b = 0), as T2 aborted and its write of C was discarded:
+                self.assertEqual(
+                    {
+                        object_id: tkvs.key_value_store[object_id].committed[-1].value
+                        for object_id in object_numbers
+                    },
+                    {
+                        "A": StoreTestAnomalies.Stuff(1, 3),
+                        "B": StoreTestAnomalies.Stuff(2, 10),
+                        "C": StoreTestAnomalies.Stuff(3, 0),
+                        "D": StoreTestAnomalies.Stuff(4, 6),
+                    },
+                )
+
     def test_read_objects_evaluates_where_clause_twice_only_for_method_1(self):
         """With validation method 2, read_objects evaluates the where clause once per object; method 1 evaluates it a
         second time on the committed snapshot to compute the checksum. The result contains the transaction's own

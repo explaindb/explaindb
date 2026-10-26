@@ -1,0 +1,614 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<!--
+    This is ExplainDB, educational database systems materials.
+
+    Copyright (C) 2026 Prof. Dr. Jens Dittrich, Saarland University
+
+    This program is free software: you can redistribute it and/or modify
+    it under the terms of the GNU Affero General Public License as
+    published by the Free Software Foundation, either version 3 of the
+    License, or (at your option) any later version.
+
+    This program is distributed in the hope that it will be useful,
+    but WITHOUT ANY WARRANTY; without even the implied warranty of
+    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+    GNU Affero General Public License for more details.
+
+    You should have received a copy of the GNU Affero General Public License
+    along with this program.  If not, see <https://www.gnu.org/licenses/>.
+
+    An animation of the validation phase of the MVCC store (system/stores/MVCC.py) under the isolation level
+    serializable: every transaction that commits shrinks from its interval [begin, commit] to a single point in time.
+    Open the file in a browser.
+-->
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>From a Time Interval to a Point in Time</title>
+<style>
+  /* layout: one column; timeline stage on top, controls and narration below */
+  :root {
+    --bg: #f4f6f8; --panel: #ffffff; --fg: #17202a; --muted: #5b6979; --grid: #dbe2ea;
+    --run: #5d8bc9; --done: #1d4f91; --ro: #8a4fc0; --abort: #c43d36; --window: #e3a01b; --ok: #2b8656;
+    --sans: system-ui, "Helvetica Neue", Arial, sans-serif;
+    --mono: ui-monospace, Menlo, Consolas, monospace;
+    color-scheme: light;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #0e141b; --panel: #161f29; --fg: #e3e9ef; --muted: #93a1b0; --grid: #243140;
+      --run: #6f9bd6; --done: #8fbaf2; --ro: #c4a2f2; --abort: #ff6a5d; --window: #f2b53c; --ok: #5fc78f;
+      color-scheme: dark;
+    }
+  }
+  body {
+    margin: 0; background: var(--bg); color: var(--fg); font-family: var(--sans); font-size: 16px; line-height: 1.5;
+  }
+  main {
+    max-width: 1000px; margin: 0 auto; display: grid; gap: 20px;
+    padding: 28px 16px 48px;
+  }
+  h1 { font-size: 2rem; font-weight: 800; letter-spacing: -0.02em; margin: 0; text-wrap: balance; }
+  h2 { font-size: 1.15rem; font-weight: 800; margin: 0 0 6px; }
+  .lede { margin: 6px 0 0; color: var(--muted); max-width: 65ch; }
+  .stage-wrap { background: var(--panel); border: 1px solid var(--grid); border-radius: 10px; overflow-x: auto; }
+  svg { display: block; width: 100%; min-width: 640px; height: auto; }
+  svg text { font-family: var(--mono); fill: var(--fg); }
+  .grid { stroke: var(--grid); stroke-width: 1; }
+  .axis { stroke: var(--muted); stroke-width: 1.2; }
+  .tick { fill: var(--muted); font-size: 13px; }
+  .lane-id { font-family: var(--sans); font-weight: 800; font-size: 17px; }
+  .lane-id.ro { fill: var(--ro); }
+  .lane-sets { fill: var(--muted); font-size: 12px; }
+  .serial-label { font-family: var(--sans); font-weight: 600; font-size: 13px; fill: var(--muted); }
+  .iv { stroke-width: 3; stroke-linecap: round; fill: none; }
+  .iv.run { stroke: var(--run); }
+  .iv.ro { stroke: var(--ro); }
+  .iv.ok { stroke: var(--ok); }
+  .iv.abort { stroke: var(--abort); }
+  .dot { fill: var(--done); }
+  .dot.ro { fill: var(--ro); }
+  .flash { fill: none; stroke: var(--window); }
+  .glow { fill: var(--window); }
+  .spark { stroke: var(--window); stroke-width: 2; stroke-linecap: round; }
+  .ghost { stroke: var(--ok); stroke-dasharray: 4 4; stroke-width: 1.2; fill: none; }
+  .ghost-cap { stroke: var(--ok); stroke-width: 1.2; }
+  .cursor { stroke: var(--fg); stroke-width: 1.5; }
+  .cursor-label { font-size: 12px; font-weight: 600; }
+  .window { fill: var(--window); }
+  .window-edge { stroke: var(--window); stroke-width: 1.5; stroke-dasharray: 3 3; }
+  .window-label { font-size: 12px; font-weight: 600; fill: var(--window); }
+  .ring { fill: none; stroke: var(--window); stroke-width: 2.5; }
+  .chip { font-size: 12px; }
+  .chip .hit { fill: var(--abort); font-weight: 600; }
+  .result-ok { fill: var(--ok); font-size: 13px; font-weight: 600; }
+  .result-bad { fill: var(--abort); font-size: 13px; font-weight: 600; }
+  .result-ro { fill: var(--ro); font-size: 13px; font-weight: 600; }
+  .arrow { stroke: var(--done); stroke-width: 1.8; }
+  .arrow-head { fill: var(--done); }
+  .axis-head { fill: var(--muted); }
+  .serial-id { font-size: 12px; font-weight: 600; }
+  .state { fill: none; stroke: var(--ok); stroke-width: 2.2; }
+  .state-label { fill: var(--ok); font-size: 11px; font-weight: 600; }
+  .read-line { stroke: var(--ro); stroke-width: 2; stroke-dasharray: 5 4; }
+
+  .controls { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; }
+  button {
+    font: 600 0.95rem var(--sans); color: var(--fg); background: var(--panel);
+    border: 1px solid var(--grid); border-radius: 8px; padding: 8px 14px; cursor: pointer;
+  }
+  button:hover { border-color: var(--muted); }
+  button:focus-visible, input:focus-visible { outline: 2px solid var(--window); outline-offset: 2px; }
+  button.primary { background: var(--done); color: var(--panel); border-color: var(--done); min-width: 7.5em; }
+  #scrub { flex: 1 1 200px; min-width: 0; accent-color: var(--done); }
+  .narration {
+    background: var(--panel); border: 1px solid var(--grid); border-radius: 10px;
+    padding: 16px 18px; min-height: 7.5em;
+  }
+  .narration .ts { font: 600 0.85rem var(--mono); color: var(--muted); text-transform: uppercase; letter-spacing: 0.06em; }
+  .narration p { margin: 6px 0 0; max-width: 72ch; }
+  .narration code, .why code { font-family: var(--mono); font-size: 0.92em; }
+  .ok { color: var(--ok); font-weight: 600; }
+  .bad { color: var(--abort); font-weight: 600; }
+  .rotxt { color: var(--ro); font-weight: 600; }
+  .why p { margin: 0 0 10px; max-width: 70ch; }
+  @media (max-width: 520px) { h1 { font-size: 1.6rem; } }
+</style>
+</head>
+<body>
+<main>
+  <header>
+    <h1>From a Time Interval to a Point in Time</h1>
+    <p class="lede">
+      Every transaction runs from its begin timestamp to its commit timestamp. Under the isolation level
+      serializable, a transaction that commits may be treated as if it ran entirely within a single moment: the
+      interval becomes a point.
+    </p>
+  </header>
+
+  <div class="stage-wrap">
+    <svg id="stage" data-testid="stage" viewBox="0 0 960 520" role="img"
+         aria-label="Time axis with seven transactions; each one that commits shrinks to a point in time"></svg>
+  </div>
+
+  <div class="controls">
+    <button id="play" class="primary" data-testid="play" type="button">Play</button>
+    <button id="prev" data-testid="prev" type="button">Back</button>
+    <button id="next" data-testid="next" type="button">Next</button>
+    <button id="restart" data-testid="restart" type="button">Restart</button>
+    <input id="scrub" data-testid="scrub" type="range" min="0" max="1000" step="1" value="0"
+           aria-label="Position in the animation">
+  </div>
+
+  <section class="narration" data-testid="narration" aria-live="polite">
+    <div class="ts" id="nar-ts"></div>
+    <p id="nar-text"></p>
+  </section>
+
+  <section class="why">
+    <h2>Why is this allowed?</h2>
+    <p>
+      A transaction T reads its snapshot as of begin. Its writes become visible only at commit. Validation looks at
+      all transactions that committed after the begin and before the commit of T and combines their write sets. If
+      nothing that T read is in that set, T would have read exactly the same at its commit timestamp as at begin.
+      (Here every read fetches single objects. In the store, a read is a WHERE clause, so an object written in the
+      meantime that now matches one of the reads of T counts as well.) This is the default validation method of the
+      store; the other one (brute force) instead runs every read of T again at its commit timestamp and compares the
+      results, which gives the same verdicts in this example.
+    </p>
+    <p>
+      So T behaves as if it had performed all its reads and writes in a single moment: at commit. If validation
+      fails, the commit does not work as the moment of T; validation does not look for another one, so T is
+      aborted.
+    </p>
+    <p>
+      Read-only transactions (R1, R2) are not validated. They read the snapshot as of begin and write nothing, so
+      begin is their moment. At commit, their view might already be outdated. As MVCC keeps the old versions they
+      read and validation checks only writing transactions, they never have to abort in this store.
+    </p>
+    <p>
+      Lining up all points gives an equivalent serial schedule. begin and commit draw their timestamps from the
+      same counter, as in <code>TransactionalKeyValueStore</code>; the transaction id is the begin timestamp.
+    </p>
+  </section>
+</main>
+
+<script>
+(() => {
+  // the example schedule: begin and commit timestamps come from one counter
+  const TAS = [
+    { id: "T1", begin: 1, commit: 5, reads: ["A"], writes: ["B"] },
+    { id: "T2", begin: 2, commit: 8, reads: ["B"], writes: ["C"] },
+    { id: "T3", begin: 3, commit: 7, reads: ["C"], writes: ["A"] },
+    { id: "R1", begin: 4, commit: 9, reads: ["A", "B"], writes: [] },
+    { id: "T4", begin: 6, commit: 12, reads: ["B"], writes: ["D"] },
+    { id: "T5", begin: 10, commit: 13, reads: ["A"], writes: ["B"] },
+    { id: "R2", begin: 11, commit: 14, reads: ["D"], writes: [] },
+  ];
+  const MAX_TS = Math.max(...TAS.map(t => t.commit));
+
+  // validate in commit order: combine the write sets of all TAs that committed after begin and before commit;
+  // a read-only TA skips the check and becomes a point at its begin
+  const committed = [];
+  [...TAS].sort((a, b) => a.commit - b.commit).forEach(ta => {
+    ta.readOnly = ta.writes.length === 0;
+    const others = committed.filter(o => !o.readOnly && o.commit > ta.begin && o.commit < ta.commit);
+    const combined = new Set(others.flatMap(o => o.writes));
+    const conflict = ta.reads.filter(r => combined.has(r));
+    const ok = ta.readOnly || conflict.length === 0;
+    ta.result = { others, combined: [...combined].sort(), conflict, ok };
+    ta.point = ta.readOnly ? ta.begin : ta.commit;
+    if (ok) committed.push(ta);
+  });
+  const serialOrder = committed.slice().sort((a, b) => a.point - b.point);
+
+  // timeline of segments in animation seconds
+  const SEG = [];
+  let T = 0;
+  const add = (type, dur, data = {}) => { SEG.push({ type, start: T, dur, ...data }); T += dur; };
+  for (let ts = 1; ts <= MAX_TS; ts++) {
+    add("move", 0.5, { from: ts - 1, to: ts });
+    const b = TAS.find(t => t.begin === ts);
+    const c = TAS.find(t => t.commit === ts);
+    if (b) add("begin", 0.5, { ta: b, ts });
+    if (c) {
+      add("validate", 3.4, { ta: c, ts });
+      add(c.result.ok ? "morph" : "abort", c.result.ok ? 2.0 : 1.4, { ta: c, ts });
+      if (c.result.ok) add("enqueue", 1.0, { ta: c, ts });
+    }
+  }
+  add("move", 0.5, { from: MAX_TS, to: MAX_TS + 1 });
+  add("serial", 3.0);
+  const TOTAL = T;
+  // stops for Next/Back: the end of every event; a morph runs on into its enqueue
+  const KEYS = [0, ...SEG.filter(s => s.type !== "move" && s.type !== "morph").map(s => s.start + s.dur)];
+
+  const clamp = v => Math.max(0, Math.min(1, v));
+  const ease = p => (p < 0.5 ? 4 * p * p * p : 1 - Math.pow(-2 * p + 2, 3) / 2);
+  const easeOut = p => 1 - Math.pow(1 - p, 3);
+  const easeOutBack = p => { const c1 = 2.4, c3 = c1 + 1; return 1 + c3 * Math.pow(p - 1, 3) + c1 * Math.pow(p - 1, 2); };
+  /** Returns how far segment <s> has run at time <t>, from 0 to 1 (0 if there is no such segment). */
+  const prog = (s, t) => (s ? clamp((t - s.start) / s.dur) : 0);
+  const segOf = (type, ta) => SEG.find(s => s.type === type && s.ta === ta);
+
+  // geometry
+  const X0 = 130, X1 = 930, TMAX = MAX_TS + 1, CAP = 9;
+  const x = ts => X0 + ((X1 - X0) * ts) / TMAX;
+  const laneY = i => 84 + i * 46;
+  const LANES_BOTTOM = laneY(TAS.length - 1) + 22;
+  const SERIAL_Y = laneY(TAS.length) + 22;
+  const AXIS_Y = SERIAL_Y + 42;
+
+  const NS = "http://www.w3.org/2000/svg";
+  const svg = document.getElementById("stage");
+  const el = (tag, attrs = {}, parent = svg) => {
+    const e = document.createElementNS(NS, tag);
+    for (const k in attrs) e.setAttribute(k, attrs[k]);
+    parent.appendChild(e);
+    return e;
+  };
+  const txt = (attrs, s, parent) => { const e = el("text", attrs, parent); e.textContent = s; return e; };
+  const setAttrs = (node, attrs) => { for (const k in attrs) node.setAttribute(k, attrs[k]); };
+  const setOpacity = (node, o) => node.setAttribute("opacity", o.toFixed(3));
+  const vline = (node, xx, y, h) => setAttrs(node, { x1: xx, x2: xx, y1: y - h, y2: y + h });
+
+  // static parts: grid, axis, lanes
+  const defs = el("defs");
+  const marker = el("marker", { id: "head", viewBox: "0 0 10 10", refX: "9", refY: "5",
+    markerWidth: "7", markerHeight: "7", orient: "auto-start-reverse" }, defs);
+  el("path", { d: "M0,0 L10,5 L0,10 z", class: "arrow-head" }, marker);
+  const axisMarker = el("marker", { id: "axis-head", viewBox: "0 0 10 10", refX: "9", refY: "5",
+    markerWidth: "8", markerHeight: "8", orient: "auto" }, defs);
+  el("path", { d: "M0,0 L10,5 L0,10 z", class: "axis-head" }, axisMarker);
+  for (let ts = 1; ts <= MAX_TS; ts++) {
+    el("line", { x1: x(ts), x2: x(ts), y1: 56, y2: AXIS_Y, class: "grid" });
+    txt({ x: x(ts), y: AXIS_Y + 20, "text-anchor": "middle", class: "tick" }, String(ts));
+  }
+  el("line", { x1: X0 - 10, x2: X1, y1: AXIS_Y, y2: AXIS_Y, class: "axis", "marker-end": "url(#axis-head)" });
+  txt({ x: X1, y: AXIS_Y + 38, "text-anchor": "end", class: "tick" }, "timestamp");
+  TAS.forEach((ta, i) => {
+    txt({ x: 16, y: laneY(i) + 1, class: "lane-id" + (ta.readOnly ? " ro" : "") }, ta.id);
+    txt({ x: 16, y: laneY(i) + 17, class: "lane-sets" },
+      `r:${ta.reads.join(",")}` + (ta.readOnly ? "" : ` w:${ta.writes.join(",")}`));
+  });
+  // the separator stays above the "DB state" label (baseline SERIAL_Y - 17):
+  el("line", { x1: 16, x2: X1, y1: SERIAL_Y - 26, y2: SERIAL_Y - 26, class: "grid" });
+  txt({ x: 16, y: SERIAL_Y + 5, class: "serial-label" }, "serial");
+
+  // dynamic parts: the lanes, dimmed at the end, and the serial lane on top of them
+  const lanesLayer = el("g");
+  const win = el("g", {}, lanesLayer);
+  const winRect = el("rect", { y: 56, height: LANES_BOTTOM - 56, class: "window" }, win);
+  const winL = el("line", { y1: 56, y2: LANES_BOTTOM, class: "window-edge" }, win);
+  const winR = el("line", { y1: 56, y2: LANES_BOTTOM, class: "window-edge" }, win);
+  const winLabel = txt({ y: 46, "text-anchor": "middle", class: "window-label" }, "", win);
+
+  const serialLayer = el("g");
+  // the arrows connect the writing TAs only; a read-only TA is a line in between, at the version it read
+  const writers = serialOrder.filter(o => !o.readOnly).sort((a, b) => a.commit - b.commit);
+  const arrows = writers.slice(1).map(() =>
+    el("line", { y1: SERIAL_Y, y2: SERIAL_Y, class: "arrow", "marker-end": "url(#head)" }, serialLayer));
+  // the latest committed state of the database: after the last writing TA in the serial order
+  const state = el("path", { d: "M0,-13 L13,0 L0,13 L-13,0 Z", class: "state" }, serialLayer);
+  const stateLabel = txt({ y: SERIAL_Y - 17, "text-anchor": "middle", class: "state-label" }, "DB state", serialLayer);
+
+  const SPARKS = 12;
+  const V = TAS.map((ta, i) => {
+    const y = laneY(i);
+    const g = el("g", {}, lanesLayer);
+    const ghost = el("g", {}, g);
+    el("line", { x1: x(ta.begin), x2: x(ta.commit), y1: y, y2: y, class: "ghost" }, ghost);
+    [ta.begin, ta.commit].forEach(ts =>
+      el("line", { x1: x(ts), x2: x(ts), y1: y - CAP, y2: y + CAP, class: "ghost-cap" }, ghost));
+    const kind = ta.readOnly ? "ro" : "run";
+    const pt = x(ta.point);
+    const resultText = ta.readOnly ? "○ read-only: not validated"
+      : ta.result.ok ? "✓ passed" : `✗ conflict: ${ta.result.conflict.join(",")}`;
+    // the verdict goes right of the interval, or left of it where it would leave the stage
+    const fitsRight = x(ta.commit) + 16 + resultText.length * 7.6 < 950;
+    return {
+      ghost,
+      line: el("line", { class: "iv " + kind }, g),
+      capL: el("line", { class: "iv " + kind }, g),
+      capR: el("line", { class: "iv " + kind }, g),
+      glow: el("circle", { cx: pt, cy: y, r: 18, class: "glow" }, g),
+      flash1: el("circle", { cx: pt, cy: y, class: "flash" }, g),
+      flash2: el("circle", { cx: pt, cy: y, class: "flash" }, g),
+      sparks: Array.from({ length: SPARKS }, () => el("line", { class: "spark" }, g)),
+      dot: el("circle", { cx: pt, class: "dot" + (ta.readOnly ? " ro" : "") }, g),
+      ring: el("circle", { cx: pt, cy: y, r: 13, class: "ring" }, g),
+      chip: el("text", { x: pt, y: y - 15, "text-anchor": "middle", class: "chip" }, g),
+      readChip: el("text", { x: (x(ta.begin) + x(ta.commit)) / 2, y: y - 15, "text-anchor": "middle",
+        class: "chip" }, g),
+      result: txt({ x: fitsRight ? x(ta.commit) + 16 : x(ta.begin) - 16, y: y + 5,
+        "text-anchor": fitsRight ? "start" : "end",
+        class: ta.readOnly ? "result-ro" : ta.result.ok ? "result-ok" : "result-bad" }, resultText, g),
+      // the mark in the serial lane: a point for a writing TA, a line down from the point for a read-only TA
+      mark: ta.readOnly
+        ? el("line", { x1: pt, x2: pt, y1: y + 9, class: "read-line" }, serialLayer)
+        : el("circle", { cx: pt, r: 7, class: "dot" }, serialLayer),
+      serialId: txt({ x: pt, y: SERIAL_Y + 26, "text-anchor": "middle", class: "serial-id" }, ta.id, serialLayer),
+    };
+  });
+  const cursor = el("line", { y1: 56, y2: AXIS_Y, class: "cursor" });
+  const cursorLabel = txt({ y: AXIS_Y - 6, class: "cursor-label" }, "");
+
+  /** Fills a text element with "<prefix> X,Y" and marks the objects in <hits> as conflicts. */
+  const setChip = (node, prefix, objs, hits) => {
+    node.textContent = "";
+    const head = document.createElementNS(NS, "tspan");
+    head.textContent = prefix + " ";
+    node.appendChild(head);
+    objs.forEach((o, k) => {
+      const s = document.createElementNS(NS, "tspan");
+      s.textContent = o + (k < objs.length - 1 ? "," : "");
+      if (hits.includes(o)) s.setAttribute("class", "hit");
+      node.appendChild(s);
+    });
+  };
+
+  /** Draws the frame at animation time <t>. */
+  function render(t) {
+    // cursor position along the time axis
+    let cur = 0;
+    for (const s of SEG) {
+      if (t < s.start) break;
+      cur = s.type === "move" ? s.from + (s.to - s.from) * ease(prog(s, t)) : (s.ts ?? cur);
+    }
+    // progress of the final segment; it fades the cursor and dims the lanes:
+    const sp = prog(SEG[SEG.length - 1], t);
+    setAttrs(cursor, { x1: x(cur), x2: x(cur) });
+    cursorLabel.setAttribute("x", x(cur) + 5);
+    cursorLabel.textContent = cur > 0.01 ? `ts=${Math.round(cur * 10) / 10}` : "";
+    setOpacity(cursor, cur > 0.01 ? 1 - sp : 0);
+    setOpacity(cursorLabel, cur > 0.01 && cur <= MAX_TS ? 1 - sp : 0);
+    setOpacity(lanesLayer, 1 - 0.6 * sp);
+
+    // the TA that is committing (if any) and how far its check is; read-only TAs are shown but not validated
+    let active = null, vp = 0, fade = 0;
+    TAS.forEach(ta => {
+      const v = prog(segOf("validate", ta), t);
+      const after = prog(segOf(ta.result.ok ? "morph" : "abort", ta), t);
+      if (v > 0 && after < 1) { active = ta; vp = v; fade = clamp(after * 2.5); }
+    });
+    const winAlpha = active ? clamp(vp * 5) * (1 - fade) : 0;
+    if (active) {
+      winRect.setAttribute("x", x(active.begin));
+      winRect.setAttribute("width", x(active.commit) - x(active.begin));
+      setAttrs(winL, { x1: x(active.begin), x2: x(active.begin) });
+      setAttrs(winR, { x1: x(active.commit), x2: x(active.commit) });
+      winLabel.setAttribute("x", (x(active.begin) + x(active.commit)) / 2);
+      winLabel.textContent = (active.readOnly ? "window" : "validation window") +
+        `: commit in (${active.begin}, ${active.commit})`;
+    }
+    setOpacity(winRect, 0.16 * winAlpha);
+    setOpacity(winL, winAlpha); setOpacity(winR, winAlpha); setOpacity(winLabel, winAlpha);
+    const showOthers = clamp((vp - 0.18) / 0.15) * (1 - fade);
+    const showHits = vp > 0.55;
+    const showResult = clamp((vp - 0.6) / 0.12);
+
+    TAS.forEach((ta, i) => {
+      const v = V[i];
+      const y0 = laneY(i);
+      const ap = prog(segOf("begin", ta), t);
+      const mp = ta.result.ok ? prog(segOf("morph", ta), t) : 0;
+      const ab = ta.result.ok ? 0 : prog(segOf("abort", ta), t);
+      const pt = x(ta.point);
+
+      // the interval |----| grows with the cursor; its closing cap appears at commit
+      let L = x(ta.begin), R = x(Math.max(ta.begin, Math.min(cur, ta.commit)));
+      let capH = CAP, lineOp = ap;
+      if (mp > 0) {
+        // morph: the far cap pulls back a little, then shoots to the point with growing speed
+        const src = ta.readOnly ? x(ta.commit) : x(ta.begin);
+        const dir = Math.sign(pt - src);
+        const a = clamp(mp / 0.15), b = clamp((mp - 0.15) / 0.45);
+        const back = src - dir * 12;
+        const pos = mp < 0.15 ? src - dir * 12 * Math.sin((a * Math.PI) / 2) : back + (pt - back) * b * b * b;
+        if (ta.readOnly) R = pos; else L = pos;
+        capH = CAP + 8 * b;
+        lineOp = 1 - clamp((mp - 0.6) / 0.04);
+      }
+      const y = y0 + 8 * easeOut(ab);
+      const op = lineOp * (1 - 0.7 * ab);
+      // once the result of the commit shows, the interval turns green (commits) or red (aborts)
+      const decided = prog(segOf("validate", ta), t) > 0.6;
+      const kind = decided ? (ta.result.ok ? "ok" : "abort") : ta.readOnly ? "ro" : "run";
+      [v.line, v.capL, v.capR].forEach(n => n.setAttribute("class", "iv " + kind));
+      setAttrs(v.line, { x1: L, x2: R, y1: y, y2: y });
+      vline(v.capL, L, y, capH);
+      vline(v.capR, R, y, capH);
+      setOpacity(v.line, op);
+      setOpacity(v.capL, op);
+      setOpacity(v.capR, cur >= ta.commit - 0.001 ? op : 0);
+      setOpacity(v.ghost, 0.6 * clamp((mp - 0.1) / 0.3));
+
+      // impact: flash rings, a burst of sparks and the point popping out with an overshoot
+      const hit = mp >= 0.6 && mp < 1;
+      const e1 = easeOut(clamp((mp - 0.6) / 0.4));
+      const e2 = easeOut(clamp((mp - 0.7) / 0.3));
+      setAttrs(v.flash1, { r: 6 + 38 * e1, "stroke-width": 0.5 + 4 * (1 - e1) });
+      setAttrs(v.flash2, { r: 6 + 24 * e2, "stroke-width": 0.5 + 3 * (1 - e2) });
+      setOpacity(v.flash1, hit ? 1 - e1 : 0);
+      setOpacity(v.flash2, hit && mp >= 0.7 ? 1 - e2 : 0);
+      setOpacity(v.glow, hit ? 0.5 * (1 - e1) : 0);
+      v.sparks.forEach((s, k) => {
+        const ang = (k * 2 * Math.PI) / SPARKS + 0.26;
+        const r1 = 10 + 28 * e1, r2 = r1 + 12 * (1 - e1);
+        setAttrs(s, { x1: pt + r1 * Math.cos(ang), y1: y0 + r1 * Math.sin(ang),
+          x2: pt + r2 * Math.cos(ang), y2: y0 + r2 * Math.sin(ang) });
+        setOpacity(s, hit ? 1 - e1 : 0);
+      });
+      const pop = clamp((mp - 0.6) / 0.25);
+      setAttrs(v.dot, { r: mp >= 0.6 ? 7 * easeOutBack(pop) : 0, cy: y0 });
+
+      // enqueue: a copy of the point of a writing TA drops into the serial lane; a read-only TA writes nothing, so
+      // a line grows from its point down through the serial lane and marks the version it read
+      const eq = ease(prog(segOf("enqueue", ta), t));
+      if (ta.readOnly) v.mark.setAttribute("y2", y0 + 9 + (SERIAL_Y + 12 - y0 - 9) * eq);
+      else v.mark.setAttribute("cy", y0 + (SERIAL_Y - y0) * eq);
+      setOpacity(v.mark, eq > 0 ? 1 : 0);
+      setOpacity(v.serialId, eq);
+
+      // validation overlay: committed TAs in the window show their write sets, the committing TA its reads
+      const isOther = active && active.result.others.includes(ta);
+      setOpacity(v.ring, isOther ? showOthers : 0);
+      if (isOther) setChip(v.chip, "writes", ta.writes, showHits ? active.result.conflict : []);
+      setOpacity(v.chip, isOther ? showOthers : 0);
+      if (active === ta) setChip(v.readChip, "reads", ta.reads, showHits ? ta.result.conflict : []);
+      setOpacity(v.readChip, active === ta ? clamp(vp * 5) * (1 - fade) : 0);
+      const res = active === ta ? showResult * (ta.result.ok ? 1 - fade : 1) : ab > 0 ? 1 : 0;
+      setOpacity(v.result, res);
+    });
+    // the serial order of the points of the writing TAs that have landed
+    const landed = writers.filter(ta => prog(segOf("enqueue", ta), t) >= 1);
+    arrows.forEach((a, j) => {
+      const on = j < landed.length - 1;
+      // an arrow starts just right of its point (radius 7) and ends before the next one, clear of the DB state
+      // diamond (half-diagonal 13) plus the arrowhead's tip:
+      if (on) setAttrs(a, { x1: x(landed[j].point) + 11, x2: x(landed[j + 1].point) - 17 });
+      setOpacity(a, on ? 1 : 0);
+    });
+    // the DB state moves along with every writing TA that lands
+    let pos = x(0);
+    writers.forEach(w => { pos += (x(w.point) - pos) * ease(prog(segOf("enqueue", w), t)); });
+    state.setAttribute("transform", `translate(${pos},${SERIAL_Y})`);
+    stateLabel.setAttribute("x", pos);
+    narrate(t);
+  }
+
+  const set = a => `{${a.join(", ")}}`;
+  const ids = list => list.map(o => o.id).join(" and ");
+  let lastNar;
+  /** Writes the explanation for the segment that is running (or last ran) at time <t>. */
+  function narrate(t) {
+    let s = null;
+    // a segment starts to narrate just after its start, so a jump to the end of the previous one keeps its text;
+    // while a point drops into the serial lane (enqueue), the text of its commit stays:
+    for (const seg of SEG) if (seg.type !== "move" && seg.type !== "enqueue" && t > seg.start) s = seg;
+    if (s === lastNar) return;
+    lastNar = s;
+    let ts = "Start", html;
+    const ta = s && s.ta, r = ta && ta.result;
+    if (!s) {
+      html = "Seven transactions on a shared time axis. Each one runs from <code>begin</code> to " +
+        "<code>commit</code>, so it occupies a time interval. On the left: what it reads (r) and writes (w). " +
+        "<span class=\"rotxt\">R1</span> and <span class=\"rotxt\">R2</span> only read. Below, the serial " +
+        "schedule grows with every commit; the marker <b>DB state</b> shows the latest committed state.";
+    } else if (s.type === "begin") {
+      ts = `ts ${s.ts}`;
+      html = `<b>${ta.id}</b> begins and from now on reads the snapshot as of timestamp ${s.ts}.`;
+    } else if (s.type === "validate" && ta.readOnly) {
+      ts = `ts ${s.ts} · commit without validation`;
+      const seen = r.conflict.length
+        ? `In the window, however, ${r.others.map(o => `${o.id} ${set(o.writes)}`).join(" and ")} committed, ` +
+          `and ${ta.id} read <span class="bad">${set(r.conflict)}</span>. So at commit ${ta.commit}, the view ` +
+          `of ${ta.id} is no longer up to date.`
+        : `In the window, nobody overwrote what ${ta.id} read.`;
+      html = `<b>${ta.id}</b> wants to commit. It wrote nothing, so it is ` +
+        `<span class="rotxt">not validated</span>. ${seen}`;
+    } else if (s.type === "validate") {
+      ts = `ts ${s.ts} · validation`;
+      const others = r.others.length ? r.others.map(o => `${o.id} writes ${set(o.writes)}`).join(", ") : "none";
+      const verdict = r.ok
+        ? `<span class="ok">empty, so no conflict</span>`
+        : `<span class="bad">${set(r.conflict)}, so a conflict</span>`;
+      html = `<b>${ta.id}</b> wants to commit. Validation checks all writing TAs that committed between ` +
+        `${ta.begin} and ${ta.commit}: ${others}. Read set of ${ta.id}: ${set(ta.reads)}. ` +
+        `Intersection with ${set(r.combined)}: ${verdict}.`;
+    } else if (s.type === "morph" && ta.readOnly) {
+      ts = `ts ${s.ts} · point at begin`;
+      const passed = r.others.length
+        ? ` In the serial order, ${ta.id} therefore comes before ${ids(r.others)}, although it commits after them.`
+        : "";
+      // the version read: the state after the last writing TA that committed before the begin of ta
+      const before = writers.filter(w => w.commit < ta.begin).pop();
+      const version = before ? `the state after ${before.id}` : "the initial state, before any commit";
+      html = `<b>${ta.id}</b> read the snapshot as of timestamp ${ta.begin} and wrote nothing. ` +
+        `Its point is therefore at <span class="rotxt">begin</span>: the interval [${ta.begin}, ${ta.commit}] ` +
+        `shrinks to the left, to ${ta.begin}.${passed} The DB state does not change, as ${ta.id} wrote nothing. ` +
+        `In the serial schedule, a line marks the version that ${ta.id} read: ${version}.`;
+    } else if (s.type === "morph") {
+      ts = `ts ${s.ts} · commit`;
+      html = `No TA that committed in the meantime overwrote what <b>${ta.id}</b> read. So ${ta.id} would ` +
+        `have read exactly the same ` +
+        `if it had run entirely at timestamp ${ta.commit}. The interval [${ta.begin}, ${ta.commit}] ` +
+        `shrinks to the point ${ta.commit} and joins the serial schedule below. The DB state becomes the ` +
+        `state after ${ta.id}.`;
+    } else if (s.type === "abort") {
+      const w = r.others.filter(o => o.writes.some(o2 => r.conflict.includes(o2)));
+      ts = `ts ${s.ts} · abort`;
+      html = `<b>${ta.id}</b> read ${set(r.conflict)}, but ${ids(w)} committed a new version of it after ` +
+        `${ta.id} began. So timestamp ${ta.commit} does not work as the moment of ${ta.id}, and validation does ` +
+        `not look for another one: <span class="bad">abort</span>.`;
+    } else {
+      ts = "Result";
+      html = "Every successful transaction is now a point. Read from left to right, they form an equivalent " +
+        `serial schedule: <b>${serialOrder.map(o => o.id).join(" → ")}</b>. ` +
+        "The read-only transactions sit at their begin, not at their commit; in the serial schedule, a line marks " +
+        "the version each of them read. The DB state is the state after " +
+        `${writers[writers.length - 1].id}.`;
+    }
+    document.getElementById("nar-ts").textContent = ts;
+    document.getElementById("nar-text").innerHTML = html; // built from the constant example data above
+  }
+
+  // playback
+  let t = 0, playing = false, lastFrame = 0, loop = 0;
+  const playBtn = document.getElementById("play");
+  const scrub = document.getElementById("scrub");
+  const show = () => { render(t); scrub.value = Math.round((t / TOTAL) * 1000); };
+  let autoplay;
+  /** Starts or pauses the playback; starts the frame loop only if it is not running yet. Every control calls this,
+   *  so it also cancels a pending autoplay, which then never overrides what the user did. */
+  const setPlaying = p => {
+    clearTimeout(autoplay);
+    const wasPlaying = playing;
+    playing = p;
+    playBtn.textContent = p ? "Pause" : t >= TOTAL ? "Replay" : "Play";
+    if (p && !wasPlaying) {
+      // a new loop id ends a frame loop that is still pending from before a pause:
+      const id = ++loop;
+      lastFrame = performance.now();
+      requestAnimationFrame(now => tick(now, id));
+    }
+  };
+  /** Advances the animation by the time since the last frame: at most 0.1 s (e.g. after a hidden tab), and never
+   *  less than 0, as the first frame's timestamp can lie before lastFrame. */
+  function tick(now, id) {
+    if (!playing || id !== loop) return;
+    t = Math.min(TOTAL, t + Math.max(0, Math.min(0.1, (now - lastFrame) / 1000)));
+    lastFrame = now;
+    show();
+    if (t >= TOTAL) setPlaying(false); else requestAnimationFrame(next => tick(next, id));
+  }
+  playBtn.addEventListener("click", () => {
+    if (!playing && t >= TOTAL) t = 0;
+    setPlaying(!playing);
+  });
+  /** Pauses and jumps to the next (<dir> > 0) or previous stop in KEYS. */
+  const jump = dir => {
+    const target = dir > 0 ? KEYS.find(k => k > t + 0.01) : [...KEYS].reverse().find(k => k < t - 0.01);
+    t = target ?? (dir > 0 ? TOTAL : 0);
+    setPlaying(false);
+    show();
+  };
+  document.getElementById("next").addEventListener("click", () => jump(1));
+  document.getElementById("prev").addEventListener("click", () => jump(-1));
+  document.getElementById("restart").addEventListener("click", () => { t = 0; show(); setPlaying(true); });
+  scrub.addEventListener("input", () => { t = (scrub.value / 1000) * TOTAL; setPlaying(false); render(t); });
+  document.addEventListener("keydown", e => {
+    if (e.target.tagName === "INPUT") return;
+    if (e.key === " " && e.target.tagName !== "BUTTON") { e.preventDefault(); playBtn.click(); }
+    if (e.key === "ArrowRight") jump(1);
+    if (e.key === "ArrowLeft") jump(-1);
+  });
+
+  show();
+  const reduced = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+  if (!reduced) autoplay = setTimeout(() => setPlaying(true), 800);
+})();
+</script>
+</body>
+</html>

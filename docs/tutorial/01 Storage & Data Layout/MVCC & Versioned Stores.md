@@ -22,6 +22,10 @@ isolation and detects the anomalies a weaker scheme would allow.
   drives concurrency anomalies (dirty read, lost update, …) and checks how the store handles them.
 - **Notebook:** [`MVCC-Playground.ipynb`](../../../notebooks/MVCC-Playground.ipynb) — build schedules by
   clicking and run them on the MVCC store, operation by operation.
+- **Visualization:** [`validation-interval-to-point.html`](../../../visualizations/validation-interval-to-point.html)
+  — an animation of the serializable check (open it in a browser): a transaction that passes it shrinks from its
+  interval [begin, commit] to a single point in time, a read-only transaction to its begin, and the points form the
+  equivalent serial order.
 
 ## The idea in one picture
 
