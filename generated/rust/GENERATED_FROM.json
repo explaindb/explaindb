@@ -140,7 +140,7 @@
           "path": "system/tests/query_processing/test_query_processing.py"
         },
         {
-          "sha256": "sha256:9378c3e2ee82e756",
+          "sha256": "sha256:d6761dfa9e7bc33d",
           "path": "system/tests/stores/test_store_anomalies.py"
         }
       ],
@@ -196,10 +196,10 @@
       "path": "tests/stores/mvcc.rs"
     },
     {
-      "sha256": "sha256:0c469328ab7a7466",
+      "sha256": "sha256:aea67291ff5fe185",
       "sources": [
         {
-          "sha256": "sha256:9378c3e2ee82e756",
+          "sha256": "sha256:d6761dfa9e7bc33d",
           "path": "system/tests/stores/test_store_anomalies.py"
         }
       ],

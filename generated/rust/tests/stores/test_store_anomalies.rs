@@ -31,6 +31,7 @@ use explaindb::{
     TransactionalKeyValueStore, TransactionalStore, TrueClause, Validation, Version, VersionEntry,
     VersionedStore, WhereClause,
 };
+use indexmap::IndexMap;
 
 /// Asserts that `result` is the error of an aborted transaction; on failure, the message shows what was returned.
 fn assert_aborted<T: std::fmt::Debug>(result: Result<T, StoreError>) {
@@ -1805,6 +1806,239 @@ fn test_validation_detects_conflict_on_unhashable_objects_with_method_1() {
 #[test]
 fn test_validation_detects_conflict_on_unhashable_objects_with_method_2() {
     check_validation_detects_conflict_on_unhashable_objects::<TransactionalKeyValueStore<Account>>(
+        Validation::WriteSets,
+    );
+}
+
+/// Checks that the store `S` produces the outcome of the example schedule shown in
+/// `visualizations/validation-interval-to-point.html`: all transactions commit except T2, whose validation fails.
+///
+/// ```text
+/// ts  T1        T2        T3        R1        T4        T5        R2
+/// 1   begin
+///     r A, w B
+/// 2             begin
+///               r B, w C
+/// 3                       begin
+///                         r C, w A
+/// 4                                 begin
+///                                   r A, B
+/// 5   commit
+/// 6                                           begin
+///                                             r B, w D
+/// 7                       commit
+/// 8             commit
+///               -> abort
+/// 9                                 commit
+/// 10                                                    begin
+///                                                       r A, w B
+/// 11                                                              begin
+///                                                                 r D
+/// 12                                          commit
+/// 13                                                    commit
+/// 14                                                              commit
+/// ```
+///
+/// All transactions share one timestamp counter, so the transaction ids and commit timestamps are those of the page.
+/// Each transaction reads its snapshot as of begin. T2 aborts because T1 committed a write to B, which T2 read,
+/// between T2's begin and commit. T4 and T5 read objects that were changed before they began, and R1 and R2 are
+/// read-only.
+///
+/// Python runs this test with both validation methods; it runs here once per method.
+fn check_validation_replays_interval_to_point_example<S>(validation: Validation)
+where
+    S: TransactionalStore<Value = Stuff> + Default,
+{
+    // the objects and their (distinct) values of attribute a, used to read each object by a where clause:
+    let object_numbers: IndexMap<&str, i64> =
+        IndexMap::from([("A", 1), ("B", 2), ("C", 3), ("D", 4)]);
+    // the read set and the write set of each transaction, as on the page:
+    let reads_and_writes: IndexMap<&str, (Vec<&str>, Vec<&str>)> = IndexMap::from([
+        ("T1", (vec!["A"], vec!["B"])),
+        ("T2", (vec!["B"], vec!["C"])),
+        ("T3", (vec!["C"], vec!["A"])),
+        ("R1", (vec!["A", "B"], vec![])),
+        ("T4", (vec!["B"], vec!["D"])),
+        ("T5", (vec!["A"], vec!["B"])),
+        ("R2", (vec!["D"], vec![])),
+    ]);
+    let schedule: [(&str, &str); 14] = [
+        ("begin", "T1"),
+        ("begin", "T2"),
+        ("begin", "T3"),
+        ("begin", "R1"),
+        ("commit", "T1"),
+        ("begin", "T4"),
+        ("commit", "T3"),
+        ("commit", "T2"),
+        ("commit", "R1"),
+        ("begin", "T5"),
+        ("begin", "R2"),
+        ("commit", "T4"),
+        ("commit", "T5"),
+        ("commit", "R2"),
+    ];
+
+    let mut store: S = S::default();
+    store.state_mut().validation = validation;
+    // put the initial versions outside of any transaction, which consumes no timestamp:
+    for (object_id, number) in &object_numbers {
+        store.put(*object_id, Stuff { a: *number, b: 0 }).unwrap();
+    }
+
+    let mut ta_ids: IndexMap<&str, u64> = IndexMap::new();
+    let mut reads: IndexMap<&str, Vec<(String, Stuff)>> = IndexMap::new();
+    let mut commit_timestamps: IndexMap<&str, Option<u64>> = IndexMap::new();
+
+    // returns what transaction `name` (with id `ta_id`) reads for all objects of its read set; adds these reads to
+    // its read set for validation only if `collect` is true:
+    let read_all = |store: &mut S, name: &str, ta_id: u64, collect: bool| -> Vec<(String, Stuff)> {
+        let mut result: Vec<(String, Stuff)> = Vec::new();
+        for object_id in &reads_and_writes[name].0 {
+            let where_clause: Rc<dyn Clause<Stuff>> =
+                Rc::new(WhereClause::new("a", "==", object_numbers[object_id]));
+            result.extend(
+                store
+                    .read_objects(ta_id, Some(where_clause), collect)
+                    .unwrap(),
+            );
+        }
+        result
+    };
+
+    for (event, name) in schedule {
+        if event == "begin" {
+            // begin, then read, then write; each write sets b to the writer's transaction id:
+            let ta_id: u64 = store.begin_transaction();
+            ta_ids.insert(name, ta_id);
+            let read: Vec<(String, Stuff)> = read_all(&mut store, name, ta_id, true);
+            reads.insert(name, read);
+            for object_id in &reads_and_writes[name].1 {
+                let b: i64 = i64::try_from(ta_id).expect("transaction ids of the tests are small");
+                store
+                    .update_object(
+                        object_id,
+                        Stuff {
+                            a: object_numbers[object_id],
+                            b,
+                        },
+                        ta_id,
+                    )
+                    .unwrap();
+            }
+        } else if name == "T2" {
+            // just before its commit, T2 still reads its snapshot as of begin, although T1 has changed B since
+            // (this check read stays out of the read set, so validation sees only the reads of the page); T2 then
+            // fails the validation:
+            assert_eq!(
+                read_all(&mut store, name, ta_ids[name], false),
+                reads[name],
+                "{name}"
+            );
+            assert_aborted(store.commit_transaction(ta_ids[name]));
+        } else {
+            // just before its commit, the transaction still reads its snapshot as of begin, although other
+            // transactions may have committed since (again a check read outside of the read set):
+            assert_eq!(
+                read_all(&mut store, name, ta_ids[name], false),
+                reads[name],
+                "{name}"
+            );
+            store.commit_transaction(ta_ids[name]).unwrap();
+            commit_timestamps.insert(name, store.state().td[&ta_ids[name]].committed_timestamp);
+        }
+    }
+
+    // transaction ids and commit timestamps are those of the page; T2's abort consumed timestamp 8:
+    assert_eq!(
+        ta_ids,
+        IndexMap::from([
+            ("T1", 1),
+            ("T2", 2),
+            ("T3", 3),
+            ("R1", 4),
+            ("T4", 6),
+            ("T5", 10),
+            ("R2", 11),
+        ])
+    );
+    assert_eq!(
+        commit_timestamps,
+        IndexMap::from([
+            ("T1", Some(5)),
+            ("T3", Some(7)),
+            ("R1", Some(9)),
+            ("T4", Some(12)),
+            ("T5", Some(13)),
+            ("R2", Some(14)),
+        ])
+    );
+    assert_eq!(
+        store.state().committed_transactions_trace,
+        [1, 3, 4, 6, 10, 11]
+    );
+
+    // every transaction read its snapshot as of begin: T4 sees T1's B, T5 sees T3's A, all others the initial
+    // versions:
+    assert_eq!(
+        reads,
+        IndexMap::from([
+            ("T1", vec![("A".to_string(), Stuff { a: 1, b: 0 })]),
+            ("T2", vec![("B".to_string(), Stuff { a: 2, b: 0 })]),
+            ("T3", vec![("C".to_string(), Stuff { a: 3, b: 0 })]),
+            (
+                "R1",
+                vec![
+                    ("A".to_string(), Stuff { a: 1, b: 0 }),
+                    ("B".to_string(), Stuff { a: 2, b: 0 }),
+                ]
+            ),
+            ("T4", vec![("B".to_string(), Stuff { a: 2, b: 1 })]),
+            ("T5", vec![("A".to_string(), Stuff { a: 1, b: 3 })]),
+            ("R2", vec![("D".to_string(), Stuff { a: 4, b: 0 })]),
+        ])
+    );
+
+    // the final state of the database: the newest committed version of every object must equal the state after
+    // running the serial order R1, T1, T3, R2, T4, T5 one transaction after another (the page shows it as the marker
+    // "DB state" after T5); every write sets b to the id of the writing transaction, so b tells who wrote last: A was
+    // written last by T3 (id 3), B by T5 (id 10), D by T4 (id 6); C keeps its initial version (b = 0), as T2 aborted
+    // and its write of C was discarded:
+    let final_state: IndexMap<&str, Version<Stuff>> = object_numbers
+        .keys()
+        .map(|object_id| {
+            let newest: &VersionEntry<Stuff> = store.key_value_store()[*object_id]
+                .committed
+                .last()
+                .expect("every object has committed versions");
+            (*object_id, newest.version.clone())
+        })
+        .collect();
+    assert_eq!(
+        final_state,
+        IndexMap::from([
+            ("A", Version::Update(Stuff { a: 1, b: 3 })),
+            ("B", Version::Update(Stuff { a: 2, b: 10 })),
+            ("C", Version::Update(Stuff { a: 3, b: 0 })),
+            ("D", Version::Update(Stuff { a: 4, b: 6 })),
+        ])
+    );
+}
+
+/// A [`TransactionalKeyValueStore`] with validation method 1 produces the outcome of the example schedule of the
+/// visualization, see [`check_validation_replays_interval_to_point_example`].
+#[test]
+fn test_validation_replays_interval_to_point_example_with_method_1() {
+    check_validation_replays_interval_to_point_example::<TransactionalKeyValueStore<Stuff>>(
+        Validation::BruteForce,
+    );
+}
+
+/// A [`TransactionalKeyValueStore`] with validation method 2 produces the outcome of the example schedule of the
+/// visualization, see [`check_validation_replays_interval_to_point_example`].
+#[test]
+fn test_validation_replays_interval_to_point_example_with_method_2() {
+    check_validation_replays_interval_to_point_example::<TransactionalKeyValueStore<Stuff>>(
         Validation::WriteSets,
     );
 }
