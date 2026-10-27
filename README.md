@@ -79,6 +79,7 @@ Standalone animations in [`visualizations/`](visualizations); open the HTML file
 | Visualization | Topic |
 |---|---|
 | [validation-interval-to-point](visualizations/validation-interval-to-point.html) | MVCC validation under the isolation level serializable: a transaction that passes validation shrinks from its interval [begin, commit] to a single point in time, a read-only transaction to its begin; the points form an equivalent serial schedule |
+| [elasticity-resources-follow-demand](visualizations/elasticity-resources-follow-demand.html) | Elasticity: one day of a teaching platform with the tiers App (scales out) and DBMS (scales up), run on premise, with hosting, IaaS, PaaS (also with scheduled scaling by a timetable) or SaaS; shows bottlenecks, scale-up and scale-out, and whether the capacity follows the demand |
 
 ## What's Inside the `system/` Package
 

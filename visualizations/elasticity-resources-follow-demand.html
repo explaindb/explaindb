@@ -1,0 +1,1450 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<!--
+    This is ExplainDB, educational database systems materials.
+
+    Copyright (C) 2026 Prof. Dr. Jens Dittrich, Saarland University
+
+    This program is free software: you can redistribute it and/or modify
+    it under the terms of the GNU Affero General Public License as
+    published by the Free Software Foundation, either version 3 of the
+    License, or (at your option) any later version.
+
+    This program is distributed in the hope that it will be useful,
+    but WITHOUT ANY WARRANTY; without even the implied warranty of
+    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+    GNU Affero General Public License for more details.
+
+    You should have received a copy of the GNU Affero General Public License
+    along with this program.  If not, see <https://www.gnu.org/licenses/>.
+
+    A simulation of elasticity: one day of a teaching platform with two tiers (App, which scales out, and DBMS,
+    which scales up), operated in one of six ways (on premise, hosting, IaaS, PaaS, PaaS with a timetable, SaaS).
+    Either the capacity follows the demand, or it does not.
+    Open the file in a browser.
+-->
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Elasticity: Resources Follow Demand</title>
+<style>
+  /* layout: on a wide screen two columns; intro and model picker left, the stack of layers right; below them the
+     stage (tiers above, the day below) left, controls and narration right; then the explanation over the full
+     width. On a narrow screen one column in this order */
+  :root {
+    --bg: #f4f6f8; --panel: #ffffff; --fg: #17202a; --muted: #5b6979; --grid: #dbe2ea;
+    /* you manage, vendor manages: dark blue and green, the colors of the lecture slides, in both themes */
+    --you: #074b7c; --vendor: #0e6f0d; --optional: #c9d0d8; --on-box: #ffffff;
+    --you-line: #074b7c; --vendor-line: #0e6f0d;
+    --demand: #b86e00; --cap: #2f64b0; --slow: #c43d36; --idle: #8b97a5; --ok: #2b8656; --demand-ink: #9a5c00;
+    --load-ok: #8fd3a0; /* a light green, so that a load bar does not look like a server the vendor manages */
+    --sans: system-ui, "Helvetica Neue", Arial, sans-serif;
+    --mono: ui-monospace, Menlo, Consolas, monospace;
+    color-scheme: light;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #0e141b; --panel: #161f29; --fg: #e3e9ef; --muted: #93a1b0; --grid: #243140;
+      --you: #074b7c; --vendor: #0e6f0d; --optional: #4a5664; --on-box: #ffffff;
+      /* the outlines of the boxes and the dashed outlines of starting servers are lighter, so that they stand out
+         from the dark background */
+      --you-line: #5b8fc4; --vendor-line: #43a340;
+      --demand: #c4861a; --cap: #5a8ad2; --slow: #ff6a5d; --idle: #6b7888; --ok: #5fc78f; --demand-ink: #c4861a;
+      --load-ok: #5fc78f;
+      color-scheme: dark;
+    }
+  }
+  body {
+    margin: 0; background: var(--bg); color: var(--fg); font-family: var(--sans); font-size: 16px; line-height: 1.5;
+  }
+  main {
+    max-width: 1600px; margin: 0 auto; display: grid; gap: 20px 24px; padding: 20px 16px 48px;
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-areas: "intro" "stack" "stage" "side" "why";
+  }
+  /* two columns once both fit: the stage's 720px and its border, the right column's 360px, the gap, the padding
+     and a scrollbar */
+  @media (min-width: 1160px) {
+    main {
+      /* the stage gets the width at which it fits below the intro on one screen (its viewBox is 1200 x 640, the
+         intro with the gaps around it about 360px high), between 720px and 1180px; the right column the rest */
+      --stage-w: clamp(720px, (100vh - 360px) * 1200 / 640, 1180px);
+      grid-template-columns: minmax(0, var(--stage-w)) minmax(360px, 1fr);
+      grid-template-areas: "intro stack" "stage side" "why why";
+    }
+  }
+  .intro { grid-area: intro; display: grid; gap: 12px; align-content: start; min-width: 0; }
+  h1 { font-size: 2rem; font-weight: 800; letter-spacing: -0.02em; margin: 0; text-wrap: balance; }
+  h2 { font-size: 1.15rem; font-weight: 800; margin: 0 0 6px; text-wrap: balance; }
+  .lede { margin: 6px 0 0; color: var(--muted); max-width: 90ch; }
+
+  /* who runs the platform: the models in one row, the size of a fixed setup in the row below */
+  .picker { display: grid; gap: 10px; min-width: 0; }
+  .eyebrow { font: 600 0.8rem var(--sans); text-transform: uppercase; letter-spacing: 0.06em; color: var(--muted); }
+  .seg { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+  .seg .eyebrow { margin-right: 4px; }
+  .seg button[aria-pressed="true"] { background: var(--grid); border-color: var(--fg); }
+  #sizes button { font-size: 0.85rem; padding: 4px 10px; }
+  #sizes button:disabled { opacity: 0.45; cursor: default; border-color: var(--grid); }
+  .model-desc { margin: 0; color: var(--muted); max-width: 80ch; min-height: 3em; text-wrap: pretty; }
+  .model-desc b { color: var(--fg); }
+  .stack { grid-area: stack; margin: 0; display: grid; gap: 2px; width: 200px; align-self: start; }
+  .layer { font: 600 12px var(--sans); padding: 2px 8px; border-radius: 3px; text-align: center; color: var(--on-box); }
+  .layer.you { background: var(--you); }
+  .layer.vendor { background: var(--vendor); }
+  .layer.optional { background: var(--optional); color: var(--fg); }
+  .stack figcaption {
+    display: flex; flex-wrap: wrap; gap: 2px 10px; margin-top: 6px; font-size: 12px; color: var(--muted);
+  }
+  .key { display: inline-flex; align-items: center; gap: 4px; }
+  .key::before { content: ""; width: 10px; height: 10px; border-radius: 2px; background: var(--c); }
+
+  .stage-wrap {
+    grid-area: stage; align-self: start; background: var(--panel); border: 1px solid var(--grid);
+    border-radius: 10px; overflow-x: auto;
+  }
+  svg { display: block; width: 100%; min-width: 720px; height: auto; }
+  .side { grid-area: side; display: grid; gap: 16px; align-content: start; min-width: 0; }
+  svg text { font-family: var(--mono); fill: var(--fg); }
+  .lane-id { font-family: var(--sans); font-weight: 800; font-size: 17px; }
+  .lane-sub, .tick, .boot-text, .panel-sub { fill: var(--muted); }
+  .lane-sub, .panel-sub, .tick, .legend { font-size: 12px; }
+  .person { fill: var(--muted); }
+  .person.waiting { fill: var(--demand); }
+  .box-you { fill: var(--you); stroke: var(--you-line); }
+  .box-vendor { fill: var(--vendor); stroke: var(--vendor-line); }
+  /* the units of the DBMS server overlap: one outline around the whole box instead of one per unit */
+  .box-unit { stroke: none; }
+  .edge { fill: none; }
+  .edge.you { stroke: var(--you-line); }
+  .edge.vendor { stroke: var(--vendor-line); }
+  .box-text { fill: var(--on-box); font-family: var(--sans); font-size: 12px; font-weight: 700; }
+  .boot { fill: none; stroke-width: 1.5; stroke-dasharray: 4 3; }
+  .boot.you { stroke: var(--you-line); }
+  .boot.vendor { stroke: var(--vendor-line); }
+  .boot-text { font-family: var(--sans); font-size: 10px; }
+  .queue { fill: var(--demand); }
+  .queue-label { fill: var(--demand-ink); font-size: 11px; font-weight: 600; }
+  .hot { fill: var(--slow); }
+  .bar-bg { fill: var(--grid); }
+  /* the light green bar gets a darker edge, so that it stands out from the gray track (light theme) */
+  .bar { fill: var(--load-ok); stroke: var(--ok); stroke-width: 1; }
+  .bar.warn { fill: var(--demand); stroke: none; }
+  .bar.full { fill: var(--slow); stroke: none; }
+  .panel-text { font-size: 12px; }
+  .panel-big { font-size: 14px; font-weight: 700; }
+  .tag-bad, .status-bad { fill: var(--slow); font-weight: 600; font-size: 12px; }
+  .status-ok { fill: var(--ok); font-weight: 600; font-size: 12px; }
+  .grid { stroke: var(--grid); stroke-width: 1; }
+  .axis { stroke: var(--muted); stroke-width: 1.2; }
+  .axis-head { fill: var(--muted); }
+  .demand { stroke: var(--demand); stroke-width: 2; fill: none; stroke-linejoin: round; }
+  .demand-ahead { stroke: var(--demand); stroke-width: 1.2; stroke-dasharray: 3 4; fill: none; opacity: 0.45; }
+  .cap { stroke: var(--cap); stroke-width: 2; fill: none; }
+  .area-slow { fill: var(--slow); fill-opacity: 0.28; }
+  .area-idle { fill: var(--idle); fill-opacity: 0.24; }
+  .cursor { stroke: var(--fg); stroke-width: 1.5; }
+  .cursor-label { font-size: 12px; font-weight: 600; }
+  .hover-line { stroke: var(--muted); stroke-width: 1; stroke-dasharray: 3 3; }
+  .tip-bg { fill: var(--panel); stroke: var(--grid); }
+  .tip { font-size: 12px; }
+
+  .controls { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; }
+  button {
+    font: 600 0.95rem var(--sans); color: var(--fg); background: var(--panel);
+    border: 1px solid var(--grid); border-radius: 8px; padding: 8px 14px; cursor: pointer;
+  }
+  button:hover { border-color: var(--muted); }
+  button:focus-visible, input:focus-visible { outline: 2px solid var(--demand); outline-offset: 2px; }
+  button.primary { border-color: var(--muted); min-width: 7.5em; }
+  #scrub { flex: 1 1 100%; min-width: 0; accent-color: var(--muted); }
+  .narration {
+    background: var(--panel); border: 1px solid var(--grid); border-radius: 10px;
+    padding: 16px 18px; min-height: 8.5em;
+  }
+  .narration .ts {
+    font: 600 0.85rem var(--mono); color: var(--muted); text-transform: uppercase; letter-spacing: 0.06em;
+  }
+  .narration p { margin: 6px 0 0; max-width: 72ch; }
+  .bad { color: var(--slow); font-weight: 600; }
+  .good { color: var(--ok); font-weight: 600; }
+
+  /* the explanation: what elasticity is left, assumptions and simplifications right, on a wide screen */
+  .why { grid-area: why; display: grid; gap: 0 40px; min-width: 0; }
+  @media (min-width: 1100px) { .why { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+  .why p, .why li { max-width: 70ch; }
+  .why p { margin: 0 0 10px; }
+  .why ul { margin: 0 0 10px; padding-left: 1.2em; }
+  blockquote {
+    margin: 0 0 10px; padding-left: 14px; border-left: 3px solid var(--grid); color: var(--muted); max-width: 66ch;
+  }
+  @media (max-width: 520px) { h1 { font-size: 1.6rem; } }
+</style>
+</head>
+<body>
+<main>
+  <div class="intro">
+    <header>
+      <h1>Elasticity: Resources Follow Demand</h1>
+      <p class="lede">
+        One day of a teaching platform during the lockdown. Thousands of students log in whenever a lecture starts
+        and upload their solutions right before the deadline. Can the platform keep up? That depends on who runs it,
+        and on how quickly servers can be added and removed. Whoever runs it, the users are the same, minute by
+        minute.
+      </p>
+    </header>
+
+    <section class="picker">
+      <span class="eyebrow" id="model-label">Who runs the platform?</span>
+      <div class="seg" role="group" aria-labelledby="model-label" id="models" data-testid="model-picker"></div>
+      <div class="seg" role="group" aria-labelledby="size-label" id="sizes" data-testid="size-picker">
+        <span class="eyebrow" id="size-label">Servers sized for</span>
+        <button type="button" id="size-normal" data-size="normal"
+                data-testid="size-option-normal">a normal day</button>
+        <button type="button" id="size-peak" data-size="peak" data-testid="size-option-peak">the peak</button>
+      </div>
+      <p class="model-desc" id="model-desc" data-testid="model-desc"></p>
+    </section>
+  </div>
+
+  <figure class="stack" id="stack" data-testid="stack" aria-label="Who manages which layer">
+    <figcaption>
+      <span class="key" style="--c: var(--you)">you manage</span>
+      <span class="key" style="--c: var(--vendor)">vendor manages</span>
+      <span class="key" style="--c: var(--optional)">optional</span>
+    </figcaption>
+  </figure>
+
+  <div class="stage-wrap">
+    <svg id="stage" data-testid="stage" viewBox="0 0 1200 640" role="img"
+         aria-label="Tiers with their servers and load above; demand and capacity over the day below"></svg>
+  </div>
+
+  <div class="side">
+    <div class="controls">
+      <button id="play" class="primary" data-testid="play" data-state="paused" type="button">Play</button>
+      <button id="prev" data-testid="prev" type="button">Back</button>
+      <button id="next" data-testid="next" type="button">Next</button>
+      <button id="restart" data-testid="restart" type="button">Restart</button>
+      <input id="scrub" data-testid="scrub" type="range" min="0" max="1000" step="1" value="0"
+             aria-label="Position in the animation">
+    </div>
+
+    <section class="narration" id="narration" data-testid="narration" aria-live="polite">
+      <div class="ts" id="nar-ts" data-testid="nar-ts"></div>
+      <p id="nar-text" data-testid="nar-text"></p>
+    </section>
+  </div>
+
+  <section class="why">
+    <div>
+      <h2>What is elasticity?</h2>
+      <blockquote>
+        Elasticity is “the degree to which a system is able to adapt to workload changes by provisioning and
+        de-provisioning resources in an autonomic manner, such that at each point in time the available resources match
+        the current demand as closely as possible.” (Herbst, Kounev and Reussner, ICAC 2013)
+      </blockquote>
+      <p>
+        In the chart, the red area shows under-provisioning, too few resources: users wait longer than the service level
+        agreement (SLA) allows, here 42 ms per request. The gray area shows over-provisioning, too many resources: you
+        pay for servers that nobody needs. The smaller both areas stay without anyone stepping in, the more elastic the
+        platform.
+      </p>
+      <p>
+        The result at 18:00 sums up the day: the minutes in which the platform was too slow, the server-hours paid
+        (every App server and every unit of the DBMS server that runs or starts), and how many of them nobody needed.
+        Unlike the gray area, which compares the demand with the narrowest tier only, the last number also counts the
+        spare capacity of the other tier. A fixed setup for a normal day has fewer server-hours that nobody needs than
+        the scaling models, but only because it is too small for about half of the day; elasticity saves money
+        compared with buying for the peak.
+      </p>
+      <p>
+        The load of a tier is the number of users it is serving, divided by the number it can serve within the SLA;
+        for the bottleneck, it counts all users whose requests reach it, including those in its queue. Above 100%, the
+        queue in front of it grows, and the requests in that queue take longer than the SLA allows.
+      </p>
+      <p>
+        Bottlenecks show up one after another. Every request travels through all tiers and waits for the answers of the
+        tiers below. So the narrowest tier limits all others: the tiers below it receive only the requests it passes on,
+        and the tiers above it are busy with only as many requests as it can answer, while the rest wait in its
+        queue. Only once the bottleneck gets more capacity do the other tiers see the full load.
+      </p>
+      <p>
+        The more layers the vendor manages, the more automatic the scaling: new hardware on premise takes weeks, a
+        rented physical server hours to days, a virtual machine (IaaS) minutes, but someone has to start it. With PaaS
+        and SaaS, an autoscaler adds and removes servers on its own.
+      </p>
+      <p>
+        Scaling that only reacts adds servers after the load has risen; when the load rises steeply, as at the start
+        of a lecture, they come too late. Many peaks repeat, though, like the lectures of a timetable or a deadline,
+        so they can be planned for. Scheduled scaling (by a timetable) or predictive scaling (by a forecast from past
+        days) starts servers ahead of time; reactive scaling corrects what the plan gets wrong. Here, the plan expects
+        too few users at 10:15, but the spare capacity of the 70% target takes the extra ones. Planning ahead trades
+        minutes in which users wait (red) for server-hours nobody needs (gray): servers that run before the users
+        come.
+      </p>
+      <p>
+        In the stack of layers, “optional” marks the layers Virtualization and OS (the operating system of the
+        virtual machines); a platform on physical servers (on premise or hosting) may leave both out. Host OS is the
+        operating system of the physical server.
+      </p>
+    </div>
+    <div>
+      <h2>Assumptions</h2>
+      <ul>
+        <li>Within the SLA, one App server serves 600 users, and one unit of the DBMS server (a share of its CPU,
+          memory and disk) serves 1,100 users. The App scales out (more servers, up to 8); the DBMS scales up (a
+          larger server, up to 4 units).</li>
+        <li>Automatic scaling aims at 70% load, so it keeps about 30% spare capacity on purpose, for growth while new
+          servers start: above 85% it adds capacity, below 35% it removes it. PaaS adds capacity after 2 minutes
+          above 85%, and it is ready in 3 minutes; it removes capacity after 10 minutes below 35%. SaaS adds capacity
+          after 1 minute from a pool of servers that many customers share, so it is ready within a minute; it removes
+          capacity after 5 minutes.</li>
+        <!-- the numbers of this item must match TIMETABLE and DEMAND_KEYS in the script below -->
+        <li>PaaS + timetable scales like PaaS and also follows the timetable you give it: from 20 minutes before
+          each lecture (08:15, 10:15, 14:15) and before the deadline (16:00) until they are over, it keeps enough
+          servers for last Monday's users (2,400, 1,800, 1,700 and 3,000) at 70% load. This Monday, 2,050 users come
+          to the lecture at 10:15, more than planned; the spare capacity of the 70% target takes them. Between two
+          windows less than 10 minutes apart, the servers keep running.</li>
+        <li>With IaaS, monitoring tells an admin after 5 minutes above 85% or after an hour below 35%. The admin acts
+          15 minutes later and, like the autoscalers, sizes the tier for 70% load; a new or larger virtual machine
+          starts in 3 minutes.</li>
+        <li>A server or unit that is starting costs as much as one that is running; a unit of the DBMS server costs as
+          much as an App server.</li>
+      </ul>
+      <h2>Simplifications</h2>
+      <ul>
+        <li>Here, n App servers serve n times as many users, and so does a DBMS server with n units. In practice,
+          coordinating servers costs extra. The DBMS scales up here because adding a DBMS server is much harder than
+          adding an App server: the data has to be copied and kept consistent.</li>
+        <li>Every bottleneck is fixed here by adding capacity. Often a better query, an index or fewer queries fix it
+          more cheaply: elasticity pays for inefficiency, it does not remove it.</li>
+        <li>Real IaaS clouds offer autoscalers as well; here, IaaS stands for scaling by hand.</li>
+        <li>Every vendor scales well here. In practice, a service is only as elastic as its vendor makes it.</li>
+        <li>The DBMS server grows and shrinks without downtime, and the demand curve is made up.</li>
+      </ul>
+    </div>
+  </section>
+</main>
+
+<script>
+(() => {
+  // ---- the day: demand, tiers and the six ways to run the platform ----
+  const DAY0 = 7 * 60, M = 11 * 60; // the day runs from 07:00 for 660 minutes, until 18:00
+  const SLA = 42; // ms per request, the service level agreement
+  // demand in users over the day, as (minute since 07:00, users); smooth in between
+  const DEMAND_KEYS = [
+    [0, 120], [45, 250], [60, 600], [72, 2300], [80, 2400], [120, 2150], [160, 1950], [170, 700], [185, 900],
+    [195, 2050], [240, 1900], [280, 1750], [290, 600], [330, 420], [375, 480], [425, 800], [435, 1650],
+    [480, 1550], [520, 1500], [530, 2200], [538, 2900], [542, 2900], [552, 700], [600, 350], [660, 200],
+  ];
+  /** Returns the number of users who want to use the platform at minute <m> (0..M, may be fractional). */
+  const demand = m => {
+    const k = DEMAND_KEYS.findIndex(([km]) => km >= m);
+    if (k === 0) return DEMAND_KEYS[0][1];
+    if (k < 0) return DEMAND_KEYS[DEMAND_KEYS.length - 1][1];
+    const [m0, d0] = DEMAND_KEYS[k - 1], [m1, d1] = DEMAND_KEYS[k];
+    const p = (1 - Math.cos((Math.PI * (m - m0)) / (m1 - m0))) / 2;
+    return d0 + (d1 - d0) * p;
+  };
+  // the two tiers; id: label on the stage, name: in running text; cap: users one server (or one unit of a server
+  // that scales up) serves within the SLA; min, max: servers (units) the tier can have; layer: row in LAYERS; scale:
+  // out (more servers) or up (more units in one server: more CPU, memory and disk)
+  const TIERS = [
+    { id: "App", name: "App", cap: 600, min: 1, max: 8, layer: 0, scale: "out" },
+    { id: "DBMS", name: "DBMS", cap: 1100, min: 1, max: 4, layer: 2, scale: "up" },
+  ];
+  // servers (units) per tier at 07:00: what a fixed setup was sized for; the scaling models start from a normal day
+  const SIZES = { normal: [2, 1], peak: [5, 3] };
+  // thresholds for the load of a tier: add servers above HIGH, remove them below LOW, size them for TARGET
+  const HIGH = 0.85, LOW = 0.35, TARGET = 0.7;
+  const LAYERS = ["App", "Runtime", "DBMS", "OS", "Virtualization", "host OS", "Physical Server", "Data Center"];
+  /**
+   * A window of the timetable, as scheduled scaling sees it.
+   * @typedef {object} TimetableWindow
+   * @property {number} from the first minute (since 07:00) in which the servers should run
+   * @property {number} to the first minute after the window
+   * @property {number} users the users who came at the same time last Monday
+   * @property {string} what what the window is for, e.g. "the lecture at 08:15"
+   */
+  /** @type {TimetableWindow[]} */
+  const TIMETABLE = [
+    { from: 55, to: 165, users: 2400, what: "the lecture at 08:15" },
+    { from: 175, to: 285, users: 1800, what: "the lecture at 10:15" },
+    { from: 415, to: 525, users: 1700, what: "the lecture at 14:15" },
+    { from: 520, to: 545, users: 3000, what: "the deadline at 16:00" },
+  ];
+  // vendor: how many layers, from the bottom, the vendor manages; how: fixed (no new servers within a day), manual
+  // or auto. All times are in minutes. confirm: how long a tier stays above HIGH before servers are added; react:
+  // how long the admin needs to act, when adding and when removing servers; boot: how long a new server needs to
+  // start; coolDown: how long a tier stays below LOW before servers are removed; schedule: a timetable that the
+  // model follows ahead of time (scheduled scaling)
+  const MODELS = [
+    { id: "onprem", name: "on premise", vendor: 0, how: "fixed",
+      desc: "<b>You</b> own and run everything. More servers: <b>weeks</b>, to order, deliver and install hardware." },
+    { id: "hosting", name: "hosting", vendor: 2, how: "fixed",
+      desc: "You rent physical servers in the vendor's data center. More servers: <b>hours to days</b>." },
+    { id: "iaas", name: "IaaS", vendor: 4, how: "manual", confirm: 5, react: 15, boot: 3, coolDown: 60,
+      desc: "Infrastructure as a Service: you rent virtual machines. More servers: <b>minutes</b>, but " +
+        "<b>you</b> have to start them by hand." },
+    { id: "paas", name: "PaaS", vendor: 7, how: "auto", confirm: 2, react: 0, boot: 3, coolDown: 10,
+      desc: "Platform as a Service: you rent runtime and DBMS and bring only the App. " +
+        "An <b>autoscaler</b> adds and removes servers." },
+    { id: "planned", name: "PaaS + timetable", vendor: 7, how: "auto", confirm: 2, react: 0, boot: 3, coolDown: 10,
+      schedule: TIMETABLE,
+      desc: "Platform as a Service with scheduled scaling: you give the autoscaler the <b>timetable</b>, and it " +
+        "starts servers <b>ahead of</b> every lecture and the deadline, enough for as many users as came last " +
+        "Monday." },
+    { id: "saas", name: "SaaS", vendor: 8, how: "auto", confirm: 1, react: 0, boot: 1, coolDown: 5,
+      desc: "Software as a Service: you rent the application itself, here the teaching platform. The " +
+        "<b>vendor</b> scales it from a pool of servers that many customers share." },
+  ];
+  /** Limits <v> to 0..1. */
+  const clamp = v => Math.max(0, Math.min(1, v));
+  /** Limits <v> to <lo>..<hi>. */
+  const clampTo = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
+
+  /** Returns { servers, window }: how many servers the timetable of <model> asks tier <i> to have when deciding in
+   *  minute <m>, and the TimetableWindow that asks for the most; 0 and null without a timetable or when no window
+   *  applies. A window asks from <boot> minutes before its <from> on, so that its servers run from <from> on, until
+   *  its <to>; it sizes the tier for its users at TARGET load. Known limits: it ignores the admin's delay <react>
+   *  (only automatic models have a timetable here), and a window at most <boot> minutes after 07:00 cannot be
+   *  ready in time. */
+  function planned(model, i, m) {
+    let best = { servers: 0, window: null };
+    (model.schedule || []).forEach(w => {
+      if (m < w.from - model.boot || m >= w.to) return;
+      const servers = clampTo(Math.ceil(w.users / (TIERS[i].cap * TARGET)), TIERS[i].min, TIERS[i].max);
+      if (servers > best.servers) best = { servers, window: w };
+    });
+    return best;
+  }
+
+  /** Like planned, but also for the <coolDown> minutes after <m>: the servers that should not be removed in minute
+   *  <m>, as the timetable asks for them now or soon, and the window that asks for the most. */
+  function plannedSoon(model, i, m) {
+    let best = planned(model, i, m);
+    for (let k = m + 1; k <= m + (model.coolDown || 0); k++) {
+      const next = planned(model, i, k);
+      if (next.servers > best.servers) best = next;
+    }
+    return best;
+  }
+
+  /**
+   * The state of one minute of the day.
+   * @typedef {object} Frame
+   * @property {number} m minute since 07:00
+   * @property {number} D demand: users who want to use the platform
+   * @property {number} C capacity: users the narrowest tier can serve within the SLA
+   * @property {number} X throughput: users who are served, min(D, C)
+   * @property {number[]} s per tier: servers (DBMS: units) that are running
+   * @property {number[]} target per tier: servers once the starting ones are ready, 0 if none are starting
+   * @property {boolean[]} noticed per tier: more servers are on their way (the admin was alerted, or they start)
+   * @property {number[]} util per tier: its load, users it has to serve / users it can serve
+   * @property {number} bottleneck the tier with a queue in front of it, -1 if nobody waits
+   */
+
+  /**
+   * One event of the story of a day. Every event has a minute and a type; the other fields depend on the type.
+   * @typedef {object} StoryEvent
+   * @property {number} m minute since 07:00
+   * @property {string} type start, note, ready, remove, shift, overload, alert, order, recover or end
+   * @property {number} [tier] alert, order, ready, remove, shift: the tier, an index into TIERS
+   * @property {number} [from] order, ready, remove: servers (DBMS: units) before the change
+   * @property {number} [to] order, ready, remove: servers (DBMS: units) after the change
+   * @property {string} [cause] order: what asked for the servers: "load" (the tier was above HIGH for
+   *   the model's <confirm> minutes) or "timetable"
+   * @property {TimetableWindow} [plannedFor] order: the window of the timetable that asked for these servers;
+   *   remove: the window that keeps some of them
+   * @property {number} [since] recover: the minute the overload began
+   * @property {number} [slow] recover: the number of minutes of the overload that were too slow
+   * @property {string[]} [added] recover: what was added during the overload, e.g. "2 App servers"
+   * @property {string} [key] note: "lunch" or "deadline"
+   * @property {string} [label] note: the label of its stop, unless an event whose type comes earlier in
+   *   LABEL_ORDER happens in the same minute
+   * @property {string} [text] note: its narration
+   * @property {boolean} [stop] whether its minute gets a stop because of it
+   */
+
+  /**
+   * A stop of the animation: a minute in which something worth telling happens, played in slow motion.
+   * @typedef {object} Stop
+   * @property {number} m minute since 07:00
+   * @property {string} text its narration, HTML built from the constants of this page
+   * @property {string} label its label as shown, e.g. "fast again"
+   * @property {string} type the event type that chose the label (the first in LABEL_ORDER), e.g. "recover"
+   * @property {string[]} notes the keys of its notes ("lunch", "deadline"), usually none
+   * @property {?DaySummary} result the end stop: the sums of the day, which its text tells; null for other stops
+   */
+
+  /** Simulates one day for <model> minute by minute; a fixed setup was sized for <size> ("normal" or "peak").
+   *  Returns one Frame per minute and the scaling events (StoryEvent: alert, order, ready, remove). */
+  function simulate(model, size) {
+    const s = [...SIZES[model.how === "fixed" ? size : "normal"]]; // servers that are running, per tier
+    // a change that was noticed, per tier: up (add servers) or not (remove them); cause: what asked for the servers,
+    // "load" or "timetable"; decide: the minute the new number of servers is set; ready: the minute it
+    // takes effect; to: the new number of servers
+    const pending = TIERS.map(() => null);
+    const hot = TIERS.map(() => 0), cold = TIERS.map(() => 0); // minutes in a row above HIGH / below LOW
+    const frames = [], events = [];
+    for (let m = 0; m <= M; m++) {
+      const D = demand(m);
+      TIERS.forEach((tier, i) => {
+        const p = pending[i];
+        if (!p) return;
+        if (p.decide === m) {
+          // the load at the moment of the decision sets the new number of servers, but never fewer than the
+          // timetable asks for, now or (when removing) soon
+          const load = frames[m - 1].util[i] * s[i] * tier.cap;
+          const byLoad = Math.ceil(load / (tier.cap * TARGET));
+          const plan = p.up ? planned(model, i, m) : plannedSoon(model, i, m);
+          p.to = clampTo(Math.max(byLoad, plan.servers), tier.min, tier.max);
+          // the load has changed since the change was noticed, and the servers already fit it:
+          if ((p.up && p.to <= s[i]) || (!p.up && p.to >= s[i])) { pending[i] = null; return; }
+          // the timetable shaped the change: an order for which it asks at least as many servers as the load, or a
+          // removal it stops short of what the load would allow
+          const isPlanned = p.up ? plan.servers >= byLoad : p.to === plan.servers && plan.servers > byLoad;
+          const plannedFor = plan.window && isPlanned ? plan.window : undefined;
+          events.push({ m, type: p.up ? "order" : "remove", tier: i, from: s[i], to: p.to, plannedFor,
+            cause: p.cause });
+          // removed servers stop at once:
+          if (!p.up) p.ready = m;
+        }
+        if (p.ready === m) {
+          if (p.up) events.push({ m, type: "ready", tier: i, from: s[i], to: p.to });
+          s[i] = p.to;
+          pending[i] = null;
+          hot[i] = cold[i] = 0;
+        }
+      });
+      const caps = TIERS.map((t, i) => s[i] * t.cap);
+      const C = Math.min(...caps);
+      const X = Math.min(D, C); // throughput: no tier passes on more than it can serve
+      const narrowest = caps.indexOf(C);
+      // every tier sees the throughput; the narrowest one also sees the requests that queue up in front of it
+      const util = caps.map((c, i) => (i === narrowest ? D : X) / c);
+      const target = pending.map(p => (p && p.up && p.to !== undefined ? p.to : 0));
+      const noticed = pending.map(p => Boolean(p && p.up));
+      frames.push({ m, D, C, X, s: [...s], target, noticed, util, bottleneck: D > C ? narrowest : -1 });
+      if (model.how === "fixed") continue;
+      TIERS.forEach((tier, i) => {
+        // a change noticed now is decided in the next minute, so the timetable is asked for minute m + 1: it asks
+        // for its servers before the users come, and it keeps them running, also those it asks for soon, so that
+        // no server is removed shortly before the timetable orders it again (the removal decision checks this too;
+        // here, it keeps the counter from starting removals that the decision would cancel)
+        const plan = planned(model, i, m + 1);
+        const keep = plannedSoon(model, i, m + 1).servers;
+        hot[i] = util[i] > HIGH ? hot[i] + 1 : 0;
+        cold[i] = util[i] < LOW && s[i] > Math.max(tier.min, keep) ? cold[i] + 1 : 0;
+        if (pending[i]) return;
+        const up = (hot[i] >= model.confirm || s[i] < plan.servers) && s[i] < tier.max;
+        if (!up && cold[i] < model.coolDown) return;
+        // the alert comes in the next minute; the admin decides <react> minutes after it
+        if (model.how === "manual" && up && m < M) events.push({ m: m + 1, type: "alert", tier: i });
+        const cause = up ? (hot[i] >= model.confirm ? "load" : "timetable") : undefined;
+        pending[i] = { up, cause, decide: m + 1 + model.react, ready: m + 1 + model.react + model.boot };
+      });
+    }
+    return { frames, events };
+  }
+
+  /**
+   * The sums of a simulated day.
+   * @typedef {object} DaySummary
+   * @property {number} slow minutes in which the platform was too slow
+   * @property {number} paid server-hours paid: servers (DBMS: units) that run or start
+   * @property {number} idle server-hours of running servers (units) that nobody needed
+   */
+
+  /** Sums up the simulated day <frames> as a DaySummary. */
+  function summarize(frames) {
+    let slow = 0, paid = 0, idle = 0;
+    frames.slice(0, M).forEach(f => {
+      if (f.D > f.C) slow++;
+      TIERS.forEach((t, i) => {
+        paid += Math.max(f.s[i], f.target[i]) / 60;
+        // a server that is starting is paid, but it cannot be idle yet:
+        idle += Math.max(0, f.s[i] - f.X / t.cap) / 60;
+      });
+    });
+    return { slow, paid: Math.round(paid), idle: Math.round(idle) };
+  }
+
+  // ---- the story: events with narration, grouped into stops ----
+  /** Formats a number of users or hours, e.g. 1,100. */
+  const fmt = n => Math.round(n).toLocaleString("en-US");
+  /** Formats a load or share, e.g. 0.85 as 85%. */
+  const pct = v => `${Math.round(100 * v)}%`;
+  /** Formats minute <m> since 07:00 as a time of day, e.g. 08:05. */
+  const hm = m => {
+    const t = DAY0 + Math.floor(m);
+    return `${String(Math.floor(t / 60)).padStart(2, "0")}:${String(t % 60).padStart(2, "0")}`;
+  };
+  /** Returns <n> followed by the singular <one> or the plural <many>, e.g. "3 minutes". */
+  const plural = (n, one, many) => `${n} ${n === 1 ? one : many}`;
+  /** Returns e.g. "1 minute" or "3 minutes". */
+  const minutes = n => plural(n, "minute", "minutes");
+  /** Returns e.g. "an hour" or "10 minutes". */
+  const duration = n => (n === 60 ? "an hour" : minutes(n));
+  /** Joins words as in "A, B and C". */
+  const list = a => (a.length < 2 ? a.join("") : `${a.slice(0, -1).join(", ")} and ${a[a.length - 1]}`);
+  /** Capitalizes the first letter of <s>. */
+  const upper = s => s[0].toUpperCase() + s.slice(1);
+  /** Returns e.g. "2 App servers" for <n> servers of <tier>, or "a DBMS server with 2 units" if <tier> scales up. */
+  const amount = (tier, n) => (tier.scale === "up" ? `a ${tier.name} server with ${plural(n, "unit", "units")}`
+    : plural(n, `${tier.name} server`, `${tier.name} servers`));
+  /** Returns e.g. "2 App servers" or, if <tier> scales up, "2 units of the DBMS server": <n> servers or units that
+   *  were added to <tier>. */
+  const addedAmount = (tier, n) => (tier.scale === "up" ? `${plural(n, "unit", "units")} of the ${tier.name} server`
+    : amount(tier, n));
+  /** Returns who adds and removes servers in <model>; for a fixed model, which adds and removes nothing, the
+   *  result is not used. */
+  const who = model => (model.how === "manual" ? "the admin" : model.id === "saas" ? "the vendor" : "the autoscaler");
+  /** Returns "tier has" or "tiers have" for <n> tiers. */
+  const tierHas = n => (n === 1 ? "tier has" : "tiers have");
+  // a stop plays its minute in slow motion, so that servers can be seen appearing; it must stay 1, as stops in
+  // neighboring minutes follow each other directly
+  const STOP_MINUTES = 1;
+  // the order of events that happen in the same minute: a note first, as a headline for the whole minute (its
+  // numbers already include the capacity that becomes ready in that minute, and the ready text after it says where
+  // that capacity came from); then new capacity, so that an overload in that minute is told with it; a problem
+  // (overload, a moved bottleneck) before the reaction to it (alert, order)
+  const ORDER_IN_MINUTE = { start: 0, note: 1, ready: 2, remove: 3, shift: 4, overload: 5, alert: 6, order: 7,
+    recover: 8, end: 9 };
+  // the label of a stop names the first of these event types among its events
+  const LABEL_ORDER = ["start", "end", "overload", "recover", "shift", "note", "alert", "order", "ready", "remove"];
+  const LABEL = { start: "start", overload: "overload", alert: "alert", order: "more servers",
+    ready: "new capacity", remove: "fewer servers", shift: "new bottleneck", recover: "fast again", end: "result" };
+  // the label of an order or a removal that only changes the size of a server that scales up
+  const RESIZE_LABEL = { order: "larger server", remove: "smaller server" };
+
+  /** Returns the text for the start of the day of <model>, sized for <size>; <f> is the first Frame. */
+  function startText(model, size, f) {
+    const servers = list(TIERS.map((t, i) => amount(t, f.s[i])));
+    const intro = "A Monday in the lockdown semester. ";
+    // PaaS + timetable runs on the same services as PaaS
+    const place = { onprem: "your own servers in your own data center", hosting: "physical servers you rent",
+      iaas: "virtual machines you rent", paas: "a runtime and a DBMS that you rent as services",
+      saas: "the vendor's servers" }[model.schedule ? "paas" : model.id];
+    const base = `${intro}The teaching platform runs on ${place}: ${servers}. Together they serve up to ` +
+      `${fmt(f.C)} users within the service level agreement (SLA) of ${SLA} ms per request.`;
+    if (model.how === "fixed") {
+      const what = size === "peak" ? "the busiest minute of the semester" : "a normal day before the lockdown";
+      const lead = model.id === "onprem" ? "New hardware takes weeks" : "Another rented server takes hours to days";
+      return `${base} They were sized for ${what}. ${lead}, so today the capacity is fixed.`;
+    }
+    if (model.how === "manual") {
+      return `${base} You can start more virtual machines or make one larger within minutes, but by hand: ` +
+        `monitoring alerts an admin once a tier has been above ${pct(HIGH)} load for ${minutes(model.confirm)}, the ` +
+        `admin needs about ${minutes(model.react)} to act, and a new or larger machine needs ` +
+        `${minutes(model.boot)} to start.`;
+    }
+    const by = model.id === "saas" ? "The vendor scales the platform from a pool of servers that many customers share"
+      : "An autoscaler watches the load of every tier";
+    const timetableText = model.schedule ? " You also give it the timetable: ahead of every lecture and the " +
+      "deadline, it starts enough servers for as many users as came last Monday, and it keeps them until the " +
+      "lecture or the deadline is over, and through a short break before the next one." : "";
+    return `${base} ${by}: above ${pct(HIGH)} for ${minutes(model.confirm)}, it adds App servers or makes the ` +
+      `DBMS server larger, which takes ${minutes(model.boot)}; below ${pct(LOW)} for ${minutes(model.coolDown)}, it ` +
+      `removes App servers or makes the DBMS server smaller again. Either way, it aims at ${pct(TARGET)} load.` +
+      timetableText;
+  }
+
+  /** Tells whether new capacity in minute <m> removed the bottleneck of the minute before and so revealed another
+   *  one; the text of the ready events then names it. <own> are all events of that minute, and an overload among
+   *  them names the new bottleneck itself. */
+  const revealsNext = (own, frames, m) => {
+    const f = frames[m], before = frames[m - 1].bottleneck;
+    return f.D > f.C && f.bottleneck !== before && !own.some(o => o.type === "overload") &&
+      own.some(o => o.type === "ready" && o.tier === before);
+  };
+
+  /** Builds the narration of the events <es> (StoryEvent), all of one <type>, in the minute of a stop. <ctx> holds
+   *  the model, the size, the frames of the day and <own>, all events of that minute. */
+  function say(type, es, ctx) {
+    const { model, size, frames, own } = ctx;
+    const e = es[0], f = frames[e.m];
+    const actor = who(model);
+    if (type === "start") return startText(model, size, f);
+    if (type === "note") return e.text;
+    if (type === "overload") {
+      const tier = TIERS[f.bottleneck];
+      // what happens next: nothing (fixed), help is already on its way, or nobody has noticed yet; an alert or an
+      // order in the same minute says it itself
+      let next = "";
+      if (model.how === "fixed") next = "With fixed capacity, it stays this slow until demand drops.";
+      else if (own.some(o => (o.type === "alert" || o.type === "order") && o.tier === f.bottleneck)) next = "";
+      else if (f.target[f.bottleneck] > f.s[f.bottleneck]) {
+        const n = f.target[f.bottleneck] - f.s[f.bottleneck];
+        next = tier.scale === "up" ? `The ${tier.name} server is already being enlarged.`
+          : `${upper(amount(tier, n))} ${n === 1 ? "is" : "are"} already starting.`;
+      } else if (f.noticed[f.bottleneck]) next = `${upper(actor)} has already been alerted.`;
+      else if (model.how === "manual") {
+        next = `Nobody has noticed yet: monitoring alerts the admin only once a tier has been above ${pct(HIGH)} ` +
+          `load for ${minutes(model.confirm)}, so that short spikes raise no alarm.`;
+      } else next = `${upper(actor)} notices within ${minutes(model.confirm)}.`;
+      return `${fmt(f.D)} users want to use the platform, but the ${tier.name} serves only ${fmt(f.C)} of them ` +
+        `within the SLA. The requests of the other ${fmt(f.D - f.C)} queue up in front of the ${tier.name} and take ` +
+        `longer than ${SLA} ms: <span class="bad">the ${tier.name} is the bottleneck</span>. ${next}`.trim();
+    }
+    if (type === "shift") {
+      // new capacity in the same minute already names the new bottleneck
+      if (revealsNext(own, frames, e.m)) return "";
+      return `Now the ${TIERS[f.bottleneck].name} is the bottleneck: ${fmt(f.D - f.C)} users wait in front of it.`;
+    }
+    if (type === "alert") {
+      const tierNames = list(es.map(a => TIERS[a.tier].name));
+      const wait = f.D > f.C ? "The users keep waiting until the admin acts."
+        : "Nobody waits yet, but the admin needs time to act.";
+      return `Monitoring alerts the admin: the ${tierNames} ${tierHas(es.length)} been above ${pct(HIGH)} load ` +
+        `for ${minutes(model.confirm)}. ${wait}`;
+    }
+    if (type === "order") {
+      const outs = es.filter(o => TIERS[o.tier].scale === "out")
+        .map(o => plural(o.to - o.from, `more ${TIERS[o.tier].name} server`, `more ${TIERS[o.tier].name} servers`));
+      const parts = outs.length ? [`starts ${list(outs)} (scale-out)`] : [];
+      es.filter(o => TIERS[o.tier].scale === "up").forEach(o =>
+        parts.push(`enlarges the ${TIERS[o.tier].name} server from ${o.from} to ${plural(o.to, "unit", "units")} ` +
+          "(scale-up)"));
+      const boot = model.boot === 1 ? "The new capacity is ready within a minute."
+        : `The new capacity needs ${model.boot} minutes to start and adds nothing before that.`;
+      // orders the timetable asked for say why they come before the users; if the load asked for some of the
+      // orders of the minute, they come only partly ahead of time
+      const plannedOrder = es.find(o => o.plannedFor);
+      if (plannedOrder) {
+        const { what, users } = plannedOrder.plannedFor;
+        const timetable = `The timetable shows ${what}, and last Monday ${fmt(users)} users came.`;
+        return es.every(o => o.plannedFor) ? `${timetable} Ahead of time, ${actor} ${list(parts)}. ${boot}`
+          : `${timetable} ${upper(actor)} ${list(parts)}, partly ahead of time. ${boot}`;
+      }
+      // an automatic order names the load that asked for it, as the alert does for the admin; only if the load
+      // asked for all orders of the minute, so that no order is said to come from a load it did not come from
+      if (model.how === "auto" && es.every(o => o.cause === "load")) {
+        return `The ${list(es.map(o => TIERS[o.tier].name))} ${tierHas(es.length)} been above ${pct(HIGH)} load ` +
+          `for ${minutes(model.confirm)}, so ${actor} ${list(parts)}. ${boot}`;
+      }
+      return `${upper(actor)} ${list(parts)}. ${boot}`;
+    }
+    if (type === "ready") {
+      const items = es.map(r => (TIERS[r.tier].scale === "up" ? `the larger ${TIERS[r.tier].name} server`
+        : `the new ${TIERS[r.tier].name} ${r.to - r.from === 1 ? "server" : "servers"}`));
+      const one = es.length === 1 && (TIERS[e.tier].scale === "up" || e.to - e.from === 1);
+      let text = `${upper(list(items))} ${one ? "is" : "are"} ready. The platform now serves up to ${fmt(f.C)} ` +
+        "users within the SLA.";
+      if (revealsNext(own, frames, e.m)) {
+        text += ` But now the ${TIERS[f.bottleneck].name} is the bottleneck: removing one bottleneck reveals the ` +
+          "next one.";
+      }
+      return text;
+    }
+    if (type === "remove") {
+      const tierNames = list(es.map(r => TIERS[r.tier].name));
+      const outs = es.filter(r => TIERS[r.tier].scale === "out").map(r => amount(TIERS[r.tier], r.from - r.to));
+      const parts = outs.length ? [`removes ${list(outs)}`] : [];
+      es.filter(r => TIERS[r.tier].scale === "up").forEach(r =>
+        parts.push(`shrinks the ${TIERS[r.tier].name} server to ${plural(r.to, "unit", "units")}`));
+      // the admin acts <react> minutes after the alert, the autoscaler right after <coolDown> minutes
+      const below = `The ${tierNames} ${tierHas(es.length)} been below ${pct(LOW)} load for ` +
+        (model.react ? `more than ${duration(model.coolDown)}` : duration(model.coolDown));
+      const why = model.how === "manual"
+        ? `${below}. ${upper(minutes(model.react))} after monitoring told the admin, the admin ${list(parts)}.`
+        : `${below}, so ${actor} ${list(parts)}.`;
+      // a removal the timetable stops short says what it keeps the servers for
+      const kept = es.find(r => r.plannedFor);
+      const keep = kept ? ` It keeps enough capacity for ${kept.plannedFor.what}, as the timetable asks.` : "";
+      return `${why}${keep} Capacity that nobody needs no longer costs money.`;
+    }
+    if (type === "recover") {
+      // the overload ends with new capacity in this very minute, which the ready text before it tells, or because
+      // the demand dropped
+      const cause = f.C > frames[e.m - 1].C ? "" : ` The demand dropped below the capacity of ${fmt(f.C)} users.`;
+      const added = e.added.length ? `Meanwhile, ${actor} added ${list(e.added)}.`
+        : model.how === "fixed" ? "Nothing was added." : `${upper(actor)} added nothing in time.`;
+      return `All ${fmt(f.D)} users are served within the SLA again.${cause} From ${hm(e.since)} on, the ` +
+        `platform was too slow for ${minutes(e.slow)}. ${added}`;
+    }
+    // end of the day; the claims about lectures and peaks fit the demand in DEMAND_KEYS and the windows in TIMETABLE
+    const r = summarize(frames);
+    let verdict;
+    if (model.how === "fixed" && size === "peak") {
+      verdict = `${r.slow ? "Few users had to wait" : "Nobody had to wait"}, but most of the day, most servers had ` +
+        "nothing to do: a lot of money for a few busy minutes.";
+    } else if (model.how === "fixed") {
+      verdict = "The capacity never followed the demand: too little at every lecture, too much before 08:00, at " +
+        "lunch and in the evening. This platform has no elasticity at all.";
+    } else if (model.how === "manual") {
+      verdict = "The capacity followed the demand, but late: new servers arrived " +
+        `${minutes(model.react + model.boot)} after an alert, some only after the rush was over, and servers kept ` +
+        "running long after the peak.";
+    } else if (model.schedule) {
+      verdict = "The capacity was ready before the users came, and it followed the demand down again. The price: " +
+        "servers that run before anyone needs them. <span class=\"good\">This is elasticity that plans ahead.</span>";
+    } else {
+      verdict = "The capacity followed the demand within minutes, up and down. " +
+        "<span class=\"good\">This is elasticity.</span>";
+    }
+    const slowFor = r.slow ? `<span class="bad">too slow for ${minutes(r.slow)}</span>`
+      : "<span class=\"good\">never too slow</span>";
+    const hours = model.id === "saas"
+      ? `The vendor ran ${fmt(r.paid)} server-hours for your platform (you pay per user), ${fmt(r.idle)} of them ` +
+        "for capacity that nobody needed."
+      : `You paid ${fmt(r.paid)} server-hours, ${fmt(r.idle)} of them for capacity that nobody needed.`;
+    return `Over the day, the platform was ${slowFor}. ${hours} ${verdict}`;
+  }
+
+  /** Returns the minutes in which the bottleneck of <frames> moves to another tier during an overload. <starts> is
+   *  the Set of the first minutes of the overloads, which never count as a move; a short pause without a
+   *  bottleneck inside an overload does not count as a move either. */
+  function bottleneckMoves(frames, starts) {
+    const moves = [];
+    // -1 until the first overload; the first minute of every overload is in <starts>, so it only sets this
+    let lastBottleneck = -1;
+    frames.forEach((f, m) => {
+      if (f.bottleneck < 0) return;
+      if (!starts.has(m) && f.bottleneck !== lastBottleneck) moves.push(m);
+      lastBottleneck = f.bottleneck;
+    });
+    return moves;
+  }
+
+  /** Sets <stop> on the removals among <all> (StoryEvent, sorted by minute): the first removal after every overload
+   *  or order gets a stop, and so does the next one after a removal the timetable stops short. All removals of a
+   *  minute share its stop, and together they decide whether the next removal gets one. */
+  function markRemovalStops(all) {
+    let removalTold = false, removalMinute = -1;
+    all.forEach(e => {
+      if (e.type === "overload" || e.type === "order") removalTold = false;
+      if (e.type !== "remove" || e.m === removalMinute) return;
+      const ofMinute = all.filter(x => x.type === "remove" && x.m === e.m);
+      ofMinute.forEach(x => { x.stop = !removalTold; });
+      removalTold = !ofMinute.some(x => x.plannedFor);
+      removalMinute = e.m;
+    });
+  }
+
+  /** Simulates <model> (sized for <size> if it is fixed) and turns its day into stops for the animation.
+   *  Returns the frames and the stops (Stop). */
+  function buildStory(model, size) {
+    const { frames, events } = simulate(model, size);
+    const all = events.slice();
+    // overload periods [from, to): fewer than GOOD_MINUTES minutes in a row within the SLA do not end one; an
+    // overload that lasts until the end of the day gets no end
+    const GOOD_MINUTES = 5;
+    const periods = [];
+    let from = -1, okSince = -1;
+    frames.forEach((f, m) => {
+      if (f.D > f.C) { if (from < 0) from = m; okSince = -1; return; }
+      if (from < 0) return;
+      if (okSince < 0) okSince = m;
+      if (m - okSince + 1 >= GOOD_MINUTES || m === M) { periods.push([from, okSince]); from = okSince = -1; }
+    });
+    if (from >= 0) periods.push([from, null]);
+    periods.forEach(([a, b]) => {
+      all.push({ m: a, type: "overload" });
+      if (b === null) return;
+      // the servers added during the period, per tier, and the minutes in it that were too slow
+      const added = [];
+      TIERS.forEach((t, i) => {
+        // servers ready in the first minute were ready before the overload began (see ORDER_IN_MINUTE)
+        const n = all.filter(e => e.type === "ready" && e.tier === i && e.m > a && e.m <= b)
+          .reduce((sum, e) => sum + e.to - e.from, 0);
+        if (n) added.push(addedAmount(t, n));
+      });
+      const slow = frames.slice(a, b).filter(f => f.D > f.C).length;
+      all.push({ m: b, type: "recover", since: a, slow, added });
+    });
+    const starts = new Set(periods.map(([a]) => a));
+    bottleneckMoves(frames, starts).forEach(m => all.push({ m, type: "shift", tier: frames[m].bottleneck }));
+    // a fixed setup gets a look at what the quiet lunch break costs; every setup gets a look at the busiest minute
+    if (model.how === "fixed") {
+      const lunch = 330; // 12:30
+      const f = frames[lunch];
+      all.push({ m: lunch, type: "note", key: "lunch", label: "lunch break", text: `Only ${fmt(f.D)} users. ` +
+        `${pct(1 - f.X / f.C)} of the capacity is not needed right now, but you pay for all of it, all day.` });
+    }
+    const peak = frames.reduce((a, b) => (b.D > a.D ? b : a));
+    const served = peak.D <= peak.C ? "Nobody waits." : `${fmt(peak.D - peak.C)} of them wait.`;
+    all.push({ m: peak.m, type: "note", key: "deadline", label: "deadline",
+      text: `${fmt(peak.D)} users at once, the busiest minute of the day. ${served}` });
+    all.push({ m: 0, type: "start" }, { m: M, type: "end" });
+    all.sort((a, b) => a.m - b.m || ORDER_IN_MINUTE[a.type] - ORDER_IN_MINUTE[b.type]);
+    // stops: always at the start, the end, notes, overloads, recoveries, moved bottlenecks and orders the timetable
+    // asks for; for removals, the first one after every overload or order, and the next one after a removal the
+    // timetable stops short; otherwise only the first time something happens to a tier
+    const seen = new Set();
+    markRemovalStops(all);
+    all.forEach(e => {
+      if (e.type === "remove") return;
+      const key = `${e.type}:${e.tier}`;
+      e.stop = ["start", "end", "note", "overload", "recover", "shift"].includes(e.type) || Boolean(e.plannedFor) ||
+        !seen.has(key);
+      seen.add(key);
+    });
+    // one stop per minute with such an event; it narrates everything that happens in that minute, type by type
+    const stops = [...new Set(all.filter(e => e.stop).map(e => e.m))].map(m => {
+      const own = all.filter(e => e.m === m);
+      const types = [...new Set(own.map(e => e.type))];
+      const ctx = { model, size, frames, own };
+      const text = types.map(ty => say(ty, own.filter(e => e.type === ty), ctx)).filter(Boolean).join(" ");
+      const first = LABEL_ORDER.find(ty => types.includes(ty));
+      const resizes = (first === "order" || first === "remove") &&
+        own.every(e => e.type !== first || TIERS[e.tier].scale === "up");
+      const label = first === "note" ? own.find(e => e.type === "note").label
+        : resizes ? RESIZE_LABEL[first] : LABEL[first];
+      return { m, text, label, type: first, notes: own.filter(e => e.type === "note").map(e => e.key),
+        result: first === "end" ? summarize(frames) : null };
+    });
+    return { frames, stops };
+  }
+
+  // ---- drawing ----
+  const NS = "http://www.w3.org/2000/svg";
+  const svg = document.getElementById("stage");
+  /** Creates the SVG element <tag> with the attributes <attrs> inside <parent>. */
+  const el = (tag, attrs = {}, parent = svg) => {
+    const e = document.createElementNS(NS, tag);
+    for (const k in attrs) e.setAttribute(k, attrs[k]);
+    parent.appendChild(e);
+    return e;
+  };
+  /** Creates an SVG text element with the attributes <attrs> and the text <s> inside <parent>. */
+  const txt = (attrs, s, parent) => { const e = el("text", attrs, parent); e.textContent = s; return e; };
+  /** Sets the attributes <attrs> of <node>. */
+  const setAttrs = (node, attrs) => { for (const k in attrs) node.setAttribute(k, attrs[k]); };
+  /** Sets the opacity of <node> to <o>. */
+  const setOpacity = (node, o) => node.setAttribute("opacity", o.toFixed(3));
+  /** Eases a progress <p> from 0 to 1: slow at both ends. */
+  const ease = p => (p < 0.5 ? 4 * p * p * p : 1 - Math.pow(-2 * p + 2, 3) / 2);
+  /** Eases a progress <p> from 0 to 1: slow at the end. */
+  const easeOut = p => 1 - Math.pow(1 - p, 3);
+  /** Eases a progress <p> from 0 to 1 with a short overshoot at the end. */
+  const easeOutBack = p => {
+    const c1 = 2.4, c3 = c1 + 1;
+    return 1 + c3 * Math.pow(p - 1, 3) + c1 * Math.pow(p - 1, 2);
+  };
+
+  // geometry: the tiers above, the day below
+  const W = 1200; // the width of the stage, as in its viewBox
+  // the users row and the tier rows; the DBMS row lies low, as its box grows upwards into the space above it
+  const USERS_Y = 56, ROW_Y = [132, 272];
+  const BOX_X = 214, BOX_STEP = 56, BOX_W = 48, BOX_H = 30; // server boxes
+  const UNIT_H = 26; // every further unit makes the box of a server that scales up this much taller
+  /** Returns how much taller than one unit the box of <tier> grows at most: 0 for a tier that scales out. */
+  const extraHeight = tier => (tier.scale === "up" ? (tier.max - 1) * UNIT_H : 0);
+  const PANEL_X = W - 260, PANEL_R = W - 20, BAR_W = 240; // the load panel right of the tiers
+  const X0 = 130, X1 = W - 30, PY0 = 358, PY1 = 600, YMAX = 4500; // the day's plot: x range, y range, users at top
+  /** Returns the x coordinate of minute <m> in the day's plot. */
+  const x = m => X0 + ((X1 - X0) * m) / M;
+  /** Returns the y coordinate of <u> users in the day's plot. */
+  const y = u => PY1 - ((PY1 - PY0) * u) / YMAX;
+  const ICONS = 30, ICON_STEP = 15; // user icons, 100 users each
+  const QUEUE_DOTS = 14, QUEUE_STEP = 11; // the queue shows at most this many dots, 100 waiting users each
+
+  const defs = el("defs");
+  const axisMarker = el("marker", { id: "axis-head", viewBox: "0 0 10 10", refX: "9", refY: "5",
+    markerWidth: "8", markerHeight: "8", orient: "auto" }, defs);
+  el("path", { d: "M0,0 L10,5 L0,10 z", class: "axis-head" }, axisMarker);
+  const clip = el("clipPath", { id: "past" }, defs);
+  const clipRect = el("rect", { x: X0 - 2, y: PY0 - 20, height: PY1 - PY0 + 22, width: 0 }, clip);
+
+  // tiers: highlight of the bottleneck, as tall as the tallest box of the tier, and labels
+  const rowHighlight = ROW_Y.map((ry, i) => el("rect", { x: 8, y: ry - 31 - extraHeight(TIERS[i]), width: W - 16,
+    height: 58 + extraHeight(TIERS[i]), rx: 8, class: "hot", opacity: 0 }));
+  txt({ x: 16, y: USERS_Y + 1, class: "lane-id" }, "users");
+  txt({ x: 16, y: USERS_Y + 17, class: "lane-sub" }, "1 icon = 100");
+  TIERS.forEach((t, i) => {
+    txt({ x: 16, y: ROW_Y[i] + 1, class: "lane-id" }, t.id);
+    txt({ x: 16, y: ROW_Y[i] + 17, class: "lane-sub" },
+      `${fmt(t.cap)} users per ${t.scale === "up" ? "unit" : "server"}`);
+  });
+
+  // users: one icon per 100 users; served ones in gray, waiting ones in the color of demand
+  const people = Array.from({ length: ICONS }, (_, k) => {
+    const g = el("g", { transform: `translate(${BOX_X + 6 + k * ICON_STEP},${USERS_Y})`, class: "person" });
+    el("circle", { cx: 0, cy: -6, r: 3.2 }, g);
+    el("rect", { x: -4.5, y: -1.5, width: 9, height: 9, rx: 4 }, g);
+    return g;
+  });
+  const usersBig = txt({ x: PANEL_X, y: USERS_Y - 6, class: "panel-big", "data-testid": "users-count" }, "");
+  const usersStatus = txt({ x: PANEL_X, y: USERS_Y + 14, class: "status-ok", "data-testid": "users-status" }, "");
+
+  // servers: a fixed slot per server, so that nothing jumps when servers come and go; the units of a server that
+  // scales up stack on top of each other and form one box with one label, which grows taller
+  const boxes = TIERS.map((t, i) => Array.from({ length: t.max }, (_, k) => {
+    const up = t.scale === "up";
+    const bx = up ? BOX_X : BOX_X + k * BOX_STEP;
+    const h = up && k > 0 ? UNIT_H : BOX_H;
+    const by = ROW_Y[i] - BOX_H / 2 - (up ? k * UNIT_H : 0);
+    const g = el("g", { "data-testid": `server-${t.id}-${k}` });
+    const solid = el("g", {}, g);
+    // a unit after the first overlaps the one below, so that no seam shows between them:
+    const join = up && k > 0 ? 6 : 0;
+    const rect = el("rect", { x: bx, y: by, width: BOX_W, height: h + join, rx: 4 }, solid);
+    if (k === 0 || !up) {
+      txt({ x: bx + BOX_W / 2, y: ROW_Y[i] + 4, "text-anchor": "middle", class: "box-text" }, t.id, solid);
+    }
+    const boot = el("rect", { x: bx + 1, y: by + 1, width: BOX_W - 2, height: h - 2, rx: 4, class: "boot" }, g);
+    const bootText = txt({ x: bx + BOX_W / 2, y: by + h / 2 + 4, "text-anchor": "middle", class: "boot-text" },
+      "starting", g);
+    return { g, solid, rect, boot, bootText, cx: bx + BOX_W / 2, cy: by + h / 2, bottom: by + h, h };
+  }));
+  // one outline around all units of the server that scales up
+  const upOutline = el("rect", { x: BOX_X, width: BOX_W, height: 0, rx: 4, class: "edge" });
+  // the queue sits above the boxes of its tier; render moves it up as a box grows taller
+  const queues = ROW_Y.map((ry, i) => ({
+    dots: Array.from({ length: QUEUE_DOTS }, (_, j) =>
+      el("circle", { cx: BOX_X + 6 + j * QUEUE_STEP, cy: ry - 24, r: 4, class: "queue" })),
+    label: txt({ y: ry - 20, class: "queue-label", "data-testid": `waiting-${TIERS[i].id}` }, ""),
+  }));
+  const panels = ROW_Y.map((ry, i) => ({
+    load: txt({ x: PANEL_X, y: ry - 8, class: "panel-text", "data-testid": `load-${TIERS[i].id}` }, ""),
+    tag: txt({ x: PANEL_R, y: ry - 8, "text-anchor": "end", class: "tag-bad", "data-testid": `tag-${TIERS[i].id}` },
+      ""),
+    bg: el("rect", { x: PANEL_X, y: ry - 2, width: BAR_W, height: 8, rx: 4, class: "bar-bg" }),
+    bar: el("rect", { x: PANEL_X, y: ry - 2, height: 8, rx: 4, class: "bar",
+      "data-testid": `load-bar-${TIERS[i].id}` }),
+    sub: txt({ x: PANEL_X, y: ry + 22, class: "panel-sub", "data-testid": `servers-${TIERS[i].id}` }, ""),
+  }));
+  el("line", { x1: 16, x2: W - 16, y1: 306, y2: 306, class: "grid" });
+
+  // the day: legend, grid, axis
+  const legend = el("g", { class: "legend" });
+  [[X0, "line", "demand", "demand: users who want in"],
+    [X0 + 220, "line", "cap", "capacity: users it can serve in time"],
+    [X0 + 520, "area", "area-slow", "too slow"], [X0 + 615, "area", "area-idle", "paid, but not needed"]]
+    .forEach(([lx, kind, cls, label]) => {
+      if (kind === "line") el("line", { x1: lx, x2: lx + 18, y1: 320, y2: 320, class: cls }, legend);
+      else el("rect", { x: lx + 2, y: 314, width: 14, height: 12, rx: 2, class: cls }, legend);
+      txt({ x: lx + 24, y: 324, class: "legend" }, label, legend);
+    });
+  for (let u = 1000; u < YMAX; u += 1000) {
+    el("line", { x1: X0, x2: X1, y1: y(u), y2: y(u), class: "grid" });
+    txt({ x: X0 - 8, y: y(u) + 4, "text-anchor": "end", class: "tick" }, fmt(u));
+  }
+  txt({ x: 16, y: PY0 + 4, class: "lane-sub" }, "users");
+  for (let h = 0; h <= 11; h++) {
+    el("line", { x1: x(h * 60), x2: x(h * 60), y1: PY0, y2: PY1, class: "grid" });
+    txt({ x: x(h * 60), y: PY1 + 18, "text-anchor": "middle", class: "tick" }, hm(h * 60));
+  }
+  el("line", { x1: X0 - 6, x2: X1 + 12, y1: PY1, y2: PY1, class: "axis", "marker-end": "url(#axis-head)" });
+  txt({ x: X1 + 12, y: PY1 + 34, "text-anchor": "end", class: "tick" }, "time of day");
+  // the demand of the whole day, faint, so that the day ahead can be seen
+  const aheadPath = el("path", { class: "demand-ahead" });
+  const past = el("g", { "clip-path": "url(#past)" });
+  const idlePath = el("path", { class: "area-idle", "data-testid": "idle-area" }, past);
+  const slowPath = el("path", { class: "area-slow", "data-testid": "slow-area" }, past);
+  const capPath = el("path", { class: "cap", "data-testid": "capacity-line" }, past);
+  const demandPath = el("path", { class: "demand", "data-testid": "demand-line" }, past);
+  const cursor = el("line", { y1: PY0 - 6, y2: PY1, class: "cursor", "data-testid": "cursor" });
+  const cursorLabel = txt({ y: PY0 - 10, class: "cursor-label", "data-testid": "cursor-label" }, "");
+
+  // hover: the values at a minute of the day that has passed already
+  const hoverLine = el("line", { y1: PY0, y2: PY1, class: "hover-line", opacity: 0, "data-testid": "hover-line" });
+  const tip = el("g", { opacity: 0, "data-testid": "day-tip" });
+  el("rect", { width: 200, height: 76, rx: 6, class: "tip-bg" }, tip);
+  const tipLines = ["time", "demand", "capacity", "status"].map((name, k) =>
+    txt({ class: "tip", x: 10, y: 20 + k * 16, "data-testid": `day-tip-${name}` }, "", tip));
+  const hit = el("rect", { x: X0, y: PY0, width: X1 - X0, height: PY1 - PY0, fill: "transparent",
+    "data-testid": "day-hover" });
+
+  // the curves of the day for areaPath: demand runs smoothly, capacity in steps, as in the capacity line
+  const DEMAND = { value: f => f.D, step: false };
+  const CAPACITY = { value: f => f.C, step: true };
+  /**
+   * Returns the SVG path of the area between the curves <top> and <bottom> of the day (DEMAND or CAPACITY) over
+   * every stretch of <frames> for which <inside(frame)> holds.
+   */
+  function areaPath(frames, inside, top, bottom) {
+    /** Returns the points of <curve> over the minutes in <run>; a step holds its value until the next minute. */
+    const points = (run, curve) => run.flatMap((m, k) => {
+      const v = y(curve.value(frames[m])).toFixed(1);
+      const next = run[k + 1];
+      return curve.step && next !== undefined ? [`${x(m).toFixed(1)},${v}`, `${x(next).toFixed(1)},${v}`]
+        : [`${x(m).toFixed(1)},${v}`];
+    });
+    let d = "", run = [];
+    /** Adds the area over the minutes in <run> to the path and starts a new run. */
+    const flush = () => {
+      if (run.length > 1) d += `M${points(run, top).join("L")}L${points(run, bottom).reverse().join("L")}Z`;
+      run = [];
+    };
+    frames.forEach((f, m) => {
+      if (inside(f)) run.push(m);
+      // the first minute outside a stretch closes its area, where the two curves meet:
+      else { if (run.length) run.push(m); flush(); }
+    });
+    flush();
+    return d;
+  }
+
+  // ---- timing of the animation ----
+  const RATE = 0.04; // animation seconds per simulated minute between stops
+  const POP = 0.8; // minutes a server needs to pop up or fade out
+
+  // ---- state of the selected model ----
+  let model = MODELS[0], size = "normal", day, slots, segments = [], keys = [0], total = 1;
+  let lastStop, lastMinute = 0, hoverMinute = -1;
+
+  /** Recomputes the day for the selected model and redraws everything that depends on it. */
+  function rebuild() {
+    day = buildStory(model, size);
+    const { frames } = day;
+    // per tier and slot: the state of every minute (0 off, 1 starting, 2 running), since when, and the state before
+    slots = TIERS.map((t, i) => Array.from({ length: t.max }, (_, k) => {
+      const state = [], since = [], prev = [];
+      frames.forEach((f, m) => {
+        const st = f.s[i] > k ? 2 : f.target[i] > k ? 1 : 0;
+        const changed = m > 0 && st !== state[m - 1];
+        since.push(changed ? m : m === 0 ? 0 : since[m - 1]);
+        prev.push(changed ? state[m - 1] : m === 0 ? st : prev[m - 1]);
+        state.push(st);
+      });
+      return { state, since, prev };
+    }));
+    // box colors: who manages the layer a tier lives on
+    TIERS.forEach((t, i) => {
+      const owner = managedBy(t.layer) === "vendor" ? "vendor" : "you";
+      boxes[i].forEach(b => {
+        b.rect.setAttribute("class", t.scale === "up" ? `box-${owner} box-unit` : `box-${owner}`);
+        b.boot.setAttribute("class", `boot ${owner}`);
+      });
+      if (t.scale === "up") upOutline.setAttribute("class", `edge ${owner}`);
+    });
+    // the day's curves
+    demandPath.setAttribute("d", "M" + frames.map(f => `${x(f.m).toFixed(1)},${y(f.D).toFixed(1)}`).join("L"));
+    aheadPath.setAttribute("d", demandPath.getAttribute("d"));
+    let d = `M${x(0)},${y(frames[0].C)}`;
+    frames.forEach((f, m) => {
+      if (m > 0 && f.C !== frames[m - 1].C) d += `H${x(m).toFixed(1)}V${y(f.C).toFixed(1)}`;
+    });
+    capPath.setAttribute("d", d + `H${x(M)}`);
+    slowPath.setAttribute("d", areaPath(frames, f => f.D > f.C, DEMAND, CAPACITY));
+    idlePath.setAttribute("d", areaPath(frames, f => f.C > f.D, CAPACITY, DEMAND));
+    // the timeline: moves between the stops, and every stop in slow motion, about 45 characters of its text per
+    // second (Pause gives more time); a stop ends just before its next minute, so that Next and Back show the minute
+    // its text describes
+    segments = [];
+    let T = 0, cur = 0;
+    day.stops.forEach(st => {
+      if (st.m > cur) {
+        segments.push({ type: "move", start: T, dur: (st.m - cur) * RATE, from: cur, to: st.m });
+        T += (st.m - cur) * RATE;
+      }
+      const to = Math.min(M, st.m + STOP_MINUTES - 0.01);
+      const dur = Math.max(3, Math.min(8, 2 + st.text.length / 45));
+      segments.push({ type: "stop", start: T, dur, from: st.m, to, stop: st });
+      T += dur;
+      cur = to;
+    });
+    total = T;
+    // Next and Back stop at the end of every stop; the first stop already shows at time 0
+    keys = [0, ...segments.filter(s => s.type === "stop").slice(1).map(s => s.start + s.dur)];
+    renderSetup();
+  }
+
+  /** Returns who manages layer <i> (0 = App at the top) in the selected model. */
+  function managedBy(i) {
+    if (i >= LAYERS.length - model.vendor) return "vendor";
+    // without virtual machines, the virtualization and their OS can be left out:
+    return (LAYERS[i] === "OS" || LAYERS[i] === "Virtualization") && model.vendor < 4 ? "optional" : "you";
+  }
+
+  /** Updates the model picker, the size picker, the description and the stack of layers. */
+  function renderSetup() {
+    document.querySelectorAll("#models button")
+      .forEach(b => b.setAttribute("aria-pressed", String(b.dataset.model === model.id)));
+    // the size applies to on premise and hosting only; for the other models, its buttons are disabled
+    const fixed = model.how === "fixed";
+    document.querySelectorAll("#sizes button").forEach(b => {
+      b.disabled = !fixed;
+      b.setAttribute("aria-pressed", String(fixed && b.dataset.size === size));
+    });
+    document.getElementById("model-desc").innerHTML = model.desc; // constant text from MODELS
+    const stack = document.getElementById("stack");
+    stack.querySelectorAll(".layer").forEach(n => n.remove());
+    const caption = stack.querySelector("figcaption");
+    LAYERS.forEach((name, i) => {
+      const row = document.createElement("div");
+      row.className = `layer ${managedBy(i)}`;
+      row.dataset.testid = `layer-${i}`;
+      row.dataset.owner = managedBy(i);
+      row.textContent = name;
+      stack.insertBefore(row, caption);
+    });
+  }
+
+  /** Returns the minute of the day (fractional) at animation time <t>, and the stop whose text shows then: the stop
+   *  that is running or, during a move, the one before. */
+  function minuteAt(t) {
+    let m = 0, stop = null;
+    for (const s of segments) {
+      if (t < s.start) break;
+      const p = clamp((t - s.start) / s.dur);
+      m = s.from + (s.to - s.from) * (s.type === "move" ? ease(p) : easeOut(p));
+      // a stop narrates from just after its start, so a jump to the end of the previous stop keeps that text
+      if (s.type === "stop" && (t > s.start || s.start === 0)) stop = s.stop;
+    }
+    return { m, stop };
+  }
+
+  /** Returns the animation time at which minute <minute> of the day (fractional) shows. In the minute of a stop, it
+   *  returns the end of the stop if <paused>, so that its text shows, as after Next, and the start of the stop
+   *  otherwise, so that the stop plays in full. For the first stop, whose text already shows at time 0, it returns 0
+   *  even if <paused>, where Back puts it as well. */
+  function timeAt(minute, paused) {
+    const s = segments.find(g => g.type === "stop" && g.from <= minute && minute <= g.to);
+    if (s) return paused && s.start > 0 ? s.start + s.dur : s.start;
+    // between the stops, the minute never decreases with the time: bisect for the earliest time that shows it
+    let lo = 0, hi = total;
+    for (let k = 0; k < 50; k++) {
+      const mid = (lo + hi) / 2;
+      if (minuteAt(mid).m >= minute) hi = mid; else lo = mid;
+    }
+    return hi;
+  }
+
+  /** Draws the frame at animation time <t>. */
+  function render(t) {
+    const { m: minute, stop } = minuteAt(t);
+    const { frames } = day;
+    // the minute as a whole number, for the state of the simulation; the tiny addition keeps 7.9999 from becoming 7
+    const whole = Math.min(M, Math.floor(minute + 1e-6));
+    const f = frames[whole];
+    const D = demand(minute); // the smooth demand between two minutes, for the user icons
+    const slow = f.D > f.C;
+    svg.dataset.bottleneck = f.bottleneck >= 0 ? TIERS[f.bottleneck].id : "none";
+    svg.dataset.minute = String(whole);
+
+    // users: served ones and, only while the platform is too slow, the waiting ones
+    const served = f.C / 100;
+    people.forEach((person, k) => {
+      setOpacity(person, clamp(D / 100 - k));
+      person.setAttribute("class", slow && k + 1 > served ? "person waiting" : "person");
+    });
+    usersBig.textContent = `${fmt(f.D)} users`;
+    usersStatus.textContent = slow ? `✗ ${fmt(f.D - f.C)} wait longer than ${SLA} ms`
+      : `✓ all within ${SLA} ms per request`;
+    usersStatus.setAttribute("class", slow ? "status-bad" : "status-ok");
+    usersStatus.setAttribute("data-state", slow ? "slow" : "ok");
+
+    // servers: new ones pop up, starting ones are dashed, removed ones fade out; a unit of a server that scales up
+    // grows from its bottom edge, as it makes the one box taller
+    TIERS.forEach((tier, i) => {
+      const up = tier.scale === "up";
+      // the box of a server that scales up reaches from its first unit up to its highest unit that shows
+      const edgeBottom = ROW_Y[i] + BOX_H / 2;
+      const keptTop = edgeBottom - BOX_H - (f.s[i] - 1) * UNIT_H; // the top of the highest unit that stays
+      let edgeTop = edgeBottom, edgeOpacity = 0;
+      boxes[i].forEach((b, k) => {
+        const sl = slots[i][k], st = sl.state[whole], age = minute - sl.since[whole], was = sl.prev[whole];
+        let scale = 1, solid = 0, dashed = 0;
+        if (st === 2) { solid = 1; scale = was === 2 ? 1 : easeOutBack(clamp(age / POP)); }
+        else if (st === 1) dashed = clamp(age / 0.5); // a starting server fades in within half a minute
+        else if (was === 2) solid = 1 - clamp(age / POP);
+        b.solid.setAttribute("transform",
+          up ? `translate(0,${b.bottom}) scale(1,${scale.toFixed(3)}) translate(0,${-b.bottom})`
+            : `translate(${b.cx},${b.cy}) scale(${scale.toFixed(3)}) translate(${-b.cx},${-b.cy})`);
+        setOpacity(b.solid, solid);
+        setOpacity(b.boot, dashed);
+        // a server that scales up names the starting units once, in the lowest of them:
+        const named = !up || k === 0 || slots[i][k - 1].state[whole] !== 1;
+        setOpacity(b.bootText, named ? dashed : 0);
+        b.g.setAttribute("data-state", ["off", "starting", "running"][st]);
+        if (up && solid > 0) {
+          // as removed units fade out, the outline moves down from their top to the top of the units that stay,
+          // also when several units go at once:
+          const top = st === 0 ? keptTop - (keptTop - (b.bottom - b.h)) * solid : b.bottom - b.h * scale;
+          edgeTop = Math.min(edgeTop, top);
+          edgeOpacity = Math.max(edgeOpacity, solid);
+        }
+      });
+      if (up) {
+        setAttrs(upOutline, { y: edgeTop.toFixed(1), height: (edgeBottom - edgeTop).toFixed(1) });
+        setOpacity(upOutline, edgeOpacity);
+      }
+
+      // load, queue and the bottleneck
+      const util = f.util[i], isBottleneck = f.bottleneck === i, p = panels[i];
+      // one decimal, so that a load just above a threshold (85%, 35%) does not read as the threshold itself;
+      // capped at 999.9%, so that it fits the panel
+      p.load.textContent = `load ${(100 * Math.min(util, 9.999)).toFixed(1)}%`;
+      // the tag names the bottleneck only; servers that are starting show as dashed boxes in their tier
+      p.tag.textContent = isBottleneck ? "bottleneck" : "";
+      p.bar.setAttribute("width", (BAR_W * Math.min(1, util)).toFixed(1));
+      const level = util >= 1 ? "full" : util > HIGH ? "warn" : "ok";
+      p.bar.setAttribute("class", level === "ok" ? "bar" : `bar ${level}`);
+      p.bar.setAttribute("data-state", level);
+      // the panel is too narrow for "a DBMS server with 2 units", so a server that scales up shows its units only
+      const what = up ? plural(f.s[i], "unit", "units") : amount(tier, f.s[i]);
+      p.sub.textContent = `${what} for ${fmt(f.s[i] * tier.cap)} users`;
+      const q = isBottleneck ? Math.min(QUEUE_DOTS, Math.ceil((f.D - f.C) / 100)) : 0;
+      // the queue sits above the top of the box, including units that are starting
+      const top = ROW_Y[i] - BOX_H / 2 - (up ? (Math.max(f.s[i], f.target[i]) - 1) * UNIT_H : 0);
+      queues[i].dots.forEach((dot, j) => { setOpacity(dot, j < q ? 1 : 0); dot.setAttribute("cy", top - 9); });
+      setAttrs(queues[i].label, { x: BOX_X + 6 + q * QUEUE_STEP, y: top - 5 });
+      queues[i].label.textContent = q ? `${fmt(f.D - f.C)} waiting` : "";
+      setOpacity(rowHighlight[i], isBottleneck ? 0.09 : 0);
+    });
+
+    // the day so far
+    clipRect.setAttribute("width", Math.max(0, x(minute) - X0 + 2));
+    setAttrs(cursor, { x1: x(minute), x2: x(minute) });
+    // the time sits right of the cursor, or left of it in the last 40 minutes, where it would leave the plot
+    const late = minute > M - 40;
+    setAttrs(cursorLabel, { x: x(minute) + (late ? -5 : 5), "text-anchor": late ? "end" : "start" });
+    cursorLabel.textContent = hm(whole);
+    narrate(stop);
+    lastMinute = minute;
+    // the values under the pointer may belong to a minute that has not been played yet
+    if (hoverMinute > minute) hideTip();
+  }
+
+  /** Writes the narration of <stop> (Stop), and its minute, type, notes and (end stop) result as data attributes
+   *  for tests. */
+  function narrate(stop) {
+    if (stop === lastStop) return;
+    lastStop = stop;
+    if (!stop) return;
+    document.getElementById("nar-ts").textContent = `${hm(stop.m)} · ${stop.label}`;
+    document.getElementById("nar-text").innerHTML = stop.text; // built from the constant data above
+    document.getElementById("narration").dataset.stopMinute = String(stop.m);
+    document.getElementById("narration").dataset.stopType = stop.type;
+    document.getElementById("narration").dataset.stopNotes = stop.notes.join(" ");
+    // the sums of the day, on the end stop only, so that tests need not read them from its text
+    ["slow", "paid", "idle"].forEach(key => {
+      const name = `result${upper(key)}`; // data-result-slow, data-result-paid, data-result-idle
+      if (stop.result) document.getElementById("narration").dataset[name] = String(stop.result[key]);
+      else delete document.getElementById("narration").dataset[name];
+    });
+  }
+
+  // hover over the day: the values at the minute under the pointer
+  /** Hides the hover line and the values. */
+  const hideTip = () => {
+    hoverMinute = -1;
+    setOpacity(hoverLine, 0);
+    setOpacity(tip, 0);
+    tip.setAttribute("visibility", "hidden");
+  };
+  hit.addEventListener("pointermove", ev => {
+    const pt = svg.createSVGPoint();
+    pt.x = ev.clientX; pt.y = ev.clientY;
+    const p = pt.matrixTransform(svg.getScreenCTM().inverse());
+    const m = Math.round(((p.x - X0) / (X1 - X0)) * M);
+    if (m < 0 || m > lastMinute) { hideTip(); return; }
+    hoverMinute = m;
+    const f = day.frames[m];
+    setAttrs(hoverLine, { x1: x(m), x2: x(m) });
+    setOpacity(hoverLine, 1);
+    const slow = f.D > f.C;
+    const [time, demandLine, capacityLine, status] = tipLines;
+    time.textContent = hm(m);
+    demandLine.textContent = `demand: ${fmt(f.D)} users`;
+    capacityLine.textContent = `capacity: ${fmt(f.C)} users`;
+    status.textContent = slow ? "✗ too slow" : "✓ in time";
+    status.setAttribute("class", slow ? "tip status-bad" : "tip status-ok");
+    status.setAttribute("data-state", slow ? "slow" : "ok");
+    // the values sit right of the line, or left of it near the right edge (200 wide, 10 apart):
+    const tx = x(m) + 210 > X1 ? x(m) - 210 : x(m) + 10;
+    // high curves get the values at the bottom of the plot, low ones at the top:
+    const ty = Math.max(f.D, f.C) > YMAX / 2 ? PY1 - 80 : PY0 + 4;
+    tip.setAttribute("transform", `translate(${tx},${ty})`);
+    setOpacity(tip, 1);
+    tip.setAttribute("visibility", "visible");
+  });
+  hit.addEventListener("pointerleave", hideTip);
+
+  // ---- playback ----
+  let t = 0, playing = false, lastFrame = 0, loop = 0;
+  const playBtn = document.getElementById("play");
+  const scrub = document.getElementById("scrub");
+  /** Draws the frame at the current time and moves the slider along. */
+  const show = () => { render(t); scrub.value = Math.round((t / total) * 1000); };
+  let autoplay = null; // the timer that starts the playback after the page has loaded, null once done or canceled
+  /** Starts or pauses the playback; starts the frame loop only if it is not running yet. Every control calls this,
+   *  so it also cancels a pending autoplay, which then never overrides what the user did. */
+  const setPlaying = p => {
+    clearTimeout(autoplay);
+    autoplay = null;
+    const wasPlaying = playing;
+    playing = p;
+    playBtn.textContent = p ? "Pause" : t >= total ? "Replay" : "Play";
+    playBtn.dataset.state = p ? "playing" : t >= total ? "ended" : "paused";
+    if (p && !wasPlaying) {
+      // a new loop id ends a frame loop that is still pending from before a pause:
+      const id = ++loop;
+      lastFrame = performance.now();
+      requestAnimationFrame(now => tick(now, id));
+    }
+  };
+  /** Advances the animation by the time since the last frame: at most 0.1 s (e.g. after a hidden tab), and never
+   *  less than 0, as the first frame's timestamp can lie before lastFrame. */
+  function tick(now, id) {
+    if (!playing || id !== loop) return;
+    t = Math.min(total, t + Math.max(0, Math.min(0.1, (now - lastFrame) / 1000)));
+    lastFrame = now;
+    show();
+    if (t >= total) setPlaying(false); else requestAnimationFrame(next => tick(next, id));
+  }
+  playBtn.addEventListener("click", () => {
+    if (!playing && t >= total) t = 0;
+    setPlaying(!playing);
+  });
+  /** Pauses and jumps to the next (<dir> > 0) or previous stop in keys. */
+  const jump = dir => {
+    const target = dir > 0 ? keys.find(k => k > t + 0.01) : [...keys].reverse().find(k => k < t - 0.01);
+    t = target ?? (dir > 0 ? total : 0);
+    setPlaying(false);
+    show();
+  };
+  document.getElementById("next").addEventListener("click", () => jump(1));
+  document.getElementById("prev").addEventListener("click", () => jump(-1));
+  document.getElementById("restart").addEventListener("click", () => { t = 0; show(); setPlaying(true); });
+  scrub.addEventListener("input", () => { t = (scrub.value / 1000) * total; setPlaying(false); render(t); });
+  document.addEventListener("keydown", e => {
+    if (e.target.tagName === "INPUT") return;
+    // Space plays or pauses, except on a playback button, which it presses; on a model or size button, it would
+    // press that button and switch the model or the size
+    if (e.key === " " && !e.target.closest(".controls button")) { e.preventDefault(); playBtn.click(); }
+    if (e.key === "ArrowRight") jump(1);
+    if (e.key === "ArrowLeft") jump(-1);
+  });
+
+  // switching the model or the size keeps the time of day, and keeps the animation playing or paused
+  /** Selects the model <id> and the size <sz>, rebuilds the day and shows it at the time of day shown so far; it
+   *  keeps playing if it was playing or about to start playing, and stays paused otherwise. */
+  const select = (id, sz) => {
+    const resume = playing || autoplay !== null;
+    model = MODELS.find(c => c.id === id);
+    size = sz;
+    rebuild();
+    hideTip();
+    t = timeAt(lastMinute, !resume);
+    show();
+    setPlaying(resume);
+  };
+  // all models in one row; the size, for on premise and hosting only, sits in the row below
+  const modelPicker = document.getElementById("models");
+  MODELS.forEach(option => {
+    const b = document.createElement("button");
+    b.type = "button";
+    b.id = `model-${option.id}`;
+    b.dataset.model = option.id;
+    b.dataset.testid = `model-option-${option.id}`;
+    b.textContent = option.name;
+    b.addEventListener("click", () => select(option.id, size));
+    modelPicker.appendChild(b);
+  });
+  document.querySelectorAll("#sizes button")
+    .forEach(b => b.addEventListener("click", () => select(model.id, b.dataset.size)));
+
+  rebuild();
+  show();
+  // with reduced motion, the day does not start playing on its own
+  const reduced = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+  if (!reduced) autoplay = setTimeout(() => setPlaying(true), 800);
+})();
+</script>
+</body>
+</html>
