@@ -113,7 +113,9 @@ formatting:
 # CONTRIBUTING.md, the job uses --locked instead of --frozen: it additionally
 # fails when uv.lock itself is out of date with pyproject.toml (pyproject.toml
 # edited without running `uv lock`). Otherwise keep the export flags identical
-# to the command in CONTRIBUTING.md and in the dependency_audit job below.
+# to the command in CONTRIBUTING.md. The export contains only the default
+# dependency groups, so the group browser-tests (see pyproject.toml) does not
+# reach Binder; the dependency_audit job below exports all groups instead.
 binder_requirements:
   stage: test
   extends: .not_in_scheduled_pipelines
@@ -168,12 +170,12 @@ dependency_audit:
     - if [ "$DOCS_ONLY" = "true" ]; then echo "Only Markdown changed; skipping."; exit 0; fi
     # Log the uv version: export output and flags can differ between versions.
     - uv --version
-    # Same export flags as binder_requirements and CONTRIBUTING.md. --frozen
-    # audits exactly what uv.lock pins (a uv.lock out of date with
-    # pyproject.toml is caught by binder_requirements). --no-dev has no effect
-    # today because the project has no dependency groups; revisit if one is
-    # added.
-    - uv export --frozen --no-dev --no-hashes --no-header --no-annotate --format requirements.txt -o /tmp/audit-requirements.txt
+    # The export flags of binder_requirements and CONTRIBUTING.md, except that
+    # --all-groups replaces --no-dev: the audit also covers the packages of the
+    # dependency groups that Binder does not get (browser-tests, see
+    # pyproject.toml). --frozen audits exactly what uv.lock pins (a uv.lock out
+    # of date with pyproject.toml is caught by binder_requirements).
+    - uv export --frozen --all-groups --no-hashes --no-header --no-annotate --format requirements.txt -o /tmp/audit-requirements.txt
     # pip-audit is pinned so a new release cannot change the result without
     # notice, and --exclude-newer pins its own dependencies to what was
     # published by that date; bump both deliberately (at least once per
@@ -739,6 +741,53 @@ ipynb_test:
         uv run jupyter nbconvert --to script "$nb" --stdout > /tmp/nb.py
         uv run ipython /tmp/nb.py
       done < /tmp/nb_slice
+  interruptible: true
+
+
+# Browser smoke test of the pages in visualizations/ (see
+# docs/changes/026-visualization-smoke-test): system/tests/repo/test_visualizations.py
+# opens every page in a headless Chromium, steps through it with its controls
+# and fails on a JavaScript error, a control that does not work, or a request
+# to anything but a local file. Playwright, which drives the browser, is in the
+# dependency group browser-tests; py_test does not install it and skips these
+# tests. The job runs only when one of the files below changes: the pages are
+# self-contained, so nothing else can change the result (unlike the other test
+# jobs, which skip only Markdown-only merge requests, see detect-docs-only).
+# Without a cache (GitLab shares caches between branches, so a browser planted
+# by one merge request could run in another): every run downloads Playwright
+# from PyPI, Chromium from Playwright's servers and the system libraries
+# Chromium needs from the Debian mirrors (about half a minute; the tests take
+# about 15 s).
+visualization_test:
+  stage: test
+  tags:
+    - test
+  rules:
+    # Not in the nightly scheduled pipeline (see .not_in_scheduled_pipelines),
+    # which system/tests/repo/test_ci_config.py requires:
+    - if: $CI_PIPELINE_SOURCE == 'schedule'
+      when: never
+    - changes:
+        - visualizations/**/*
+        - system/tests/repo/test_visualizations.py
+        - .gitlab-ci.yml
+        - pyproject.toml
+        - uv.lock
+  # A browser that hangs ends the job after 10 minutes, not after an hour.
+  timeout: 10m
+  script:
+    # Only the group browser-tests (Playwright and its dependencies), not the
+    # project's packages: the tests need nothing else.
+    - uv sync --frozen --only-group browser-tests
+    # --no-sync keeps the environment as installed above; a plain `uv run`
+    # would first install all of the project's packages, which the tests do
+    # not need.
+    # --with-deps installs the system libraries Chromium needs (the job runs as
+    # root); --only-shell installs only the headless Chromium.
+    - uv run --no-sync python -m playwright install --with-deps --only-shell chromium
+    # Fails if Playwright is missing, so the tests can never be skipped here.
+    - uv run --no-sync python -m playwright --version
+    - uv run --no-sync python -m unittest -v system.tests.repo.test_visualizations
   interruptible: true
 
 

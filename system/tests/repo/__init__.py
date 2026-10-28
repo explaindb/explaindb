@@ -18,4 +18,4 @@
 #
 #
 
-"""Tests that check the repository itself: CI configuration, notebooks and the README, and the Javadoc hook."""
+"""Tests that check the repository itself: CI configuration, notebooks, README, Javadoc hook and visualizations."""

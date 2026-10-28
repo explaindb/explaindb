@@ -133,7 +133,7 @@
   </div>
 
   <div class="controls">
-    <button id="play" class="primary" data-testid="play" type="button">Play</button>
+    <button id="play" class="primary" data-testid="play" data-state="paused" type="button">Play</button>
     <button id="prev" data-testid="prev" type="button">Back</button>
     <button id="next" data-testid="next" type="button">Next</button>
     <button id="restart" data-testid="restart" type="button">Restart</button>
@@ -141,9 +141,9 @@
            aria-label="Position in the animation">
   </div>
 
-  <section class="narration" data-testid="narration" aria-live="polite">
-    <div class="ts" id="nar-ts"></div>
-    <p id="nar-text"></p>
+  <section class="narration" id="narration" data-testid="narration" aria-live="polite">
+    <div class="ts" id="nar-ts" data-testid="nar-ts"></div>
+    <p id="nar-text" data-testid="nar-text"></p>
   </section>
 
   <section class="why">
@@ -481,7 +481,8 @@
   const set = a => `{${a.join(", ")}}`;
   const ids = list => list.map(o => o.id).join(" and ");
   let lastNar;
-  /** Writes the explanation for the segment that is running (or last ran) at time <t>. */
+  /** Writes the explanation for the segment that is running (or last ran) at time <t>, and its type as a data
+   *  attribute for tests. */
   function narrate(t) {
     let s = null;
     // a segment starts to narrate just after its start, so a jump to the end of the previous one keeps its text;
@@ -552,6 +553,8 @@
     }
     document.getElementById("nar-ts").textContent = ts;
     document.getElementById("nar-text").innerHTML = html; // built from the constant example data above
+    // the type of the segment, named as on the other pages: start before the first one, end for the serial schedule
+    document.getElementById("narration").dataset.stopType = !s ? "start" : s.type === "serial" ? "end" : s.type;
   }
 
   // playback
@@ -567,6 +570,7 @@
     const wasPlaying = playing;
     playing = p;
     playBtn.textContent = p ? "Pause" : t >= TOTAL ? "Replay" : "Play";
+    playBtn.dataset.state = p ? "playing" : t >= TOTAL ? "ended" : "paused";
     if (p && !wasPlaying) {
       // a new loop id ends a frame loop that is still pending from before a pause:
       const id = ++loop;

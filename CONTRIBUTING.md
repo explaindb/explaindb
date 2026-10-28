@@ -11,9 +11,9 @@ code, so run `black .` before every push.
 The unit tests live in `system/tests/`, whose folders mirror the packages of `system/`: the tests of
 `system/stores/` are in `system/tests/stores/`, and the tests of modules directly in `system/` (e.g.
 `system/DBMS.py`) are directly in `system/tests/`. Tests that check the repository itself (CI configuration,
-notebooks and the README, the Javadoc hook of the API documentation in `docs/api/javadoc.py`) are in
-`system/tests/repo/`. Every test folder below `system/tests/` needs an `__init__.py`; without it,
-`unittest discover` silently skips its tests. Run all tests with:
+notebooks and the README, the Javadoc hook of the API documentation in `docs/api/javadoc.py`, the pages in
+`visualizations/`) are in `system/tests/repo/`. Every test folder below `system/tests/` needs an `__init__.py`;
+without it, `unittest discover` silently skips its tests. Run all tests with:
 
 ```sh
 uv run python -m unittest discover system/tests/
@@ -29,6 +29,11 @@ an export of it. After every dependency change, regenerate it (the CI job
 ```sh
 uv export --frozen --no-dev --no-hashes --no-header --no-annotate --format requirements.txt -o .binder/requirements.txt
 ```
+
+The dependency group `browser-tests` in `pyproject.toml` holds what only the browser test of the
+pages in `visualizations/` needs (see [Visualizations](#visualizations)). `uv sync` does not
+install it, and the export above leaves it out, so it does not reach Binder; the dependency audit
+below covers it.
 
 ### Security audit
 
@@ -239,6 +244,42 @@ The notebooks live in `notebooks/`. When you add, rename or remove one, also upd
 - `.ci/notebook_weights.tsv` (the notebook's run time, used to balance the parallel CI
   jobs) and the expected packing and notebook count in
   `system/tests/repo/test_assign_notebooks.py`, which fails otherwise.
+
+## Visualizations
+
+The pages in `visualizations/` are single HTML files with inline JavaScript; they load nothing
+from the network, so they also work offline. `system/tests/repo/test_visualizations.py` opens
+each page in a headless Chromium, driven by [Playwright](https://playwright.dev/python/), and uses
+its controls the way a reader does. The tests fail if a page's script throws an error or logs one
+to the console, if a control does not work, or if the page requests anything but a local file.
+The CI job `visualization_test` runs them in every merge request that changes a page, the test,
+`.gitlab-ci.yml`, `pyproject.toml` or `uv.lock`.
+
+The tests find elements only by their `data-testid` and read the state of a page mainly from `data-*`
+attributes that its script sets. Some tests run on every page in the folder, so a new page needs
+these elements as well:
+
+| `data-testid` | Element | State the script sets |
+| --- | --- | --- |
+| `play` | the Play/Pause button | `data-state`: `paused`, `playing` or `ended` |
+| `next` | the Next button, which jumps to the next stop | |
+| `scrub` | the slider, from 0 to 1000 | its value |
+| `narration` | the text that explains the current step | `data-stop-type`: `start` at the start, `end` at the end |
+
+Unless the browser asks for reduced motion, a page starts playing on its own shortly after it has
+loaded; the tests ask for reduced motion (except the test of exactly that), so that they start from
+a paused page.
+
+Playwright is in the dependency group `browser-tests`, which `uv sync` does not install; without
+it, the tests are skipped. To run them locally:
+
+```sh
+uv run --group browser-tests python -m playwright install --only-shell chromium
+uv run --group browser-tests python -m unittest -v system.tests.repo.test_visualizations
+```
+
+On Linux, add `--with-deps` to the install command: it installs the system libraries Chromium
+needs (as root). A later `uv sync` without `--group browser-tests` removes the group again.
 
 ## Serializability test of the MVCC store
 

@@ -25,6 +25,16 @@ dependencies = [
     "furo==2025.12.19",
 ]
 
+# Packages that only the CI job `visualization_test` needs: the browser test of
+# the pages in visualizations/ (system/tests/repo/test_visualizations.py). The
+# group is not a default group, so `uv sync` does not install it, and the export
+# for Binder (.binder/requirements.txt) leaves it out; the dependency audit
+# covers it (see .gitlab-ci.yml).
+[dependency-groups]
+browser-tests = [
+    "playwright==1.64.1",
+]
+
 [tool.uv]
 # This repository is a collection of notebooks plus the `system/` package used
 # via the current working directory; it is not itself an installable package.
