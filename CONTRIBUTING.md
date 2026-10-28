@@ -149,11 +149,12 @@ GIT_ATTR_SOURCE=4b825dc642cb6eb9a060e54bf8d69288fbee4904 gitleaks git . --log-op
 ### Static analysis
 
 The CI job `semgrep_sast` runs [Semgrep](https://semgrep.dev) with the rulesets
-`p/security-audit` and `p/python` and fails if the merge request introduces a new finding,
-e.g. a call of `eval` or `pickle.load`, which can run arbitrary code on untrusted input.
+`p/security-audit` and `p/python` (`p/javascript` for HTML pages, see below) and fails if the
+merge request introduces a new finding, e.g. a call of `eval` or `pickle.load`, which can run
+arbitrary code on untrusted input.
 Findings in older code do not fail the job. The job log lists each finding with its file,
-line and rule. Code in `tests/` folders is not scanned, and the job is skipped when a merge
-request only changes Markdown.
+line and rule. Code in `tests/` folders is not scanned (except the inline JavaScript of HTML
+pages, see below), and the job is skipped when a merge request only changes Markdown.
 
 Semgrep cannot read notebooks, so the job writes the code cells of every notebook the merge
 request changes to a Python file (`.ci/notebook_code.py`) and scans these in full: a finding
@@ -169,6 +170,20 @@ The code after `%timeit -s` and the bodies of cell magics such as `%%writefile` 
 suppressed, and a comment line above `%%timeit` makes the conversion fail; rewrite such code
 as plain Python instead.
 
+Semgrep applies only its HTML rules to HTML pages, so the job also writes each inline
+JavaScript `<script>` of every HTML page the merge request changes to a file of its own
+(`.ci/html_scripts.py`) and scans these in full with `p/security-audit` and `p/javascript`, also
+in folders such as `tests/`. Each script keeps its line and column, so for a finding the log
+names `/tmp/html_scripts/<path of the page>.<n>.js` (the n-th script) and a line that is the
+same line in the page. Scripts with `src` or a type that is not JavaScript (e.g.
+`application/json`) are not scanned; the log lists them. Where Python's parser could read a page
+differently from a browser (e.g. `<script` in a comment, or a script inside `<svg>`), the job
+fails and the log names the page, the line and what to change. The scan also fails on any
+warning of Semgrep, e.g. on JavaScript it cannot parse; if that JavaScript is valid, rewrite it,
+or change the job in a merge request of its own. The scan catches honest mistakes, not code
+hidden on purpose. Inline event handlers (`onclick="..."`), `javascript:` URLs and
+`<iframe srcdoc="...">` are not scanned.
+
 If the code is wrong, fix it. If it is intentional (as `eval` and `pickle` in the teaching
 code of `system/` and of some notebooks), add `# nosemgrep: <rule>` on the line before the
 finding, in the same file or notebook cell, with the rule ID from the job log, and above it a
@@ -180,20 +195,24 @@ comment that says why the code is safe:
 for tup in pickle.load(f):
 ```
 
-The job lists every added suppression in its log (for a changed notebook: all of its
-suppressions), and reviewers check each one. Below that list it shows all findings, including
+In the JavaScript of an HTML page, the suppression has the same form with `//`:
+`// nosemgrep: <rule>` on a line of its own.
+
+The job lists every added suppression in its log (for a changed notebook or HTML page: all of
+its suppressions), and reviewers check each one. Below that list it shows all findings, including
 those the suppressions hide. The job fails if a suppression is not a comment line of its own
 in exactly this form (e.g. a bare `nosemgrep` without a rule, or one at the end of a line of
 code). It also fails if the merge request adds or changes a `.semgrepignore`, or changes a file
 that matches a `.gitignore`, as both would remove files from the scan. Suppressions are checked
-in Python files and notebooks only, not in other files Semgrep scans (e.g. YAML).
+in Python files, notebooks and the inline JavaScript of HTML pages only, not in other files
+Semgrep scans (e.g. YAML, or a `<!-- nosemgrep -->` in HTML).
 
 Semgrep has no rule set for Rust enabled, and its suppressions are not checked in `.rs` files:
 the Rust code in [`generated/rust/`](generated/rust) is hardly scanned. This gap is accepted for now (see
 [`docs/changes/011-rust-store-foundation`](docs/changes/011-rust-store-foundation/DECISION.md)).
 
-To run the check locally, scan the changes that are not yet on `main`, then the notebooks you
-changed:
+To run the check locally, scan the changes that are not yet on `main`, then the notebooks and
+HTML pages you changed:
 
 ```sh
 git fetch origin
@@ -201,6 +220,10 @@ uv tool run --from semgrep==1.173.0 semgrep scan --metrics=off --config p/securi
 rm -rf /tmp/notebook_code
 uv run python .ci/notebook_code.py /tmp/notebook_code notebooks/<notebook>.ipynb
 uv tool run --from semgrep==1.173.0 semgrep scan --metrics=off --config p/security-audit --config p/python /tmp/notebook_code
+rm -rf /tmp/html_scripts
+uv run python .ci/html_scripts.py /tmp/html_scripts visualizations/<page>.html
+touch /tmp/html_scripts/.semgrepignore
+uv tool run --from semgrep==1.173.0 semgrep scan --metrics=off --config p/security-audit --config p/javascript --error --strict /tmp/html_scripts
 ```
 
 ## Notebooks

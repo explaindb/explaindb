@@ -359,9 +359,12 @@ gitleaks_secret_detection:
 # and p/python; Semgrep's default exclusions apply (e.g. tests/ and everything in
 # .gitignore). Semgrep does not read notebooks, so the code cells of the
 # notebooks the merge request changes are written to Python files first and
-# scanned in full. Suppressions are listed in the log, together with the
+# scanned in full. Likewise, the inline JavaScript of the HTML pages it changes
+# is scanned in full, with p/javascript instead of p/python and without the
+# default exclusions. Suppressions are listed in the log, together with the
 # findings they hide, and must name a rule. CONTRIBUTING.md explains how to
-# accept an intentional finding (see also docs/changes/008-semgrep-sast).
+# accept an intentional finding (see also docs/changes/008-semgrep-sast and
+# docs/changes/025-semgrep-html-scripts).
 semgrep_sast:
   # In the first stage: the job is quick, and if it finds something the test
   # stage does not run at all. It needs detect-docs-only (same stage) for the
@@ -386,8 +389,12 @@ semgrep_sast:
     GIT_ATTR_SOURCE: 4b825dc642cb6eb9a060e54bf8d69288fbee4904
     # The options of all scans below. --metrics=off: send no usage data to
     # Semgrep's servers. --max-target-bytes=0: scan files of any size (by
-    # default Semgrep skips files over 1 MB without failing).
-    SCAN_OPTIONS: --metrics=off --max-target-bytes=0 --config p/security-audit --config p/python
+    # default Semgrep skips files over 1 MB without failing). Python files and
+    # notebooks are scanned with p/python, the JavaScript of HTML pages with
+    # p/javascript.
+    COMMON_SCAN_OPTIONS: --metrics=off --max-target-bytes=0 --config p/security-audit
+    SCAN_OPTIONS: $COMMON_SCAN_OPTIONS --config p/python
+    HTML_SCAN_OPTIONS: $COMMON_SCAN_OPTIONS --config p/javascript
   # The job fetches from GitLab and downloads the rulesets; one retry absorbs a
   # network hiccup. A real finding simply fails twice.
   retry:
@@ -455,7 +462,7 @@ semgrep_sast:
       fi
     # --error fails the job on a new finding. The findings are printed to the
     # log; a copy in GitLab's SAST format is kept as an artifact (for the Python
-    # files only; findings in notebooks appear only in the log).
+    # files only; findings in notebooks and HTML pages appear only in the log).
     - >
       semgrep scan
       $SCAN_OPTIONS
@@ -494,6 +501,55 @@ semgrep_sast:
         semgrep scan $SCAN_OPTIONS --error /tmp/notebook_code
       else
         echo "No notebook changed."
+      fi
+    # Likewise for HTML pages, to which Semgrep applies only HTML rules: the
+    # inline JavaScript of the pages that the merge request changes (deleted
+    # ones left out) is written by .ci/html_scripts.py to one JavaScript file
+    # per script, at its line and column in the page (its docstring says what
+    # it skips and where it stops with an error), and scanned in full.
+    # --strict also fails on Semgrep's warnings, e.g. on JavaScript it cannot
+    # parse. An empty .semgrepignore switches off Semgrep's default exclusions
+    # (e.g. tests/) for these files. A self-check first requires a finding
+    # (exit status 1) for a page with eval(location.hash) in a tests/ folder,
+    # scanned the same way, so that a scan that finds nothing even there fails
+    # the job. :(icase) also matches Page.HTML.
+    # Suppressions are checked as above, in the form // nosemgrep: <rule-id>.
+    - git diff -z --name-only --diff-filter=d "$BASELINE" HEAD -- ':(icase)*.html' ':(icase)*.htm' > /tmp/changed_pages
+    - |
+      if [ -s /tmp/changed_pages ]; then
+        # How html.parser reads a <script> has changed in Python's security
+        # releases; log the version the extraction ran with.
+        python3 --version
+        xargs -0 python3 .ci/html_scripts.py /tmp/html_scripts < /tmp/changed_pages
+        if [ -d /tmp/html_scripts ]; then
+          mkdir -p /tmp/html_selfcheck/tests
+          printf '<script>\neval(location.hash);\n</script>\n' > /tmp/html_selfcheck/tests/page.html
+          (cd /tmp/html_selfcheck && python3 "$CI_PROJECT_DIR/.ci/html_scripts.py" /tmp/html_selfcheck_code tests/page.html)
+          : > /tmp/html_selfcheck_code/.semgrepignore
+          status=0
+          semgrep scan $HTML_SCAN_OPTIONS --error --strict /tmp/html_selfcheck_code > /dev/null || status=$?
+          if [ "$status" -ne 1 ]; then
+            echo "Self-check failed: a page with eval(location.hash) gave exit status $status instead of 1."
+            exit 1
+          fi
+          : > /tmp/html_scripts/.semgrepignore
+          grep -rinE 'nosem' /tmp/html_scripts > /tmp/html_suppressions || true
+          if [ -s /tmp/html_suppressions ]; then
+            echo "Suppressions in the changed HTML pages (reviewers check the new ones):"
+            cat /tmp/html_suppressions
+            if grep -vE '^[^:]+:[0-9]+:[[:space:]]*// nosemgrep: [A-Za-z0-9_.-]+$' /tmp/html_suppressions; then
+              echo "A suppression must be a comment line of its own that names a rule: // nosemgrep: <rule-id>"
+              exit 1
+            fi
+            echo "All findings, including those hidden by suppressions (for review only):"
+            semgrep scan $HTML_SCAN_OPTIONS --disable-nosem /tmp/html_scripts || true
+          fi
+          semgrep scan $HTML_SCAN_OPTIONS --error --strict /tmp/html_scripts
+        else
+          echo "No inline JavaScript in the changed HTML pages."
+        fi
+      else
+        echo "No HTML page changed."
       fi
   artifacts:
     # Keep the report also when the job fails.
