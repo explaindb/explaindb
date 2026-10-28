@@ -102,7 +102,7 @@ pycparser==3.0 ; implementation_name != 'PyPy'
 pydantic==2.10.4
 pydantic-core==2.27.2
 pygments==2.21.0
-pylint==4.0.8
+pylint==4.0.9
 pyparsing==3.3.2
 python-dateutil==2.9.0.post0
 python-json-logger==4.2.0
