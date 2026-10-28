@@ -199,10 +199,13 @@ In the JavaScript of an HTML page, the suppression has the same form with `//`:
 `// nosemgrep: <rule>` on a line of its own.
 
 The job lists every added suppression in its log (for a changed notebook or HTML page: all of
-its suppressions), and reviewers check each one. Below that list it shows all findings, including
-those the suppressions hide. The job fails if a suppression is not a comment line of its own
-in exactly this form (e.g. a bare `nosemgrep` without a rule, or one at the end of a line of
-code). It also fails if the merge request adds or changes a `.semgrepignore`, or changes a file
+its suppressions), and reviewers check each one. A suppression is any line that contains `nosem`
+in any case, as Semgrep reads it: also with a letter that Unicode case folding turns into one of
+its letters, such as the long s `ſ`, and also after a NUL byte (`.ci/suppressions.py` finds them).
+Below that list the job shows all findings, including those the suppressions hide. It fails if a
+suppression is not a comment line of its own in exactly this form (e.g. a bare `nosemgrep`
+without a rule, one at the end of a line of code, or one in capitals, with a `ſ` or with a NUL
+byte). It also fails if the merge request adds or changes a `.semgrepignore`, or changes a file
 that matches a `.gitignore`, as both would remove files from the scan. Suppressions are checked
 in Python files, notebooks and the inline JavaScript of HTML pages only, not in other files
 Semgrep scans (e.g. YAML, or a `<!-- nosemgrep -->` in HTML).

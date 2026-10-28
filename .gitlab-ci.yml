@@ -442,11 +442,18 @@ semgrep_sast:
     # a comment of its own that names a rule; a bare or differently written
     # suppression, or one at the end of a line of code, fails the job. (A
     # correctly written one on a line of its own inside a multi-line string
-    # passes, but is listed as well.) awk reads only the
-    # lines inside the diff's hunks (after "@@"), so that the "+++ b/<path>"
-    # header lines never count. Suppressions in notebooks are checked further
-    # below, on the converted code.
-    - git diff -U0 "$BASELINE" HEAD -- '*.py' '*.pyi' ':(exclude)*/tests/*' | awk '/^diff --git /{hunk=0} /^@@/{hunk=1; next} hunk && /^\+/ && tolower($0) ~ /nosem/' > /tmp/suppressions
+    # passes, but is listed as well.) .ci/suppressions.py finds the lines as
+    # Semgrep reads them: in any case, also with a letter such as the long s
+    # "ſ" that Unicode case folding turns into "s", and also after a NUL byte
+    # (the busybox grep and awk of the image miss both). It prints a NUL byte
+    # as \x00, which the form check rejects. It reads only the lines inside
+    # the diff's hunks (after "@@"), so that the "+++ b/<path>" header lines
+    # never count. --text: git would take a file with a NUL byte for a binary
+    # file and show none of its lines. python3 -I: no module in .ci/ can
+    # replace one of the standard library that the script imports.
+    # Suppressions in notebooks are checked further below, on the converted
+    # code.
+    - git diff --text -U0 "$BASELINE" HEAD -- '*.py' '*.pyi' ':(exclude)*/tests/*' | python3 -I .ci/suppressions.py --diff > /tmp/suppressions
     - |
       if [ -s /tmp/suppressions ]; then
         echo "Suppressions added by this merge request (reviewers check each):"
@@ -478,8 +485,9 @@ semgrep_sast:
     # any name works. The script fails if a notebook's code is not valid Python
     # after the conversion, as Semgrep would skip such code with only a warning.
     # In the converted code, every line that mentions a suppression is listed
-    # for the reviewers, with the findings it hides, and must be a comment of
-    # its own that names a rule (as in the Python files above).
+    # for the reviewers (by .ci/suppressions.py, as in the Python files
+    # above), with the findings it hides, and must be a comment of its own
+    # that names a rule.
     - git diff -z --name-only --diff-filter=d "$BASELINE" HEAD -- '*.ipynb' > /tmp/changed_notebooks
     - |
       if [ -s /tmp/changed_notebooks ]; then
@@ -487,7 +495,7 @@ semgrep_sast:
         # in 3.12), which should match the project's.
         python3 --version
         xargs -0 python3 .ci/notebook_code.py /tmp/notebook_code < /tmp/changed_notebooks
-        grep -rinE 'nosem' /tmp/notebook_code > /tmp/notebook_suppressions || true
+        python3 -I .ci/suppressions.py /tmp/notebook_code > /tmp/notebook_suppressions
         if [ -s /tmp/notebook_suppressions ]; then
           echo "Suppressions in the changed notebooks (reviewers check the new ones):"
           cat /tmp/notebook_suppressions
@@ -533,7 +541,7 @@ semgrep_sast:
             exit 1
           fi
           : > /tmp/html_scripts/.semgrepignore
-          grep -rinE 'nosem' /tmp/html_scripts > /tmp/html_suppressions || true
+          python3 -I .ci/suppressions.py /tmp/html_scripts > /tmp/html_suppressions
           if [ -s /tmp/html_suppressions ]; then
             echo "Suppressions in the changed HTML pages (reviewers check the new ones):"
             cat /tmp/html_suppressions
