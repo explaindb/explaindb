@@ -138,7 +138,7 @@ tinycss2==1.5.1
 tokenize-rt==6.2.0
 tomli==2.4.1
 tomlkit==0.15.1
-tornado==6.5.10
+tornado==6.6
 tqdm==4.67.0
 traitlets==5.16.1
 typing-extensions==4.16.0

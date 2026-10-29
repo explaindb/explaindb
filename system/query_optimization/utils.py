@@ -26,6 +26,7 @@ from system.query_optimization.join_graph import JoinGraph
 from system.query_optimization.cardinality_table import CardinalityTable
 from system.query_optimization.cost_function import C_Out
 from system.interfaces.cost_functions import CostFunction
+from system.interfaces.query_optimization.planning import PlanEnumerator
 import random
 
 
@@ -53,10 +54,7 @@ def randomize_cardinalities(
 
 def randomize_cardinalities_and_enumerate_join_graph(
     join_graph: JoinGraph,
-    # NOTE: PlanEnumerator is defined in the PlanEnumeration notebook and is not importable here, so this
-    # forward reference does not resolve to any class in the package; the parameter just needs an object
-    # providing an enumerate(join_graph, cardinality_table, cost_function, print_info) method.
-    plan_enumerator: "PlanEnumerator",
+    plan_enumerator: PlanEnumerator,
     print_info: bool = False,
 ) -> tuple[int, tuple, int]:
     """

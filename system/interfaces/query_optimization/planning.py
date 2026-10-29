@@ -18,7 +18,7 @@
 #
 #
 
-"""Abstract plan-table interface for join-order enumeration."""
+"""Abstract interfaces for join-order enumeration: the plan table and the plan enumerator."""
 
 from __future__ import annotations
 
@@ -132,4 +132,29 @@ class PlanTable(ABC):
         Returns the current best plan for the problem.
         :param problem: The problem.
         :return: The plan for the problem.
+        """
+
+
+class PlanEnumerator(ABC):
+    """
+    Abstract enumerator class to enumerate the join plans for a given join graph.
+    """
+
+    @abstractmethod
+    def enumerate(
+        self,
+        join_graph: JoinGraph,
+        cardinality_table: CardinalityTable,
+        cost_function: CostFunction,
+        print_info: bool = False,
+    ) -> tuple[int, tuple, int]:
+        """Computes and returns the best join order for the given problem sizes.
+        # TODO: join order vs join plan
+
+        @param join_graph: The join graph.
+        @param cardinality_table: The cardinality table to be used.
+        @param cost_function: A cost function determining the cost of different operations.
+        @param print_info: A flag indicating whether additional info should be printed during enumeration.
+        @return: A tuple, consisting of the costs of the best plan, the best plan as a tuple and the number of pairs
+        that were enumerated.
         """

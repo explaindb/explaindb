@@ -100,8 +100,8 @@ A small DBMS written for reading, not for speed. Interfaces in
   [`query_processing/queues/`](system/query_processing/queues)): external merge sort with in-memory and
   disk-backed queues.
 - **Query optimization** ([`query_optimization/`](system/query_optimization)): join graphs (chain,
-  star, cycle, clique), cardinality estimation, the C_out cost function and plan tables for
-  dynamic-programming join ordering.
+  star, cycle, clique), cardinality estimation, the C_out cost function, plan tables and the
+  dynamic-programming join-order enumeration algorithms DPsize, DPsub and DPccp.
 
 [`DBMS.py`](system/DBMS.py) ties these parts together: it manages stores, prepared queries and query
 optimization. Unit tests for all of this live in [`system/tests/`](system/tests).

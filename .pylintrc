@@ -8,9 +8,10 @@ init-hook = 'import sys; sys.path.insert(0, ".")'
 
 [BASIC]
 # Short mathematical names used deliberately (loop indices, vector/triangle
-# vertices and edges A/B/C/AB/AC, matrix labels) and two domain class names
-# (C_Out cost, WHERE_Clause) that keep their non-PascalCase spelling.
-good-names = _, i, j, k, m, n, x, y, z, A, B, C, D, AB, AC, C_Out, WHERE_Clause
+# vertices and edges A/B/C/AB/AC, matrix labels) and five domain class names
+# (C_Out cost, WHERE_Clause, the plan enumerators DP_Size, DP_Sub and DP_CCP)
+# that keep their non-PascalCase spelling.
+good-names = _, i, j, k, m, n, x, y, z, A, B, C, D, AB, AC, C_Out, WHERE_Clause, DP_Size, DP_Sub, DP_CCP
 
 # Type variables are descriptive PascalCase in this codebase (e.g. ObjectType,
 # Key, Value) rather than the conventional single letter.

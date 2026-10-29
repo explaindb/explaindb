@@ -23,6 +23,8 @@
 # pylint: disable=invalid-name,missing-class-docstring,missing-function-docstring
 """Tests for join-plan enumeration and problem (relation-subset) operations."""
 
+import contextlib
+import io
 import unittest
 from system.query_optimization.problems import Problem
 from system.query_optimization.cost_function import C_Out
@@ -31,7 +33,7 @@ from system.query_optimization.plan_table import (
     StandardPlanTable,
     SizeBasedPlanTable,
 )
-from system.interfaces.query_optimization.planning import PlanTable
+from system.interfaces.query_optimization.planning import PlanEnumerator, PlanTable
 from system.query_optimization.cardinality_table import CardinalityTable
 from system.query_optimization.join_graph import (
     JoinGraph,
@@ -40,6 +42,14 @@ from system.query_optimization.join_graph import (
     StarQueryFactory,
     CliqueQueryFactory,
 )
+from system.query_optimization.plan_enumeration import (
+    DP_Size,
+    DP_Sub,
+    DP_CCP,
+    generate_connected_problems,
+    generate_ccp_pairs,
+)
+from system.query_optimization.utils import randomize_cardinalities
 
 
 class PlanEnumerationTests(unittest.TestCase):
@@ -337,6 +347,306 @@ class PlanEnumerationTests(unittest.TestCase):
         self.assertEqual(
             clique_query.get_neighbors(Problem(0b10000, 5)), Problem(0b01111)
         )
+
+    def test_plan_enumerators(self):
+        """
+        DPsize, DPsub and DPccp find the same best plan with the same costs on a chain of five relations, and
+        enumerate 73, 42 and 20 pairs.
+        """
+        join_graph: JoinGraph = ChainQueryFactory.construct_join_graph(5)
+        cardinality_table: CardinalityTable = CardinalityTable()
+        # set the cardinalities of the connected problems, by size; size 1:
+        cardinality_table.update_cardinality_estimation(Problem(0b1, 5), 5000)
+        cardinality_table.update_cardinality_estimation(Problem(0b10, 5), 4000)
+        cardinality_table.update_cardinality_estimation(Problem(0b100, 5), 500)
+        cardinality_table.update_cardinality_estimation(Problem(0b1000, 5), 100)
+        cardinality_table.update_cardinality_estimation(Problem(0b10000, 5), 1000)
+
+        # size 2:
+        cardinality_table.update_cardinality_estimation(Problem(0b11, 5), 100)
+        cardinality_table.update_cardinality_estimation(Problem(0b110, 5), 500)
+        cardinality_table.update_cardinality_estimation(Problem(0b1100, 5), 100)
+        cardinality_table.update_cardinality_estimation(Problem(0b11000, 5), 100)
+
+        # size 3:
+        cardinality_table.update_cardinality_estimation(Problem(0b111, 5), 500)
+        cardinality_table.update_cardinality_estimation(Problem(0b1110, 5), 50)
+        cardinality_table.update_cardinality_estimation(Problem(0b11100, 5), 100)
+
+        # size 4:
+        cardinality_table.update_cardinality_estimation(Problem(0b1111, 5), 10)
+        cardinality_table.update_cardinality_estimation(Problem(0b11110, 5), 100)
+
+        # size 5:
+        cardinality_table.update_cardinality_estimation(Problem(0b11111, 5), 10)
+
+        # the expected best plan and costs, and the number of pairs each algorithm enumerates:
+        best_plan: tuple = (
+            (((3, 2), 1), 0),
+            4,
+        )
+        best_costs: int = 10770
+        algorithm_pairs: dict[str, int] = {
+            "DP_Sub": 42,
+            "DP_Size": 73,
+            "DP_CCP": 20,
+        }
+
+        def _test_plan_costs(enumeration_algorithm: PlanEnumerator) -> None:
+            """Runs the given enumerator on the chain query and checks its best plan, costs and number of pairs."""
+            costs, plan, enumerated_pairs = enumeration_algorithm.enumerate(
+                join_graph, cardinality_table, C_Out(), False
+            )
+            self.assertEqual(plan, best_plan)
+            self.assertEqual(costs, best_costs)
+            self.assertEqual(
+                enumerated_pairs,
+                algorithm_pairs[enumeration_algorithm.__class__.__name__],
+            )
+
+        _test_plan_costs(DP_Size())
+        _test_plan_costs(DP_Sub())
+        _test_plan_costs(DP_CCP())
+
+    def test_csg_enumeration(self):
+        """
+        generate_connected_problems yields every connected problem of a chain of five relations exactly once,
+        starting from the highest relation.
+        """
+        chain_query: JoinGraph = ChainQueryFactory.construct_join_graph(5)
+        # each singleton from the highest relation down, followed by the connected problems it is extended to:
+        correct_csgs: list[Problem] = [
+            Problem(0b10000, 5),
+            Problem(0b1000, 5),
+            Problem(0b11000, 5),
+            Problem(0b100, 5),
+            Problem(0b1100, 5),
+            Problem(0b11100, 5),
+            Problem(0b10, 5),
+            Problem(0b110, 5),
+            Problem(0b1110, 5),
+            Problem(0b11110, 5),
+            Problem(0b1, 5),
+            Problem(0b11, 5),
+            Problem(0b111, 5),
+            Problem(0b1111, 5),
+            Problem(0b11111, 5),
+        ]
+
+        csgs_without_duplicates: list[Problem] = list(
+            generate_connected_problems(chain_query)
+        )
+
+        self.assertListEqual(csgs_without_duplicates, correct_csgs)
+
+    def test_ccp_helper_enumeration(self):
+        """
+        generate_ccp_pairs yields every csg-cmp pair of a chain of five relations exactly once, grouped by csg in the
+        order in which generate_connected_problems yields the csgs.
+        """
+        chain_query: JoinGraph = ChainQueryFactory.construct_join_graph(5)
+
+        # the pairs grouped by their csg, in the order generate_connected_problems yields the csgs:
+        correct_ccps: list[tuple[Problem, Problem]] = [
+            (Problem(0b1000, 5), Problem(0b10000, 5)),
+            (Problem(0b100, 5), Problem(0b1000, 5)),
+            (Problem(0b100, 5), Problem(0b11000, 5)),
+            (Problem(0b1100, 5), Problem(0b10000, 5)),
+            (Problem(0b10, 5), Problem(0b100, 5)),
+            (Problem(0b10, 5), Problem(0b1100, 5)),
+            (Problem(0b10, 5), Problem(0b11100, 5)),
+            (Problem(0b110, 5), Problem(0b1000, 5)),
+            (Problem(0b110, 5), Problem(0b11000, 5)),
+            (Problem(0b1110, 5), Problem(0b10000, 5)),
+            (Problem(0b1, 5), Problem(0b10, 5)),
+            (Problem(0b1, 5), Problem(0b110, 5)),
+            (Problem(0b1, 5), Problem(0b1110, 5)),
+            (Problem(0b1, 5), Problem(0b11110, 5)),
+            (Problem(0b11, 5), Problem(0b100, 5)),
+            (Problem(0b11, 5), Problem(0b1100, 5)),
+            (Problem(0b11, 5), Problem(0b11100, 5)),
+            (Problem(0b111, 5), Problem(0b1000, 5)),
+            (Problem(0b111, 5), Problem(0b11000, 5)),
+            (Problem(0b1111, 5), Problem(0b10000, 5)),
+        ]
+
+        generated_ccps = list(generate_ccp_pairs(chain_query))
+        self.assertListEqual(generated_ccps, correct_ccps)
+
+    def test_csg_enumeration_on_cycle(self):
+        """
+        generate_connected_problems yields every connected problem of the cycle R0 - R1 - R2 - R3 - R0 (the example
+        of the notebook) exactly once, also where a problem can grow in two directions.
+        """
+        cycle_query: JoinGraph = CycleQueryFactory.construct_join_graph(4)
+
+        # the connected problems: {0} grows by {1}, by {3} and by both at once:
+        self.assertListEqual(
+            [problem.as_set() for problem in generate_connected_problems(cycle_query)],
+            [
+                {3},
+                {2},
+                {2, 3},
+                {1},
+                {1, 2},
+                {1, 2, 3},
+                {0},
+                {0, 1},
+                {0, 3},
+                {0, 1, 3},
+                {0, 1, 2},
+                {0, 2, 3},
+                {0, 1, 2, 3},
+            ],
+        )
+
+    def test_ccp_helper_enumeration_on_cycle(self):
+        """
+        generate_ccp_pairs yields every csg-cmp pair of the cycle R0 - R1 - R2 - R3 - R0 exactly once, grouped by
+        csg in the order in which generate_connected_problems yields the csgs.
+        """
+        cycle_query: JoinGraph = CycleQueryFactory.construct_join_graph(4)
+
+        # the csg-cmp pairs, grouped by csg; for the csg {0}, the cmps start with {3} and then {1}:
+        self.assertListEqual(
+            [(s1.as_set(), s2.as_set()) for s1, s2 in generate_ccp_pairs(cycle_query)],
+            [
+                ({2}, {3}),
+                ({1}, {2}),
+                ({1}, {2, 3}),
+                ({1, 2}, {3}),
+                ({0}, {3}),
+                ({0}, {2, 3}),
+                ({0}, {1}),
+                ({0}, {1, 2}),
+                ({0}, {1, 2, 3}),
+                ({0, 1}, {3}),
+                ({0, 1}, {2}),
+                ({0, 1}, {2, 3}),
+                ({0, 3}, {2}),
+                ({0, 3}, {1}),
+                ({0, 3}, {1, 2}),
+                ({0, 1, 3}, {2}),
+                ({0, 1, 2}, {3}),
+                ({0, 2, 3}, {1}),
+            ],
+        )
+
+    def test_plan_enumerators_on_cycle(self):
+        """
+        DPsize, DPsub and DPccp find the same best plan with the same costs on the cycle R0 - R1 - R2 - R3 - R0 with
+        the notebook's random cardinalities, enumerate 44, 23 and 18 pairs, and print nothing without print_info.
+        """
+        cycle_query: JoinGraph = CycleQueryFactory.construct_join_graph(4)
+
+        # with the notebook's random cardinalities (seed 42), all three enumerators find the plan (3⋈((1⋈0)⋈2)) with
+        # costs 2011; DPsize enumerates 44 pairs, DPsub 23 and DPccp only the 18 valid ones:
+        for plan_enumerator, pairs in ((DP_Size(), 44), (DP_Sub(), 23), (DP_CCP(), 18)):
+            with self.subTest(plan_enumerator=plan_enumerator.__class__.__name__):
+                cardinality_table: CardinalityTable = CardinalityTable()
+                randomize_cardinalities(cardinality_table, 4, 42)
+                output: io.StringIO = io.StringIO()
+                with contextlib.redirect_stdout(output):
+                    result: tuple[int, tuple, int] = plan_enumerator.enumerate(
+                        cycle_query, cardinality_table, C_Out()
+                    )
+                self.assertEqual(result, (2011, (3, ((1, 0), 2)), pairs))
+
+                # print_info is off by default, so nothing is printed:
+                self.assertEqual(output.getvalue(), "")
+
+    def _enumerate_chain_of_three(
+        self, plan_enumerator: PlanEnumerator
+    ) -> tuple[int, list[str]]:
+        """
+        Runs the given enumerator with print_info on a chain query R0 - R1 - R2 and captures what it prints.
+        :param plan_enumerator: The enumerator to run.
+        :return: A tuple, consisting of the number of enumerated pairs the enumerator returns and its printed lines.
+        """
+        # random cardinalities with a fixed seed and C_out; the printed pairs depend only on the join graph, not on
+        # the cardinalities:
+        chain_query: JoinGraph = ChainQueryFactory.construct_join_graph(3)
+        cardinality_table: CardinalityTable = CardinalityTable()
+        randomize_cardinalities(cardinality_table, 3, 42)
+        cost_function: CostFunction = C_Out()
+
+        # run the enumerator and collect its output line by line:
+        output: io.StringIO = io.StringIO()
+        with contextlib.redirect_stdout(output):
+            _, _, enumerated_pairs = plan_enumerator.enumerate(
+                chain_query, cardinality_table, cost_function, print_info=True
+            )
+        return enumerated_pairs, output.getvalue().splitlines()
+
+    def test_DP_Size_prints_enumerated_pairs(self):
+        """
+        DPsize prints every pair it enumerates on a chain of three relations, valid or not, in size order, and a
+        summary.
+        """
+        enumerated_pairs, lines = self._enumerate_chain_of_three(DP_Size())
+
+        # all pairs of plan-table entries whose sizes add up to 2, then to 3; a pair is invalid if its two problems
+        # overlap or are not joined with each other:
+        self.assertListEqual(
+            [
+                "Enumerated valid pair {0}, {1}.",
+                "Enumerated invalid pair {0}, {2}.",
+                "Enumerated valid pair {1}, {2}.",
+                "Enumerated invalid pair {0}, {0, 1}.",
+                "Enumerated valid pair {0}, {1, 2}.",
+                "Enumerated invalid pair {1}, {0, 1}.",
+                "Enumerated invalid pair {1}, {1, 2}.",
+                "Enumerated valid pair {2}, {0, 1}.",
+                "Enumerated invalid pair {2}, {1, 2}.",
+                "9 pairs were enumerated, out of which 4 were valid!",
+            ],
+            lines,
+        )
+        # the returned count includes the invalid pairs:
+        self.assertEqual(enumerated_pairs, 9)
+
+    def test_DP_Sub_prints_enumerated_pairs(self):
+        """
+        DPsub prints every pair it enumerates on a chain of three relations, splitting each connected problem in
+        increasing-integer order, and a summary.
+        """
+        enumerated_pairs, lines = self._enumerate_chain_of_three(DP_Sub())
+
+        # the connected problems {0, 1}, {1, 2} and {0, 1, 2} are split into disjoint halves; the pair {1}, {0, 2} is
+        # invalid because {0, 2} is not connected:
+        self.assertListEqual(
+            [
+                "Enumerated valid pair {0}, {1}",
+                "Enumerated valid pair {1}, {2}",
+                "Enumerated valid pair {0}, {1, 2}",
+                "Enumerated invalid pair {1}, {0, 2}",
+                "Enumerated valid pair {0, 1}, {2}",
+                "5 pairs were enumerated, out of which 4 were valid",
+            ],
+            lines,
+        )
+        # the returned count includes the invalid pair:
+        self.assertEqual(enumerated_pairs, 5)
+
+    def test_DP_CCP_prints_enumerated_pairs(self):
+        """
+        DPccp prints every csg-cmp pair it enumerates on a chain of three relations, all of them valid, and a
+        summary.
+        """
+        enumerated_pairs, lines = self._enumerate_chain_of_three(DP_CCP())
+
+        # the connected subgraphs are generated from the highest relation down, so the pair {1}, {2} comes first:
+        self.assertListEqual(
+            [
+                "Enumerated valid pair {1}, {2}",
+                "Enumerated valid pair {0}, {1}",
+                "Enumerated valid pair {0}, {1, 2}",
+                "Enumerated valid pair {0, 1}, {2}",
+                "Enumerated 4 valid pairs",
+            ],
+            lines,
+        )
+        self.assertEqual(enumerated_pairs, 4)
 
 
 if __name__ == "__main__":

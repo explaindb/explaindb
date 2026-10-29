@@ -18,13 +18,19 @@ in what order.
 
 ## In this repo
 
-- **Notebook:** [`PlanEnumeration.ipynb`](../../../notebooks/PlanEnumeration.ipynb) — builds the enumeration
+- **Notebook:** [`PlanEnumeration.ipynb`](../../../notebooks/PlanEnumeration.ipynb) — explains the enumeration
   algorithms and runs them over the different join-graph topologies.
-- **Implementation:** [`system/query_optimization/plan_table.py`](../../../system/query_optimization/plan_table.py)
+- **Implementation:** the algorithms `DP_Size`, `DP_Sub` and `DP_CCP` in
+  [`system/query_optimization/plan_enumeration.py`](../../../system/query_optimization/plan_enumeration.py),
+  [`system/query_optimization/plan_table.py`](../../../system/query_optimization/plan_table.py)
   (`StandardPlanTable`, `SizeBasedPlanTable`), the subset walk in
   [`system/query_optimization/problems.py`](../../../system/query_optimization/problems.py), and helpers
   in [`system/query_optimization/utils.py`](../../../system/query_optimization/utils.py).
-- **Interface:** [`system/interfaces/query_optimization/planning.py`](../../../system/interfaces/query_optimization/planning.py).
+- **Interface:**
+  [`system/interfaces/query_optimization/planning.py`](../../../system/interfaces/query_optimization/planning.py)
+  (`PlanTable`, `PlanEnumerator`).
+- **Tests:**
+  [`system/tests/query_optimization/test_plan_enumeration.py`](../../../system/tests/query_optimization/test_plan_enumeration.py).
 
 ## The idea in one picture
 
