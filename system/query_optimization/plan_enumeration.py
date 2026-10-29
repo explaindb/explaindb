@@ -45,7 +45,7 @@ class DP_Size(PlanEnumerator):
         cardinality_table: CardinalityTable,
         cost_function: CostFunction,
         print_info: bool = False,
-    ) -> tuple[int, tuple, int]:
+    ) -> tuple[int, tuple | int, int]:
         """See :meth:`PlanEnumerator.enumerate`.
 
         With ``print_info``, prints every pair it enumerates, valid or invalid, and at the end how many of them were
@@ -112,8 +112,8 @@ class DP_Size(PlanEnumerator):
         num_nodes: int = len(join_graph.adjacency_matrix)
         # Enumerate all possible problem sizes starting from 2
         for main_size in range(2, num_nodes + 1):
-            # Enumerate all sizes that are smaller than size_1 // 2
-            # to avoid duplicate work.
+            # Enumerate the sizes of s1 only up to main_size // 2 (inclusive)
+            # to avoid duplicate work: larger sizes of s1 would only swap s1 and s2.
             for s1_size in range(1, (main_size // 2) + 1):
                 s2_size: int = main_size - s1_size
 
@@ -147,7 +147,7 @@ class DP_Sub(PlanEnumerator):
         cardinality_table: CardinalityTable,
         cost_function: CostFunction,
         print_info: bool = False,
-    ) -> tuple[int, tuple, int]:
+    ) -> tuple[int, tuple | int, int]:
         """See :meth:`PlanEnumerator.enumerate`.
 
         With ``print_info``, prints every pair it enumerates, valid or invalid, and at the end how many of them were
@@ -297,7 +297,7 @@ def generate_ccp_pairs(join_graph: JoinGraph) -> Iterator[tuple[Problem, Problem
     :param join_graph: The join graph.
     """
     for csg in generate_connected_problems(join_graph):
-        # We do not want the csg_problem to be contained in any cmp problem at any problem
+        # No cmp problem may overlap the csg, so the csg itself is always excluded
         # We also always want to ignore cmp problems that contain relations whose number is smaller than the smallest in the csg
         always_exclude_set: Problem = csg | csg.get_smaller_or_equal_relations()
 
@@ -336,7 +336,7 @@ class DP_CCP(PlanEnumerator):
         cardinality_table: CardinalityTable,
         cost_function: CostFunction,
         print_info: bool = False,
-    ) -> tuple[int, tuple, int]:
+    ) -> tuple[int, tuple | int, int]:
         """See :meth:`PlanEnumerator.enumerate`.
 
         With ``print_info``, prints every pair it enumerates (all of them are valid) and at the end their number.

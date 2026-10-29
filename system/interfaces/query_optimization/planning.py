@@ -147,14 +147,14 @@ class PlanEnumerator(ABC):
         cardinality_table: CardinalityTable,
         cost_function: CostFunction,
         print_info: bool = False,
-    ) -> tuple[int, tuple, int]:
-        """Computes and returns the best join order for the given problem sizes.
-        # TODO: join order vs join plan
+    ) -> tuple[int, tuple | int, int]:
+        """Computes and returns the best join plan (a join tree without cross products) for the given join graph.
 
-        @param join_graph: The join graph.
+        @param join_graph: A connected join graph.
         @param cardinality_table: The cardinality table to be used.
         @param cost_function: A cost function determining the cost of different operations.
         @param print_info: A flag indicating whether additional info should be printed during enumeration.
-        @return: A tuple, consisting of the costs of the best plan, the best plan as a tuple and the number of pairs
-        that were enumerated.
+        @return: A tuple, consisting of the costs of the best plan, the best plan and the number of pairs that were
+        enumerated. The plan is a nested tuple (left, right) of relation ids, or a single relation id for a join graph
+        with one relation.
         """

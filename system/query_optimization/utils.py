@@ -56,13 +56,13 @@ def randomize_cardinalities_and_enumerate_join_graph(
     join_graph: JoinGraph,
     plan_enumerator: PlanEnumerator,
     print_info: bool = False,
-) -> tuple[int, tuple, int]:
+) -> tuple[int, tuple | int, int]:
     """
-    Create an example graph and prints its best plan.
+    Fills a cardinality table with random cardinalities (seed 42) and enumerates the given join graph with C_out.
     :param join_graph: The join_graph to use.
     :param plan_enumerator: The Plan enumerator to be used.
     :param print_info: A flag to indicate whether to print additional information during enumeration.
-    :return: A tuple, consisting of the costs of the best plan, the best plan as a tuple and the number of csg-cmp pairs that were enumerated.
+    :return: A tuple, consisting of the costs of the best plan, the best plan and the number of pairs that were enumerated.
     """
 
     # Define cardinalities of problems
@@ -77,7 +77,7 @@ def randomize_cardinalities_and_enumerate_join_graph(
         join_graph, cardinality_table, cost_function, print_info
     )
 
-    results: tuple[int, tuple, int] = (
+    results: tuple[int, tuple | int, int] = (
         join_costs,
         join_plan,
         enumerated_pairs,
@@ -86,10 +86,10 @@ def randomize_cardinalities_and_enumerate_join_graph(
     return results
 
 
-def print_results(results: tuple[int, tuple, int]):
+def print_results(results: tuple[int, tuple | int, int]):
     """
     Print a human-readable summary of an enumeration result.
-    :param results: A tuple of the best plan's costs, the best plan, and the number of enumerated csg-cmp pairs.
+    :param results: A tuple of the best plan's costs, the best plan, and the number of enumerated pairs.
     """
     print(
         f"The best join plan is {visualize_join_plan(results[1])} with costs {results[0]}!"

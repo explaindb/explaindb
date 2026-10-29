@@ -547,13 +547,36 @@ class PlanEnumerationTests(unittest.TestCase):
                 randomize_cardinalities(cardinality_table, 4, 42)
                 output: io.StringIO = io.StringIO()
                 with contextlib.redirect_stdout(output):
-                    result: tuple[int, tuple, int] = plan_enumerator.enumerate(
+                    result: tuple[int, tuple | int, int] = plan_enumerator.enumerate(
                         cycle_query, cardinality_table, C_Out()
                     )
                 self.assertEqual(result, (2011, (3, ((1, 0), 2)), pairs))
 
                 # print_info is off by default, so nothing is printed:
                 self.assertEqual(output.getvalue(), "")
+
+    def test_plan_enumerators_on_one_relation(self):
+        """
+        On a join graph with a single relation, DPsize, DPsub and DPccp return the costs of that relation, the
+        relation id 0 as the plan (an int, not a tuple) and no enumerated pairs.
+        """
+        join_graph: JoinGraph = ChainQueryFactory.construct_join_graph(1)
+
+        for plan_enumerator in (DP_Size(), DP_Sub(), DP_CCP()):
+            with self.subTest(plan_enumerator=plan_enumerator.__class__.__name__):
+                # random cardinality for R0; C_out charges a base relation with its cardinality:
+                cardinality_table: CardinalityTable = CardinalityTable()
+                randomize_cardinalities(cardinality_table, 1, 42)
+                expected_cost: int = cardinality_table.get_cardinality_estimation(
+                    Problem(0b1, 1)
+                )
+
+                # the result is the cost of R0, the plain relation id 0 and no enumerated pairs:
+                result: tuple[int, tuple | int, int] = plan_enumerator.enumerate(
+                    join_graph, cardinality_table, C_Out()
+                )
+                self.assertEqual(result, (expected_cost, 0, 0))
+                self.assertIs(type(result[1]), int)
 
     def _enumerate_chain_of_three(
         self, plan_enumerator: PlanEnumerator

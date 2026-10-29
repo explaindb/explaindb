@@ -43,5 +43,7 @@ best[S] = min over connected splits S = S1 ∪ S2 of  join( best[S1], best[S2] )
 
 ## Try it
 
-In `PlanEnumeration.ipynb`, run DPsub and DPccp on a chain vs. a clique and compare how many subproblems
-each visits — the gap is the whole point of DPccp.
+In `PlanEnumeration.ipynb`, run DPsub and DPccp on a chain and on a clique and compare the number of pairs
+each enumerates (the third value of the result). On the chain, DPccp enumerates fewer pairs, and the gap grows
+with the number of relations; on the clique, both enumerate the same pairs. The gain of DPccp comes from sparse
+join graphs.
