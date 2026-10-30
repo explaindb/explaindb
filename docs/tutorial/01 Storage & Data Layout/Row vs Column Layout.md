@@ -16,6 +16,9 @@ levers on analytical performance.
 - **Notebook:** [`Data-Layout.ipynb`](../../../notebooks/Data-Layout.ipynb) — writes the same data in row and
   column layout (as CSV, for readability) and shows how much each layout has to read for different
   queries. The concepts apply equally to binary on-disk formats and to in-memory representations.
+- **Visualization:** [`row-or-column.html`](../../../visualizations/row-or-column.html) — an animation
+  (open it in a browser): memory is read one 64-byte cache line at a time, so `SELECT MAX(price)` loads
+  4 cache lines of a row layout but only 1 of a column layout.
 
 ## The idea in one picture
 
