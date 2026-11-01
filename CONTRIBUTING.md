@@ -248,7 +248,11 @@ The notebooks live in `notebooks/`. When you add, rename or remove one, also upd
 ## Visualizations
 
 The pages in `visualizations/` are single HTML files with inline JavaScript; they load nothing
-from the network, so they also work offline. `system/tests/repo/test_visualizations.py` opens
+from the network, so they also work offline. Each page carries a Content-Security-Policy, a
+`<meta http-equiv="Content-Security-Policy">` line right after `<meta charset="utf-8">`. With it the
+reader's browser itself blocks every load from the network (the line and its rules are explained in
+[`docs/changes/030-visualizations-csp`](docs/changes/030-visualizations-csp/DECISION.md)).
+`system/tests/repo/test_visualizations.py` opens
 each page in a headless Chromium, driven by [Playwright](https://playwright.dev/python/), and uses
 its controls the way a reader does. The tests fail if a page's script throws an error or logs one
 to the console, if a control does not work, or if the page requests anything but a local file.
