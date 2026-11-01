@@ -227,6 +227,8 @@
       <button id="prev" data-testid="prev" type="button">Back</button>
       <button id="next" data-testid="next" type="button">Next</button>
       <button id="restart" data-testid="restart" type="button">Restart</button>
+      <button id="fullscreen" data-testid="fullscreen" type="button" title="Full screen (F)"
+              disabled>Full screen</button>
       <input id="scrub" data-testid="scrub" type="range" min="0" max="1000" step="1" value="0"
              aria-label="Position in the animation">
     </div>
@@ -1403,11 +1405,36 @@
   document.getElementById("prev").addEventListener("click", () => jump(-1));
   document.getElementById("restart").addEventListener("click", () => { t = 0; show(); setPlaying(true); });
   scrub.addEventListener("input", () => { t = (scrub.value / 1000) * total; setPlaying(false); render(t); });
+  // full screen: the whole page, with the controls, and without the browser's bars
+  const fullscreenBtn = document.getElementById("fullscreen");
+  /** Switches the page to full screen and back. A refusal by the browser (e.g. without a click or key press)
+   *  leaves the page as it is. */
+  const toggleFullscreen = () => {
+    if (!document.fullscreenEnabled) return; // e.g. Safari on the iPhone: no full screen for pages
+    const request = document.fullscreenElement
+      ? document.exitFullscreen()
+      : document.documentElement.requestFullscreen();
+    request.catch(() => {});
+  };
+  // browsers without full screen for pages (e.g. Safari on the iPhone) get no button
+  fullscreenBtn.hidden = !document.fullscreenEnabled;
+  fullscreenBtn.addEventListener("click", toggleFullscreen);
+  // also when full screen ends without the button (Esc), so that the button shows the state
+  document.addEventListener("fullscreenchange", () => {
+    const on = document.fullscreenElement !== null;
+    fullscreenBtn.textContent = on ? "Leave full screen" : "Full screen";
+  });
+  // disabled in the HTML, so that it cannot be clicked before the script has set it up
+  fullscreenBtn.disabled = false;
   document.addEventListener("keydown", e => {
+    // F switches to full screen and back, also on the slider, but not when held down or with a modifier (Ctrl+F
+    // searches the page)
+    if (e.key.toLowerCase() === "f" && !e.repeat && !e.altKey && !e.ctrlKey && !e.metaKey) { toggleFullscreen(); return; }
     if (e.target.tagName === "INPUT") return;
     // Space plays or pauses, except on a playback button, which it presses; on a model or size button, it would
-    // press that button and switch the model or the size
-    if (e.key === " " && !e.target.closest(".controls button")) { e.preventDefault(); playBtn.click(); }
+    // press that button and switch the model or the size. On the full-screen button (F and Enter switch that one)
+    // it plays or pauses, so Space still does so after a click on it
+    if (e.key === " " && (!e.target.closest(".controls button") || e.target === fullscreenBtn)) { e.preventDefault(); playBtn.click(); }
     if (e.key === "ArrowRight") jump(1);
     if (e.key === "ArrowLeft") jump(-1);
   });

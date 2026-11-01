@@ -274,6 +274,16 @@ Unless the browser asks for reduced motion, a page starts playing on its own sho
 loaded; the tests ask for reduced motion (except the test of exactly that), so that they start from
 a paused page.
 
+Every page also offers full screen, and a new page needs it as well: a button with the `data-testid`
+`fullscreen` among its controls and the key F both switch the whole page to full screen and back.
+Browsers that cannot show a page in full screen (e.g. Safari on the iPhone) do not show the button.
+
+The README links to each page with an absolute link to htmlpreview.github.io, which shows the page
+instead of its source code. GitLab opens such a link in a new tab, as it adds `target="_blank"` to
+every link to another site (checked on 2026-11-01 with GitLab's Markdown API). GitHub's renderer
+drops `target` attributes, so on the GitHub mirror the link opens in the same tab. The README
+therefore needs no HTML links to force a new tab.
+
 Playwright is in the dependency group `browser-tests`, which `uv sync` does not install; without
 it, the tests are skipped. To run them locally:
 

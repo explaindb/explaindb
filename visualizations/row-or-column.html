@@ -25,7 +25,8 @@
     stored row by row and column by column; memory is read linearly, one 64-byte cache line at a time, so
     SELECT MAX(price) loads 4 cache lines of the row layout but only 1 of the column layout. Open the file in a
     browser; it works offline, as three.js and the fonts are embedded (their licenses are given where they are
-    embedded). Keys: Space plays and pauses, → and ← jump to the next and previous step.
+    embedded). Keys: Space plays and pauses, → and ← jump to the next and previous step, F switches to full screen
+    and back.
 -->
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="description" content="A 52-second three.js explainer for ExplainDB: why SELECT MAX(price) loads four times less memory from a column layout than from a row layout.">
@@ -303,6 +304,12 @@ char   author[8][8];    <span class="comment">//  64 B</span>
       <input type="range" id="scrub" data-testid="scrub" min="0" max="1000" step="1" value="0"
              aria-label="Position in the animation" disabled>
       <span id="clock" data-testid="clock">0:00 / 0:52</span>
+      <button type="button" id="fullscreen" data-testid="fullscreen" aria-label="Full screen" aria-pressed="false"
+              title="Full screen (F)" disabled>
+        <svg viewBox="0 0 14 14" aria-hidden="true">
+          <path d="M1 1h4v1.5H2.5V5H1zM9 1h4v4h-1.5V2.5H9zM13 13H9v-1.5h2.5V9H13zM1 13V9h1.5v2.5H5V13z"/>
+        </svg>
+      </button>
     </div>
   </footer>
 </div>
@@ -5410,6 +5417,7 @@ var THREE={AdditiveBlending:ir,BoxGeometry:ri,BufferGeometry:en,CanvasTexture:Ur
   const nextButton = $('next');
   const scrub = $('scrub');
   const clock = $('clock');
+  const fullscreenButton = $('fullscreen');
   const iconPause = $('iconPause');
   const iconPlay = $('iconPlay');
   // the size of the stage, set by resize():
@@ -5648,6 +5656,27 @@ var THREE={AdditiveBlending:ir,BoxGeometry:ri,BufferGeometry:en,CanvasTexture:Ur
     show();
   }
 
+  /**
+   * Switches the page to full screen and back: the whole page, with the controls, and without the browser's bars.
+   * A refusal by the browser (e.g. without a click or key press) leaves the page as it is.
+   */
+  function toggleFullscreen() {
+    if (!document.fullscreenEnabled) return; // e.g. Safari on the iPhone: no full screen for pages
+    const request = document.fullscreenElement
+      ? document.exitFullscreen()
+      : document.documentElement.requestFullscreen();
+    request.catch(() => {});
+  }
+  // browsers without full screen for pages (e.g. Safari on the iPhone) get no button
+  fullscreenButton.hidden = !document.fullscreenEnabled;
+  fullscreenButton.addEventListener('click', toggleFullscreen);
+  // also when full screen ends without the button (Esc), so that the button shows the state
+  document.addEventListener('fullscreenchange', () => {
+    const on = document.fullscreenElement !== null;
+    // the label stays "Full screen"; aria-pressed tells whether it is on
+    fullscreenButton.setAttribute('aria-pressed', String(on));
+  });
+
   playButton.addEventListener('click', () => {
     if (!playing && time >= DURATION) time = 0;
     setPlaying(!playing);
@@ -5661,10 +5690,13 @@ var THREE={AdditiveBlending:ir,BoxGeometry:ri,BufferGeometry:en,CanvasTexture:Ur
   window.addEventListener('keydown', (event) => {
     // keys held down or pressed with a modifier (e.g. Alt+← for the browser's Back) are left to the browser:
     if (event.repeat || event.altKey || event.ctrlKey || event.metaKey) return;
-    if (event.code === 'Space' && !(event.target instanceof HTMLButtonElement)) {
-      // a focused button clicks itself on Space; elsewhere, also on the slider, Space plays and pauses
+    if (event.code === 'Space' && (!(event.target instanceof HTMLButtonElement) || event.target === fullscreenButton)) {
+      // Space plays and pauses, also on the slider and on the full-screen button (F and Enter switch that one, so
+      // Space still plays or pauses after a click on it); on any other button, Space clicks that button
       event.preventDefault();
       playButton.click();
+    } else if (event.key.toLowerCase() === 'f') {
+      toggleFullscreen();
     } else if (event.target === scrub) {
       // the slider moves itself with the arrow keys
     } else if (event.code === 'ArrowRight') {
@@ -5715,7 +5747,7 @@ var THREE={AdditiveBlending:ir,BoxGeometry:ri,BufferGeometry:en,CanvasTexture:Ur
   document.fonts.ready.then(resize);
   setPlaying(false);
   show();
-  for (const control of [playButton, nextButton, scrub]) control.disabled = false;
+  for (const control of [playButton, nextButton, scrub, fullscreenButton]) control.disabled = false;
   if (renderer) {
     // in the next frame, so that the first picture is on screen first: prepare the GPU programs (also of objects
     // hidden now) and upload the textures before playing starts, so that playing does not stutter when an object
