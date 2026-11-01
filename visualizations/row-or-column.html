@@ -5628,8 +5628,9 @@ var THREE={AdditiveBlending:ir,BoxGeometry:ri,BufferGeometry:en,CanvasTexture:Ur
     const ended = !playing && time >= DURATION;
     playButton.dataset.state = playing ? 'playing' : ended ? 'ended' : 'paused';
     playButton.setAttribute('aria-label', playing ? 'Pause' : ended ? 'Replay' : 'Play');
-    iconPause.hidden = !playing;
-    iconPlay.hidden = playing;
+    // An SVG element has no hidden property, so set the attribute; the CSS rule [hidden] hides the icon.
+    iconPause.toggleAttribute('hidden', !playing);
+    iconPlay.toggleAttribute('hidden', playing);
     if (playing) requestFrame();
   }
 
