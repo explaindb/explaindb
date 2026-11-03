@@ -91,3 +91,8 @@ every new page has to carry the line; the policy has to be kept the same in all 
 - `img-src data:` and similar rules in advance: no page needs them today.
 
 <!-- notes below: skill never overwrites past this marker -->
+
+Note 2026-11-03 (decision 034): the line gains `media-src data:`, so that a page can embed sound as `data:` URLs, as
+the clock-scan page does for its synthetic voice. As with `font-src data:`, every page carries it, also a page without
+sound, so that all pages keep one line; it loads nothing from the network. The pages of open merge requests
+(`call-through-dbms.html` in !197, `clock-scan.html` in !201) get it on their next update.
