@@ -33,6 +33,7 @@ tests are skipped. The CI job ``visualization_test`` installs the group and Chro
 from __future__ import annotations
 
 import importlib.util
+import math
 import re
 import tempfile
 import unittest
@@ -73,12 +74,19 @@ ELASTICITY_PAGE: Path = PAGES_DIR / "elasticity-resources-follow-demand.html"
 VALIDATION_PAGE: Path = PAGES_DIR / "validation-interval-to-point.html"
 # a page with a synthetic voice, which the sound button switches on (decision 034):
 CLOCK_SCAN_PAGE: Path = PAGES_DIR / "clock-scan.html"
+# a page whose voice says some captions in two segments, each with a clip of its own (decision 035):
+ROW_OR_COLUMN_PAGE: Path = PAGES_DIR / "row-or-column.html"
+# the pages that speak their narration; each must keep its sound button:
+PAGES_WITH_SOUND: frozenset[Path] = frozenset({CLOCK_SCAN_PAGE, ROW_OR_COLUMN_PAGE})
+# the pages with sound whose film has parts, with a button (chapter-1, ...) that jumps to the start of each:
+PAGES_WITH_PARTS: frozenset[Path] = frozenset({CLOCK_SCAN_PAGE})
 
 # Next is clicked at most this often on the way from the start of a page to its end:
 MAX_NEXT_CLICKS: int = 300
 
-# a wait for the film to reach a time (e.g. the first caption, after about 0.75 s) ends after this many milliseconds,
-# not after the 5 s of a control: on a slow machine (software rendering) a frame may advance the film by only 0.1 s:
+# a wait for the film to reach a time (e.g. the first caption, after about 0.75 s on the clock-scan page) ends after
+# this many milliseconds, not after the 5 s of a control: on a slow machine (software rendering) a frame may advance
+# the film by only 0.1 s:
 FILM_TIMEOUT: int = 15_000
 
 
@@ -259,7 +267,7 @@ class _SoundPageTestCase(_PageTestCase):
     """Opens the pages with a sound button and reads the state of their voice; holds no tests of its own."""
 
     def check_each_page_with_sound(self, check: Callable[[Page], None]) -> None:
-        """Runs a check on each page with a sound button, and asserts that the clock-scan page is one of them.
+        """Runs a check on each page with a sound button, and asserts that the pages of PAGES_WITH_SOUND are among them.
 
         The pages with a sound button are found in their HTML, so that the others are not opened in the browser. Each
         page is opened at its start, paused and with sound off; after the check, the page must have had no errors.
@@ -272,8 +280,8 @@ class _SoundPageTestCase(_PageTestCase):
             for path in self.pages()
             if 'data-testid="sound"' in path.read_text(encoding="utf-8")
         ]
-        # the clock-scan page has a sound button, so that a test cannot pass without a page that speaks:
-        self.assertIn(CLOCK_SCAN_PAGE, pages_with_sound)
+        # the pages that speak have a sound button, so that a test cannot pass without them:
+        self.assertLessEqual(PAGES_WITH_SOUND, set(pages_with_sound))
 
         for path in pages_with_sound:
             with self.subTest(page=path.name):
@@ -406,21 +414,42 @@ class _SoundPageTestCase(_PageTestCase):
         )
 
     @staticmethod
-    def let_film_play_on(page: Page, steps: int) -> None:
-        """Waits until the playing film has moved the slider on by at least the given number of steps.
-
-        The slider has 1000 steps from the start of the film to its end; on the clock-scan page, which lasts about
-        100 s, ten steps are about 1 s.
+    def let_film_play_until(page: Page, position: int) -> None:
+        """Waits until the playing film has moved the slider to at least the given position.
 
         @param page: a playing page
-        @param steps: how far the slider has to move on
+        @param position: the slider's value to reach, from 0 at the start of the film to 1000 at its end
         """
         scrub = page.get_by_test_id("scrub")
         page.wait_for_function(
             "([scrub, until]) => Number(scrub.value) >= until",
-            arg=[scrub.element_handle(), int(scrub.input_value()) + steps],
+            arg=[scrub.element_handle(), position],
             timeout=FILM_TIMEOUT,
         )
+
+    @classmethod
+    def let_film_play_on(cls, page: Page, steps: int) -> None:
+        """Waits until the playing film has moved the slider on by at least the given number of steps.
+
+        The slider has 1000 steps from the start of the film to its end; on the clock-scan page, which lasts about
+        100 s, ten steps are about 1 s, on the row-or-column page, which lasts 52 s, about 0.5 s.
+
+        @param page: a playing page
+        @param steps: how far the slider has to move on
+        """
+        position: int = int(page.get_by_test_id("scrub").input_value())
+        cls.let_film_play_until(page, position + steps)
+
+    @staticmethod
+    def has_parts(page: Page) -> bool:
+        """Returns whether the page is one of PAGES_WITH_PARTS, and expects the button of part 1 on exactly those.
+
+        @param page: a page with a sound button
+        @return: whether the film of the page has parts, with a button that jumps to the start of each
+        """
+        parts: bool = page.url in {path.as_uri() for path in PAGES_WITH_PARTS}
+        expect(page.get_by_test_id("chapter-1")).to_have_count(1 if parts else 0)
+        return parts
 
     def play_until_held_back(self, page: Page) -> None:
         """Makes the browser refuse the sound from now on and plays until it refuses the voice: the voice is held back.
@@ -446,7 +475,8 @@ class EveryPageWithSoundTest(_SoundPageTestCase):
     def test_voice_speaks_while_playing_with_sound_on(self) -> None:
         """On each page with a sound button, the voice speaks while the page plays with sound on; sound is off at load.
 
-        Next drops the voice's clip; Play and the button of part 1 make the voice speak again; the sound button switches
+        Next drops the voice's clip, and Play makes the voice speak again; so does a jump back to the start with the
+        button of part 1 (on a page without parts: the slider back to the start, and Play). The sound button switches
         the voice off again.
         """
 
@@ -457,6 +487,7 @@ class EveryPageWithSoundTest(_SoundPageTestCase):
             scrub = page.get_by_test_id("scrub")
             stage = page.get_by_test_id("stage")
             voice = page.get_by_test_id("voice")
+            narration = page.get_by_test_id("narration")
 
             # sound is off at load, and the captions show as subtitles:
             self.expect_sound(page, on=False)
@@ -465,7 +496,8 @@ class EveryPageWithSoundTest(_SoundPageTestCase):
             sound.click()
             self.expect_sound(page, on=True)
 
-            # Play from the start: the voice speaks the clip of the first caption, which begins after about 0.75 s:
+            # Play from the start: the voice speaks the clip of the first caption, which begins shortly after the start
+            # (after about 0.75 s on the clock-scan page):
             expect(scrub).to_have_value("0")
             play.click()
             expect(stage).to_have_attribute(
@@ -488,13 +520,16 @@ class EveryPageWithSoundTest(_SoundPageTestCase):
                 "data-voice", "playing", timeout=FILM_TIMEOUT
             )
 
-            # the button of part 1 jumps back to the start, before the first caption, and plays from there; the voice
-            # speaks again once the first caption begins:
-            page.get_by_test_id("chapter-1").click()
-            self.assertEqual(
-                "start",
-                page.get_by_test_id("narration").get_attribute("data-stop-type"),
-            )
+            # the button of part 1 jumps back to the start, before the first caption, and plays from there (on a page
+            # without parts: the slider back to the start, which pauses, and Play); the voice speaks again once the
+            # first caption begins:
+            if self.has_parts(page):
+                page.get_by_test_id("chapter-1").click()
+                self.assertEqual("start", narration.get_attribute("data-stop-type"))
+            else:
+                scrub.fill("0")
+                self.assertEqual("start", narration.get_attribute("data-stop-type"))
+                play.click()
             expect(play).to_have_attribute("data-state", "playing")
             expect(stage).to_have_attribute(
                 "data-voice", "playing", timeout=FILM_TIMEOUT
@@ -505,7 +540,8 @@ class EveryPageWithSoundTest(_SoundPageTestCase):
             self.expect_sound(page, on=False)
             expect(play).to_have_attribute("data-state", "playing")
 
-            # the voice stays silent while the film plays on for about 1 s, and does not start even for a moment:
+            # the voice stays silent while the film plays on by 10 steps of the slider, and does not start even for a
+            # moment:
             self.record_voice_starts(page)
             self.let_film_play_on(page, 10)
             self.assertTrue(voice.evaluate("audio => audio.paused"))
@@ -515,25 +551,35 @@ class EveryPageWithSoundTest(_SoundPageTestCase):
         self.check_each_page_with_sound(check)
 
     def test_voice_stays_silent_with_sound_off(self) -> None:
-        """With sound off, the voice stays silent while the film plays on into the next caption; no clip is loaded."""
+        """With sound off, the voice stays silent while the film plays on past where it would say the second caption.
+
+        No clip is loaded.
+        """
 
         def check(page: Page) -> None:
             """Checks one page, opened at its start with sound off."""
+            sound = page.get_by_test_id("sound")
             play = page.get_by_test_id("play")
+            scrub = page.get_by_test_id("scrub")
             voice = page.get_by_test_id("voice")
-            text = page.get_by_test_id("nar-text")
 
-            # Next stops where the first caption is shown in full:
+            # with sound on, two Next stop where the voice would begin to say the second caption; there the sound is
+            # switched off:
+            sound.click()
+            self.expect_sound(page, on=True)
             page.get_by_test_id("next").click()
-            first_caption: str = text.inner_text()
-            self.assertNotEqual("", first_caption)
+            page.get_by_test_id("next").click()
+            second_caption: int = int(scrub.input_value())
+            sound.click()
+            self.expect_sound(page, on=False)
 
-            # Play: the film plays on past the first caption into the second one, where the voice would speak with sound
-            # on, and on for about half a second more:
+            # ← stops before, where the first caption is shown in full; Play: the film plays on past where the voice
+            # would begin the second caption, by 10 steps of the slider:
+            page.keyboard.press("ArrowLeft")
+            self.assertLess(int(scrub.input_value()), second_caption)
             self.record_voice_starts(page)
             play.click()
-            expect(text).not_to_have_text(first_caption, timeout=FILM_TIMEOUT)
-            self.let_film_play_on(page, 5)
+            self.let_film_play_until(page, second_caption + 10)
 
             # the film plays, but the voice is silent, has not started even for a moment, and holds no clip:
             expect(play).to_have_attribute("data-state", "playing")
@@ -638,8 +684,8 @@ class EveryPageWithSoundTest(_SoundPageTestCase):
     def test_voice_speaks_each_caption_once_and_again_after_a_jump_back(self) -> None:
         """With sound on, a clip said in full is not said again, and the next one starts when its caption begins.
 
-        Between the two captions, the voice is silent. After a jump back with the button of part 1, the first clip is
-        said again.
+        Between the two captions, the voice is silent. After a jump back with the button of part 1 (with the slider on
+        a page without parts), the first clip is said again.
         """
 
         def check(page: Page) -> None:
@@ -681,8 +727,13 @@ class EveryPageWithSoundTest(_SoundPageTestCase):
                 page.evaluate("window.voiceStarts"),
             )
 
-            # the button of part 1 jumps back to the start and plays: the voice says the first clip again:
-            page.get_by_test_id("chapter-1").click()
+            # the button of part 1 jumps back to the start and plays (on a page without parts: the slider back to the
+            # start, which pauses, and Play): the voice says the first clip again:
+            if self.has_parts(page):
+                page.get_by_test_id("chapter-1").click()
+            else:
+                scrub.fill("0")
+                page.get_by_test_id("play").click()
             page.wait_for_function(
                 speaks_clip,
                 arg=[voice.element_handle(), stage.element_handle(), True],
@@ -1072,6 +1123,38 @@ class EveryPageWithSoundTest(_SoundPageTestCase):
 
         self.check_each_page_with_sound(check)
 
+    def test_space_on_the_sound_button_plays_and_pauses_and_leaves_the_sound_on(
+        self,
+    ) -> None:
+        """On the sound button, which keeps the focus after a click, Space plays and pauses, and the sound stays on.
+
+        A held Space, which the keyboard repeats, pauses once and does not click the sound button when it comes up.
+        """
+
+        def check(page: Page) -> None:
+            """Checks one page, opened at its start with sound off."""
+            sound = page.get_by_test_id("sound")
+            play = page.get_by_test_id("play")
+
+            # a click switches the sound on, and the sound button keeps the focus:
+            sound.click()
+            self.expect_sound(page, on=True)
+            expect(sound).to_be_focused()
+
+            # Space plays the film, and the sound stays on:
+            page.keyboard.press("Space")
+            expect(play).to_have_attribute("data-state", "playing")
+            self.expect_sound(page, on=True)
+
+            # a held Space, which the keyboard repeats before it comes up, pauses the film, and the sound stays on:
+            page.keyboard.down("Space")
+            page.keyboard.down("Space")
+            page.keyboard.up("Space")
+            expect(play).to_have_attribute("data-state", "paused")
+            self.expect_sound(page, on=True)
+
+        self.check_each_page_with_sound(check)
+
     def test_pause_holds_the_clip_and_play_goes_on_in_it(self) -> None:
         """With sound on, Pause holds the voice's clip where it is, and Play goes on in it, not from its start."""
 
@@ -1279,6 +1362,215 @@ class ClockScanPageTest(_SoundPageTestCase):
         scrub.fill("0")
         expect(hint).to_have_css("opacity", "1")
         self.assert_no_errors(opened)
+
+
+@unittest.skipUnless(PLAYWRIGHT_AVAILABLE, SKIP_REASON)
+class RowOrColumnPageTest(_SoundPageTestCase):
+    """Checks what is particular to the voice of the row-or-column page, which says some captions in two segments.
+
+    Each segment has a clip of its own, which starts at the segment's time (decision 035). The times below are those
+    of the page's CAPTIONS.
+    """
+
+    # the film's length (s); the slider has 1000 steps over it:
+    LENGTH: float = 52
+    # the steps of the film in their order, by their stop type, and where the first segment of each begins (s):
+    STEP_TYPES: list[str] = [
+        "query",
+        "memory",
+        "cache-lines",
+        "row-layout",
+        "column-layout",
+        "verdict",
+        "result",
+    ]
+    FIRST_SEGMENTS: list[float] = [0.5, 6.4, 13.4, 19.4, 30.6, 42.5, 49.3]
+    # the row-layout step, the fourth, says its caption in two segments; the second one begins at 25.8 s:
+    ROW_LAYOUT_STEP: int = 4
+    ROW_LAYOUT_SEGMENTS: list[str] = [
+        "Row layout: each line drags title and author along.",
+        "Four lines read, a quarter used.",
+    ]
+    ROW_LAYOUT_SECOND_SEGMENT: float = 25.8
+    # a clip longer than its time plays at most this many times as fast (decision 034):
+    MAX_RATE: float = 1.15
+
+    def setUp(self) -> None:
+        """Opens the page, paused at its start with sound off."""
+        self.opened: OpenedPage = self.open_page(ROW_OR_COLUMN_PAGE)
+        self.page: Page = self.opened.page
+
+    def slider_at(self, seconds: float) -> float:
+        """Returns where the slider stands at a time of the film, before the page rounds it to a whole step.
+
+        @param seconds: a time of the film
+        @return: the slider's position, from 0 at the start of the film to 1000 at its end
+        """
+        return seconds / self.LENGTH * 1000
+
+    def press_next(self, times: int) -> None:
+        """Clicks Next the given number of times.
+
+        @param times: how often Next is clicked
+        """
+        for _ in range(times):
+            self.page.get_by_test_id("next").click()
+
+    def test_a_second_segment_gets_a_clip_of_its_own(self) -> None:
+        """With sound on, the second segment of a caption is said by a clip of its own, which starts at its time.
+
+        The first clip does not start again; the second one starts once, not before its segment begins, while the step
+        is still shown.
+        """
+        page: Page = self.page
+        scrub = page.get_by_test_id("scrub")
+        narration = page.get_by_test_id("narration")
+        stage = page.get_by_test_id("stage")
+        voice = page.get_by_test_id("voice")
+
+        # with sound on, Next stops where the row-layout step begins, whose caption is said in two segments:
+        page.get_by_test_id("sound").click()
+        self.expect_sound(page, on=True)
+        self.press_next(self.ROW_LAYOUT_STEP)
+        expect(narration).to_have_attribute("data-stop-type", "row-layout")
+
+        # Play: the voice says the first segment; its clip is noted, and every start of the voice from now on is
+        # recorded:
+        page.get_by_test_id("play").click()
+        expect(stage).to_have_attribute("data-voice", "playing", timeout=FILM_TIMEOUT)
+        voice.evaluate("audio => { window.firstClip = audio.currentSrc; }")
+        self.record_voice_starts(page)
+
+        # the first clip plays to its end, and then the voice speaks another one:
+        page.wait_for_function(
+            """([audio, stage]) =>
+                stage.dataset.voice === "playing" && audio.currentSrc !== window.firstClip""",
+            arg=[voice.element_handle(), stage.element_handle()],
+            timeout=FILM_TIMEOUT,
+        )
+
+        # it began at or after the time of the second segment, still in the row-layout step, and the voice started
+        # only once, for it:
+        self.assertGreaterEqual(
+            int(scrub.input_value()),
+            math.floor(self.slider_at(self.ROW_LAYOUT_SECOND_SEGMENT)),
+        )
+        self.assertEqual("row-layout", narration.get_attribute("data-stop-type"))
+        self.assertEqual(1, len(page.evaluate("window.voiceStarts")))
+        self.assert_no_errors(self.opened)
+
+    def test_next_and_back_stop_once_per_step_with_sound_on(self) -> None:
+        """With sound on, Next and ← stop once per step, where its first segment begins, also in a step of two segments.
+
+        So a step's second segment is no stop.
+        """
+        page: Page = self.page
+        scrub = page.get_by_test_id("scrub")
+        narration = page.get_by_test_id("narration")
+
+        # with sound on, Next leads to the end through each step once, in their order:
+        page.get_by_test_id("sound").click()
+        self.expect_sound(page, on=True)
+        self.assertEqual([*self.STEP_TYPES, "end"], self.step_to_end(page))
+
+        # ← leads back to the start through each step once, in reverse order, each time where its first segment
+        # begins:
+        stops: list[tuple[str, int]] = []
+        for _ in range(len(self.STEP_TYPES) + 1):
+            page.keyboard.press("ArrowLeft")
+            stops.append(
+                (
+                    narration.get_attribute("data-stop-type") or "",
+                    int(scrub.input_value()),
+                )
+            )
+        # the page rounds the slider to a whole step, half steps up, as Math.round does:
+        expected: list[tuple[str, int]] = [
+            (step_type, math.floor(self.slider_at(at) + 0.5))
+            for step_type, at in zip(self.STEP_TYPES, self.FIRST_SEGMENTS)
+        ]
+        self.assertEqual([*reversed(expected), ("start", 0)], stops)
+        self.assert_no_errors(self.opened)
+
+    def test_words_said_count_segment_by_segment(self) -> None:
+        """With sound off, the words of a caption in two segments count as said segment by segment.
+
+        Just before the second segment begins, all words of the first are said; in the silence at the start of the
+        second segment's clip, still only those; where the caption is shown in full, all words of both.
+        """
+        page: Page = self.page
+        scrub = page.get_by_test_id("scrub")
+        narration = page.get_by_test_id("narration")
+        first_words: int = len(self.ROW_LAYOUT_SEGMENTS[0].split())
+        all_words: int = len(" ".join(self.ROW_LAYOUT_SEGMENTS).split())
+        second_segment: float = self.slider_at(self.ROW_LAYOUT_SECOND_SEGMENT)
+
+        # with sound off, Next stops where the row-layout step is shown in full: both segments, all words said:
+        self.press_next(self.ROW_LAYOUT_STEP)
+        expect(narration).to_have_attribute("data-stop-type", "row-layout")
+        expect(page.get_by_test_id("nar-text")).to_have_text(
+            " ".join(self.ROW_LAYOUT_SEGMENTS)
+        )
+        expect(narration).to_have_attribute("data-words-said", str(all_words))
+
+        # on the last step of the slider before the second segment begins, all words of the first one are said:
+        scrub.fill(str(math.ceil(second_segment) - 1))
+        expect(narration).to_have_attribute("data-words-said", str(first_words))
+
+        # on the first step after it begins, in the silence of 0.4 s at the start of its clip, still only those:
+        scrub.fill(str(math.ceil(second_segment)))
+        expect(narration).to_have_attribute("data-words-said", str(first_words))
+        self.assert_no_errors(self.opened)
+
+    def test_the_last_clip_plays_faster(self) -> None:
+        """The first clip plays at its normal speed, and the last one, longer than the time left in the film, faster.
+
+        It plays at most 1.15 times as fast.
+        """
+        page: Page = self.page
+        play = page.get_by_test_id("play")
+        stage = page.get_by_test_id("stage")
+        voice = page.get_by_test_id("voice")
+
+        # sound on, and Next stops where the first step begins; Play: its clip plays at its normal speed:
+        page.get_by_test_id("sound").click()
+        self.expect_sound(page, on=True)
+        self.press_next(1)
+        play.click()
+        expect(stage).to_have_attribute("data-voice", "playing", timeout=FILM_TIMEOUT)
+        self.assertEqual(1, voice.evaluate("audio => audio.playbackRate"))
+
+        # Next leads on to where the last step begins; Play: its clip plays faster:
+        self.press_next(len(self.STEP_TYPES) - 1)
+        expect(page.get_by_test_id("narration")).to_have_attribute(
+            "data-stop-type", "result"
+        )
+        play.click()
+        expect(stage).to_have_attribute("data-voice", "playing", timeout=FILM_TIMEOUT)
+        rate: float = voice.evaluate("audio => audio.playbackRate")
+        self.assertGreater(rate, 1)
+        self.assertLessEqual(rate, self.MAX_RATE)
+        self.assert_no_errors(self.opened)
+
+    def test_the_terminal_credits_the_synthetic_voice_at_the_end(self) -> None:
+        """The terminal shows the line that credits the synthetic voice only at the end of the film."""
+        page: Page = self.page
+        scrub = page.get_by_test_id("scrub")
+        credit = page.get_by_test_id("voice-credit")
+
+        # at the start, the line is left out:
+        expect(credit).to_be_hidden()
+
+        # at the end, the terminal shows it:
+        scrub.fill("1000")
+        expect(page.get_by_test_id("play")).to_have_attribute("data-state", "ended")
+        expect(credit).to_be_visible()
+        expect(credit).to_contain_text("synthetic voice")
+
+        # back at the start, it is left out again:
+        scrub.fill("0")
+        expect(credit).to_be_hidden()
+        self.assert_no_errors(self.opened)
 
 
 @unittest.skipUnless(PLAYWRIGHT_AVAILABLE, SKIP_REASON)
