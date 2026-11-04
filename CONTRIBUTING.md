@@ -292,16 +292,27 @@ needs (as root). A later `uv sync` without `--group browser-tests` removes the g
 A new page follows these rules, so that a reader who knows one page can use the next. The House DBMS
 page (`call-through-dbms.html`) follows all of them. Older pages differ in some points, which a new
 page should not copy; the main ones are listed under [Where older pages differ](#where-older-pages-differ).
-The tests that run on every page (`EveryPageTest` in `system/tests/repo/test_visualizations.py`) use
-only the elements in the table above: they check how Play, Next and the slider behave, autoplay,
-script errors and network requests. The other rules are checked by the author and the reviewers.
+The tests that run on every page (`EveryPageTest` in `system/tests/repo/test_visualizations.py`) use only
+the elements in the table above: they check how Play, Next and the slider behave, autoplay, script errors
+and network requests. On a page with a sound button, the tests in `EveryPageWithSoundTest` check how its
+sound button and voice behave (not the line at the end that names the voice). A page that speaks is listed
+in `PAGES_WITH_SOUND`, so that they fail if it loses its button, and, if its film has parts, in
+`PAGES_WITH_PARTS` as well, as they expect the part buttons (`chapter-1`, …) exactly on the pages listed
+there. At least one of its captions must begin with a clip of 4.5 s or more (`test_voice_follows_the_film`
+needs it), no two captions may have the same text, and its clock reads exactly `m:ss / m:ss`. As the tests
+wait at most 15 s for the film to reach a moment (`FILM_TIMEOUT`), its first caption begins a moment after
+the start of the film but within a few seconds of it, the second within about ten seconds of the first,
+and the clip of the first caption lasts more than 1.5 s (`test_a_jump_back_drops_the_clip`); the film
+lasts at most about four minutes. The other rules are checked by the author and the reviewers.
 
 The words used here: a page plays a *film* from its start to its end. A longer film is cut into
 *parts*, e.g. the four orders (queries) of the House DBMS page; the test ids of the part buttons call
 them chapters. A *step* is a scene of the film with its own name in the header. The narration says one
 *caption*, a sentence or two, at a time. A *stop* is the moment when a caption has been said in full,
 just before it fades out: Next jumps from stop to stop, so that each click shows the picture with a
-whole caption under it.
+whole caption under it. A page may also *speak* its narration: each caption then has a *clip*, a
+recording of a synthetic voice. A caption may be said in *segments*, each from its own time and with a
+clip of its own (on the row/column page); these are not the segments of the slider.
 
 - **One file, offline:** as described at the start of *Visualizations*. Fonts are embedded in the page as
   `data:` URLs, with their license in a comment, or are the fonts of the reader's system; a page never
@@ -326,14 +337,16 @@ whole caption under it.
   scene where it fits the picture, e.g. as the maker's name on a clock or as a stamp on a parcel;
   never in green, which marks results.
 - **Controls:** from left to right, the part buttons (only if the film has parts), Play/Pause
-  (`play`), Next (`next`), the slider (`scrub`), the clock (`clock`, e.g. `0:42 / 2:38`) and full
-  screen (`fullscreen`). They form one row, which may wrap onto a second one on a narrow window. Play,
-  Next and full screen are round buttons with an icon. For screen readers, each has an `aria-label`
-  that names it; its `title`, shown when the pointer rests on it, names its key, e.g. "Next step (→)".
-  All controls are disabled in the HTML until the script has set them up, so that no click is lost
-  while the page loads. There is no Back and no Restart button; at the end, Play starts again from the
-  beginning.
-- **Next:** pauses and jumps to the next stop; after the last stop, to the end.
+  (`play`), Next (`next`), the slider (`scrub`), the clock (`clock`, e.g. `0:42 / 2:38`), the sound
+  button (`sound`; only on a page that speaks), and full screen (`fullscreen`). They form one row, which
+  may wrap onto a second one on a narrow window. Play, Next, sound and full screen are round buttons with
+  an icon. For screen readers, each has an `aria-label` that names it; its `title`, shown when the
+  pointer rests on it, names its key, e.g. "Next step (→)". All controls are disabled in the HTML until
+  the script has set them up, so that no click is lost while the page loads. There is no Back and no
+  Restart button; at the end, Play starts again from the beginning.
+- **Next:** pauses and jumps to the next stop; after the last stop, to the end. While the voice of a
+  page that speaks may speak (see *Voice*), Next and ← stop where a caption begins instead, and Play
+  speaks it.
 - **Slider:** it follows the playback, and moving it pauses the page. If the film has parts, the
   slider is cut into one segment per part (`segment-1`, …), each as long as its part, with gaps
   between them, like the chapters of a video; what has been played is green. When the pointer is over
@@ -344,16 +357,46 @@ whole caption under it.
   Tab). When a button other than Play has the focus, Space does not click it, not even when held down;
   on Play itself, the browser's own click plays and pauses. The → key does the same as Next, and ←
   pauses and jumps back to the stop before, or to the start; on the slider, the arrow keys move the
-  slider instead. F switches full screen on and off, also on the slider. Apart from that, keys held
-  down or pressed with Alt, Ctrl or Cmd are left to the browser (e.g. Alt+← for the previous page,
-  Ctrl+F to search).
+  slider instead. F switches full screen on and off, also on the slider; on a page that speaks, M
+  switches the sound on and off. Apart from that, keys held down or pressed with Alt, Ctrl or Cmd are
+  left to the browser (e.g. Alt+← for the previous page, Ctrl+F to search).
 - **Full screen:** the button switches the whole page to full screen and back. Browsers that cannot
   show a page in full screen (e.g. Safari on the iPhone) do not show the button.
 - **Narration:** shown word by word, as if spoken: the words said are white, the current one is
   underlined, the words still to come are dim, and green marks a word that names a result. Each
   caption fades in and out. The narration has `aria-live="polite"`, so that a screen reader reads it
   out; its words are put in only when the caption changes, so that the screen reader reads each
-  caption once.
+  caption once. On a page that speaks, this holds while the sound is off or held back by the browser
+  (see *Voice*).
+- **Voice:** a page may speak its narration with a synthetic voice
+  ([decision 034](docs/changes/034-narration-voice/DECISION.md); e.g. the clock-scan page,
+  `clock-scan.html`). Each caption has a clip (a caption said in segments, as on the row/column page, has
+  one per segment), embedded as an MP3 `data:` URL (mono, at a constant 48 or 64 kbit/s; at 48 kbit/s the
+  voice adds about 0.5 MB to the page per minute of speech, 0.3 to 0.6 MB on the three pages that speak),
+  which the page's Content-Security-Policy allows with `media-src data:` (see the note at the end of
+  decision 030). Its words light up at the moments the voice says them, so that the subtitles keep the
+  voice's pace also with sound off. Sound is off at load, as browsers allow sound only after a click or
+  key press: the narration shows as subtitles, with the hint "Switch on audio (M)" (`sound-hint`). The
+  sound button (a speaker, crossed out while the sound is off; title "Sound: synthetic voice (M)") and M
+  switch the sound on and off. The voice *may speak* while the sound is on and the browser does not hold
+  it back; then the narration and the hint are hidden, and the narration's `aria-live` is `off`, so that a
+  screen reader does not speak at the same time. A browser that holds the sound back gets the hint
+  "Click or press a key for sound", and the reader's next click or key press lets the voice speak; if the
+  browser refuses it even after the sound button or M, the sound goes back off. The page's own clock
+  drives the film, and the voice follows it. A clip begins with 0.4 s of silence, so that a browser that
+  starts it late does not swallow the first syllable, and must end by its caption's stop (a segment's clip
+  by the start of its caption's next segment, if there is one; no clip after the end of the film); a
+  longer clip plays faster, at most 1.15 times (if a clip would need more, the page's script stops with an
+  error at start-up, which the tests report). Pause holds the clip; Next, ←, the slider and the part
+  buttons drop it. A pause from outside the page (e.g. media keys) pauses the film, and so does hiding the
+  tab while sound is on; a play from outside is undone while the film is paused, and lets a held-back
+  voice speak while the film plays. At the end, the page shows in writing that the voice is synthetic and
+  names its model and voice (on the House DBMS page at the end of the `credit` line, on the clock-scan
+  page in the card above it); a comment above the clips names the model, its license (MIT) and how the
+  clips were made, and the README says that the page speaks, in its row of the visualizations table and in
+  the section *License*. The voice's code is the same on the three pages that speak; a new page takes it
+  over. The clips are made outside the repository, as decision 034 describes: every new take is checked
+  with a speech recogniser for misspoken or cut words and listened to before it goes into the page.
 - **Fast passages:** while the film runs faster than normal, a badge `▶▶ ×4` (`fast-forward`) says
   so. On the House DBMS page, these are the ways through the house that the film has already shown
   once.
@@ -384,10 +427,10 @@ whole caption under it.
   textures before the first picture, a few per frame, as the House DBMS page does, and marks the end of
   this with `data-ready` on the picture.
 - **Autoplay:** unless the browser asks for reduced motion or a URL parameter (below) says otherwise,
-  a page starts playing on its own shortly after it has loaded; any control except full screen cancels
-  that start. The tests ask for reduced motion (except the test of autoplay itself), so that they start
-  from a paused page; reduced motion changes nothing else, so that the tests see the frames a reader
-  sees (on a software GPU, after the start-up).
+  a page starts playing on its own shortly after it has loaded; any control except full screen and the
+  sound button (and M) cancels that start. The tests ask for reduced motion (except the test of
+  autoplay itself), so that they start from a paused page; reduced motion changes nothing else, so that
+  the tests see the frames a reader sees (on a software GPU, after the start-up).
 - **URL parameters:** `t=<seconds>` starts at that time, `paused` keeps the page from starting on its
   own, and, if the film has parts, `q=<n>` starts at part n; e.g. `?q=3&paused`. The page reads `t` as
   a number and keeps it within the length of the film, accepts `q` only if it names one of the parts
@@ -396,7 +439,12 @@ whole caption under it.
   has a `data-testid`; those in the table above are needed on every page. The script also writes state
   for tests into `data-*` attributes, e.g. `data-scene` (the number of the step, `1` … `13` on the
   House DBMS page) and `data-ready` (see Start-up) on the picture (`stage`), and `data-active` (`true` or
-  `false`) on the fast-forward badge.
+  `false`) on the fast-forward badge. A page that speaks also has the audio element (`voice`), the two
+  icons of the sound button (`sound-icon-on`, `sound-icon-off`) and the text of the narration
+  (`nar-text`), with the state `data-voice="playing"` on the picture while the voice plays,
+  `aria-pressed` (`true` or `false`) and `data-blocked` (empty, set only while the browser holds the
+  sound back) on the sound button, and `data-voiced` (empty, set only while the voice may speak) and
+  `data-words-said` (how many words of the caption have been said) on the narration.
 
 #### Where older pages differ
 
