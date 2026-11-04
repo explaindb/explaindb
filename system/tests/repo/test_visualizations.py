@@ -57,6 +57,7 @@ if TYPE_CHECKING:
         Browser,
         ConsoleMessage,
         Error,
+        FloatRect,
         Page,
         Playwright,
         Route,
@@ -76,10 +77,14 @@ VALIDATION_PAGE: Path = PAGES_DIR / "validation-interval-to-point.html"
 CLOCK_SCAN_PAGE: Path = PAGES_DIR / "clock-scan.html"
 # a page whose voice says some captions in two segments, each with a clip of its own (decision 035):
 ROW_OR_COLUMN_PAGE: Path = PAGES_DIR / "row-or-column.html"
+# the House DBMS page, which speaks its narration with the same voice (decision 036):
+HOUSE_DBMS_PAGE: Path = PAGES_DIR / "call-through-dbms.html"
 # the pages that speak their narration; each must keep its sound button:
-PAGES_WITH_SOUND: frozenset[Path] = frozenset({CLOCK_SCAN_PAGE, ROW_OR_COLUMN_PAGE})
+PAGES_WITH_SOUND: frozenset[Path] = frozenset(
+    {CLOCK_SCAN_PAGE, ROW_OR_COLUMN_PAGE, HOUSE_DBMS_PAGE}
+)
 # the pages with sound whose film has parts, with a button (chapter-1, ...) that jumps to the start of each:
-PAGES_WITH_PARTS: frozenset[Path] = frozenset({CLOCK_SCAN_PAGE})
+PAGES_WITH_PARTS: frozenset[Path] = frozenset({CLOCK_SCAN_PAGE, HOUSE_DBMS_PAGE})
 
 # Next is clicked at most this often on the way from the start of a page to its end:
 MAX_NEXT_CLICKS: int = 300
@@ -1571,6 +1576,124 @@ class RowOrColumnPageTest(_SoundPageTestCase):
         scrub.fill("0")
         expect(credit).to_be_hidden()
         self.assert_no_errors(self.opened)
+
+
+@unittest.skipUnless(PLAYWRIGHT_AVAILABLE, SKIP_REASON)
+class HouseDbmsPageTest(_SoundPageTestCase):
+    """Checks what is particular to the voice of the House DBMS page (decision 036)."""
+
+    # the caption that stays on until 0.3 s after the optimizer has handed over the plan, so that the voice has the
+    # time to say it:
+    PLANNED_ONCE: str = "The optimizer plans it once: id = ?"
+
+    def test_the_stop_of_the_optimizers_caption_stays_in_its_scene(self) -> None:
+        """With sound off, Next stops on "The optimizer plans it once: id = ?" in scene 9, with all its 8 words said.
+
+        The caption ends 0.3 s after scene 10 begins (at the hand-over of the plan); its stop lies CAPTION_FADE
+        (0.35 s) before its end, so still in scene 9.
+        """
+        opened: OpenedPage = self.open_page(HOUSE_DBMS_PAGE)
+        page: Page = opened.page
+        text = page.get_by_test_id("nar-text")
+
+        # with sound off, Next stops where each caption is shown in full, until the optimizer's caption shows:
+        clicks: int = 0
+        while text.text_content() != self.PLANNED_ONCE:
+            self.assertLess(clicks, MAX_NEXT_CLICKS, "Next did not reach the caption")
+            page.get_by_test_id("next").click()
+            clicks += 1
+
+        # the stop shows scene 9 (PREPARE), and all 8 words of the caption are said by then:
+        expect(page.get_by_test_id("stage")).to_have_attribute("data-scene", "9")
+        expect(page.get_by_test_id("narration")).to_have_attribute(
+            "data-words-said", "8"
+        )
+        self.assert_no_errors(opened)
+
+    def test_the_sound_hint_gives_way_to_the_end_card(self) -> None:
+        """With sound off, the hint "Switch on audio (M)" fades out while the end card fades in, which it would cover on
+        a narrow window, and shows again before it."""
+        opened: OpenedPage = self.open_page(HOUSE_DBMS_PAGE)
+        page: Page = opened.page
+        hint = page.get_by_test_id("sound-hint")
+        scrub = page.get_by_test_id("scrub")
+
+        # at the start, the hint shows in full:
+        expect(hint).to_have_text("Switch on audio (M)")
+        expect(hint).to_have_css("opacity", "1")
+
+        # at the end, where the end card shows, the hint has faded out:
+        scrub.fill("1000")
+        expect(page.get_by_test_id("legend")).to_have_css("opacity", "1")
+        expect(hint).to_have_css("opacity", "0")
+
+        # back at the start, it shows again:
+        scrub.fill("0")
+        expect(hint).to_have_css("opacity", "1")
+        self.assert_no_errors(opened)
+
+    def test_the_end_card_names_the_voice(self) -> None:
+        """The end card says that the voice is synthetic and names its model and voice."""
+        opened: OpenedPage = self.open_page(HOUSE_DBMS_PAGE)
+        page: Page = opened.page
+
+        # at the end, the end card shows, with the credit of the voice:
+        page.get_by_test_id("scrub").fill("1000")
+        expect(page.get_by_test_id("legend")).to_contain_text(
+            "The voice is synthetic: Ming-3.0 TTS, voice UK_George."
+        )
+        self.assert_no_errors(opened)
+
+    def test_the_sound_hint_leaves_the_sql_card_free_on_a_phone(self) -> None:
+        """On a phone's narrow screen (360 × 800 px), the hint does not cover the SQL card, not even the widest one
+        (order 3's): neither "Switch on audio (M)" with sound off nor the longer "Click or press a key for sound" while
+        the browser holds the voice back.
+
+        On a screen up to 720 px wide, the card moves below the place of the ×4 badge, and the hint to its right,
+        where a hint too long for one line wraps.
+        """
+        opened: OpenedPage = self.open_page(HOUSE_DBMS_PAGE)
+        page: Page = opened.page
+        play = page.get_by_test_id("play")
+        query = page.get_by_test_id("query")
+        hint = page.get_by_test_id("sound-hint")
+
+        def expect_hint_beside_order_3s_card() -> None:
+            """Expects order 3's SQL card to show, and the hint's box not to overlap the card's box."""
+            expect(query).to_have_attribute("data-order", "3")
+            expect(query).to_have_css("opacity", "1")
+            hint_box: FloatRect | None = hint.bounding_box()
+            query_box: FloatRect | None = query.bounding_box()
+            if hint_box is None or query_box is None:
+                self.fail("the hint or the SQL card has no box")
+            apart: bool = (
+                hint_box["x"] >= query_box["x"] + query_box["width"]
+                or query_box["x"] >= hint_box["x"] + hint_box["width"]
+                or hint_box["y"] >= query_box["y"] + query_box["height"]
+                or query_box["y"] >= hint_box["y"] + hint_box["height"]
+            )
+            self.assertTrue(
+                apart, f"the hint {hint_box} covers the SQL card {query_box}"
+            )
+
+        # a small phone held upright:
+        page.set_viewport_size({"width": 360, "height": 800})
+
+        # the button of order 3 jumps to its start and plays; Play pauses there, with order 3's SQL shown and, with
+        # sound off, the hint "Switch on audio (M)" beside it:
+        page.get_by_test_id("chapter-3").click()
+        play.click()
+        expect(play).to_have_attribute("data-state", "paused")
+        self.expect_sound(page, on=False)
+        expect_hint_beside_order_3s_card()
+
+        # sound on, and Play while the browser refuses sound: the voice is held back, and the hint "Click or press a
+        # key for sound" shows, also beside the card (the film plays on in order 3, which lasts about 28 s):
+        page.get_by_test_id("sound").click()
+        self.expect_sound(page, on=True)
+        self.play_until_held_back(page)
+        expect_hint_beside_order_3s_card()
+        self.assert_no_errors(opened)
 
 
 @unittest.skipUnless(PLAYWRIGHT_AVAILABLE, SKIP_REASON)

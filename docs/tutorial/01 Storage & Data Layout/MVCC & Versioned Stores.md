@@ -26,6 +26,9 @@ isolation and detects the anomalies a weaker scheme would allow.
   — an animation of the serializable check (open it in a browser): a transaction that passes it shrinks from its
   interval [begin, commit] to a single point in time, a read-only transaction to its begin, and the points form the
   equivalent serial order.
+- **Visualization:** [`call-through-dbms.html`](../../../visualizations/call-through-dbms.html) — the DBMS as a
+  factory building whose floors are its layers (open it in a browser): the MVCC store and its versioned base share
+  one floor, as they are one object, not two layers.
 
 ## The idea in one picture
 
