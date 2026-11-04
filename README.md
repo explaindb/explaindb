@@ -81,6 +81,7 @@ Standalone animations in [`visualizations/`](visualizations); open the HTML file
 | [validation-interval-to-point](https://htmlpreview.github.io/?https://github.com/explaindb/explaindb/blob/main/visualizations/validation-interval-to-point.html) | MVCC validation under the isolation level serializable: a transaction that passes validation shrinks from its interval [begin, commit] to a single point in time, a read-only transaction to its begin; the points form an equivalent serial schedule |
 | [elasticity-resources-follow-demand](https://htmlpreview.github.io/?https://github.com/explaindb/explaindb/blob/main/visualizations/elasticity-resources-follow-demand.html) | Elasticity: one day of a teaching platform with the tiers App (scales out) and DBMS (scales up), run on premise, with hosting, IaaS, PaaS (also with scheduled scaling by a timetable) or SaaS; shows bottlenecks, scale-up and scale-out, and whether the capacity follows the demand |
 | [row-or-column](https://htmlpreview.github.io/?https://github.com/explaindb/explaindb/blob/main/visualizations/row-or-column.html) | Row vs. column layout in main memory: eight books stored row by row and column by column; memory is read linearly, one 64-byte cache line at a time, so `SELECT MAX(price)` loads 4 cache lines of the row layout but only 1 of the column layout (in 3D, with three.js) |
+| [clock-scan](https://htmlpreview.github.io/?https://github.com/explaindb/explaindb/blob/main/visualizations/clock-scan.html) | Clock scan, as in QPipe and Crescando: one scan runs round a key-value store laid out like a clock and never stops; three queries on different attributes get on at any hour, ride exactly once round and get off at their hour again, so the one scan serves them all (19 values read instead of 36 with a scan per query; in 3D, with three.js; a synthetic voice speaks the narration once the sound is switched on) |
 
 ## What's Inside the `system/` Package
 
@@ -183,9 +184,10 @@ dependencies, notebooks and the API documentation are maintained.
 ExplainDB is licensed under the [GNU Affero General Public License v3.0](LICENSE) (AGPL-3.0).
 Copyright (C) 2026 Prof. Dr. Jens Dittrich, Saarland University.
 
-The page `visualizations/row-or-column.html` also embeds third-party code and fonts under their own licenses:
-three.js (MIT License) and the fonts Archivo and JetBrains Mono (SIL Open Font License 1.1). The page itself
-gives their copyright and license notices.
+The pages `visualizations/row-or-column.html` and `visualizations/clock-scan.html` also embed third-party code and
+fonts under their own licenses: three.js (MIT License) and the fonts Archivo and JetBrains Mono (SIL Open Font
+License 1.1). Each page gives their copyright and license notices. The clock-scan page also embeds a synthetic voice,
+spoken with the model Ming-3.0-tts (MIT License, voice UK_George); the page names it.
 
 ## Contributors
 
