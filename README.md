@@ -14,7 +14,24 @@ DBMS implemented in Python (the `system/` package). The lecture that uses this c
 YouTube: [Database Systems 2024/25](https://www.youtube.com/playlist?list=PLC4UZxBVGKteZpmLGukzu2BpNDifaTe9G)
 (Prof. Dr. Jens Dittrich, Big Data Analytics Group, Saarland University).
 
-## Try It in the Browser
+## Visualizations
+
+Standalone animations in [`visualizations/`](visualizations).
+
+| Visualization | Topic | Notebook |
+|---|---|---|
+| [validation-interval-to-point](https://htmlpreview.github.io/?https://github.com/explaindb/explaindb/blob/main/visualizations/validation-interval-to-point.html) | MVCC validation under the isolation level serializable: a transaction that passes validation shrinks from its interval [begin, commit] to a single point in time, a read-only transaction to its begin; the points form an equivalent serial schedule | [MVCC-Playground](notebooks/MVCC-Playground.ipynb) [![Open MVCC-Playground on Binder](https://mybinder.org/badge_logo.svg)](https://mybinder.org/v2/gh/explaindb/explaindb/main?urlpath=lab/tree/notebooks/MVCC-Playground.ipynb) |
+| [elasticity-resources-follow-demand](https://htmlpreview.github.io/?https://github.com/explaindb/explaindb/blob/main/visualizations/elasticity-resources-follow-demand.html) | Elasticity: one day of a teaching platform with the tiers App (scales out) and DBMS (scales up), run on premise, with hosting, IaaS, PaaS (also with scheduled scaling by a timetable) or SaaS; shows bottlenecks, scale-up and scale-out, and whether the capacity follows the demand | |
+| [row-or-column](https://htmlpreview.github.io/?https://github.com/explaindb/explaindb/blob/main/visualizations/row-or-column.html) | Row vs. column layout in main memory: eight books stored row by row and column by column; memory is read linearly, one 64-byte cache line at a time, so `SELECT MAX(price)` loads 4 cache lines of the row layout but only 1 of the column layout (in 3D, with three.js; a synthetic voice speaks the narration once the sound is switched on) | [Data-Layout](notebooks/Data-Layout.ipynb) [![Open Data-Layout on Binder](https://mybinder.org/badge_logo.svg)](https://mybinder.org/v2/gh/explaindb/explaindb/main?urlpath=lab/tree/notebooks/Data-Layout.ipynb) |
+| [call-through-dbms](https://htmlpreview.github.io/?https://github.com/explaindb/explaindb/blob/main/visualizations/call-through-dbms.html) | The architecture of a DBMS as a factory building in cross-section: its floors are the layers, box robots are the components; orders go down the stairs on paper, results ride the lift up. `SELECT * FROM R WHERE id = 2` brings up one box; `SELECT a, COUNT(*) FROM R GROUP BY a` reads every row and folds the copies into a bar chart, the only thing that rides up to the application; a prepared query is planned once (`PREPARE q1 … WHERE id = ?`: the DBMS files the plan in a key rack and hands back its name) and then run with a key (`EXECUTE q1 (id = 7)`): a copy of the plan goes on a VIP ticket, and a VIP lift takes it straight down to the store (in 3D, with three.js; a synthetic voice speaks the narration once the sound is switched on) | |
+| [clock-scan](https://htmlpreview.github.io/?https://github.com/explaindb/explaindb/blob/main/visualizations/clock-scan.html) | Clock scan, as in QPipe and Crescando: one scan runs round a key-value store laid out like a clock and never stops; three queries on different attributes get on at any hour, ride exactly once round and get off at their hour again, so the one scan serves them all (19 values read instead of 36 with a scan per query; in 3D, with three.js; a synthetic voice speaks the narration once the sound is switched on) | [Shared-Scan](notebooks/Shared-Scan.ipynb) [![Open Shared-Scan on Binder](https://mybinder.org/badge_logo.svg)](https://mybinder.org/v2/gh/explaindb/explaindb/main?urlpath=lab/tree/notebooks/Shared-Scan.ipynb) |
+
+## Notebooks
+
+The notebooks are grouped by the chapters of the [tutorial](docs/tutorial/README.md), which explains each
+topic and points to the code that implements it. The launch badge opens a notebook directly on Binder.
+
+### Try It in the Browser
 
 [![Binder](https://mybinder.org/badge_logo.svg)](https://mybinder.org/v2/gh/explaindb/explaindb/main?urlpath=lab/tree/notebooks)
 
@@ -24,11 +41,6 @@ or after a longer pause, while Binder builds the environment. Sessions are tempo
 period of inactivity, or after a few hours at most, and all your changes are lost. Download any notebook
 you want to keep (**File → Download**). mybinder.org is a free public service: do not upload private or
 confidential data, and do not enter passwords in a Binder session.
-
-## Notebooks
-
-The notebooks are grouped by the chapters of the [tutorial](docs/tutorial/README.md), which explains each
-topic and points to the code that implements it. The launch badge opens a notebook directly on Binder.
 
 ### Storage & Data Layout
 
@@ -71,18 +83,6 @@ topic and points to the code that implements it. The launch badge opens a notebo
 | Notebook | Topic | Launch |
 |---|---|---|
 | [Z-Order-Curve](notebooks/Z-Order-Curve.ipynb) | Z-codes (Morton codes): mapping 2-D data to 1-D while preserving locality | [![Open Z-Order-Curve on Binder](https://mybinder.org/badge_logo.svg)](https://mybinder.org/v2/gh/explaindb/explaindb/main?urlpath=lab/tree/notebooks/Z-Order-Curve.ipynb) |
-
-## Visualizations
-
-Standalone animations in [`visualizations/`](visualizations); open the HTML file in a browser.
-
-| Visualization | Topic |
-|---|---|
-| [validation-interval-to-point](https://htmlpreview.github.io/?https://github.com/explaindb/explaindb/blob/main/visualizations/validation-interval-to-point.html) | MVCC validation under the isolation level serializable: a transaction that passes validation shrinks from its interval [begin, commit] to a single point in time, a read-only transaction to its begin; the points form an equivalent serial schedule |
-| [elasticity-resources-follow-demand](https://htmlpreview.github.io/?https://github.com/explaindb/explaindb/blob/main/visualizations/elasticity-resources-follow-demand.html) | Elasticity: one day of a teaching platform with the tiers App (scales out) and DBMS (scales up), run on premise, with hosting, IaaS, PaaS (also with scheduled scaling by a timetable) or SaaS; shows bottlenecks, scale-up and scale-out, and whether the capacity follows the demand |
-| [row-or-column](https://htmlpreview.github.io/?https://github.com/explaindb/explaindb/blob/main/visualizations/row-or-column.html) | Row vs. column layout in main memory: eight books stored row by row and column by column; memory is read linearly, one 64-byte cache line at a time, so `SELECT MAX(price)` loads 4 cache lines of the row layout but only 1 of the column layout (in 3D, with three.js; a synthetic voice speaks the narration once the sound is switched on) |
-| [call-through-dbms](https://htmlpreview.github.io/?https://github.com/explaindb/explaindb/blob/main/visualizations/call-through-dbms.html) | The architecture of a DBMS as a factory building in cross-section: its floors are the layers, box robots are the components; orders go down the stairs on paper, results ride the lift up. `SELECT * FROM R WHERE id = 2` brings up one box; `SELECT a, COUNT(*) FROM R GROUP BY a` reads every row and folds the copies into a bar chart, the only thing that rides up to the application; a prepared query is planned once (`PREPARE q1 … WHERE id = ?`: the DBMS files the plan in a key rack and hands back its name) and then run with a key (`EXECUTE q1 (id = 7)`): a copy of the plan goes on a VIP ticket, and a VIP lift takes it straight down to the store (in 3D, with three.js; a synthetic voice speaks the narration once the sound is switched on) |
-| [clock-scan](https://htmlpreview.github.io/?https://github.com/explaindb/explaindb/blob/main/visualizations/clock-scan.html) | Clock scan, as in QPipe and Crescando: one scan runs round a key-value store laid out like a clock and never stops; three queries on different attributes get on at any hour, ride exactly once round and get off at their hour again, so the one scan serves them all (19 values read instead of 36 with a scan per query; in 3D, with three.js; a synthetic voice speaks the narration once the sound is switched on) |
 
 ## What's Inside the `system/` Package
 
