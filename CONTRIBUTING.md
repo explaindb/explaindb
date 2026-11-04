@@ -260,8 +260,8 @@ The CI job `visualization_test` runs them in every merge request that changes a 
 `.gitlab-ci.yml`, `pyproject.toml` or `uv.lock`.
 
 The tests find elements only by their `data-testid` and read the state of a page mainly from `data-*`
-attributes that its script sets. Some tests run on every page in the folder, so a new page needs
-these elements as well:
+attributes that its script sets. Some tests run on every page in the folder and its subfolders, so a
+new page needs these elements as well:
 
 | `data-testid` | Element | State the script sets |
 | --- | --- | --- |
@@ -269,14 +269,6 @@ these elements as well:
 | `next` | the Next button, which jumps to the next stop | |
 | `scrub` | the slider, from 0 to 1000 | its value |
 | `narration` | the text that explains the current step | `data-stop-type`: `start` at the start, `end` at the end |
-
-Unless the browser asks for reduced motion, a page starts playing on its own shortly after it has
-loaded; the tests ask for reduced motion (except the test of exactly that), so that they start from
-a paused page.
-
-Every page also offers full screen, and a new page needs it as well: a button with the `data-testid`
-`fullscreen` among its controls and the key F both switch the whole page to full screen and back.
-Browsers that cannot show a page in full screen (e.g. Safari on the iPhone) do not show the button.
 
 The README links to each page with an absolute link to htmlpreview.github.io, which shows the page
 instead of its source code. GitLab opens such a link in a new tab, as it adds `target="_blank"` to
@@ -294,6 +286,147 @@ uv run --group browser-tests python -m unittest -v system.tests.repo.test_visual
 
 On Linux, add `--with-deps` to the install command: it installs the system libraries Chromium
 needs (as root). A later `uv sync` without `--group browser-tests` removes the group again.
+
+### What a new page has
+
+A new page follows these rules, so that a reader who knows one page can use the next. The House DBMS
+page (`call-through-dbms.html`) follows all of them. Older pages differ in some points, which a new
+page should not copy; the main ones are listed under [Where older pages differ](#where-older-pages-differ).
+The tests that run on every page (`EveryPageTest` in `system/tests/repo/test_visualizations.py`) use
+only the elements in the table above: they check how Play, Next and the slider behave, autoplay,
+script errors and network requests. The other rules are checked by the author and the reviewers.
+
+The words used here: a page plays a *film* from its start to its end. A longer film is cut into
+*parts*, e.g. the four orders (queries) of the House DBMS page; the test ids of the part buttons call
+them chapters. A *step* is a scene of the film with its own name in the header. The narration says one
+*caption*, a sentence or two, at a time. A *stop* is the moment when a caption has been said in full,
+just before it fades out: Next jumps from stop to stop, so that each click shows the picture with a
+whole caption under it.
+
+- **One file, offline:** as described at the start of *Visualizations*. Fonts are embedded in the page as
+  `data:` URLs, with their license in a comment, or are the fonts of the reader's system; a page never
+  loads a font from the network (e.g. from Google Fonts).
+- **Links:** no link to a lecture video; a link to a notebook is fine.
+- **No HTML from strings:** the script never turns text into markup, so no `innerHTML`, `outerHTML`,
+  `insertAdjacentHTML`, `document.write` or the like. It sets text with `textContent` and builds
+  elements with `createElement`. That way no text, e.g. from a URL parameter, can put code into the
+  page.
+- **Playback time:** what the page shows depends only on the playback time. Each frame is drawn from
+  that time alone, never from the frame before, so that the slider, Next and `t=` can jump to any
+  moment. A paused page draws nothing until something changes (e.g. the size of the window), and the
+  script writes into the page only values that have changed, so that it does not redraw everything
+  60 times a second for nothing.
+- **Layout:** the picture fills the window. The header names the page and the current step (e.g.
+  `01/07 · The query` on the row/column page, `row-or-column.html`). Along the bottom edge run the
+  narration and, below it, the controls.
+- **The name ExplainDB:** the header begins with `ExplainDB ·`, in the header's own style (e.g.
+  `ExplainDB · The House DBMS · lecture 03, slide 10 · 01/13 · Slide 10 becomes a house`), and the
+  card at the end closes with the line `ExplainDB · github.com/explaindb/explaindb` (`credit`), whose
+  address is a link that opens in a new tab (`credit-link`). A page may also show the name in its
+  scene where it fits the picture, e.g. as the maker's name on a clock or as a stamp on a parcel;
+  never in green, which marks results.
+- **Controls:** from left to right, the part buttons (only if the film has parts), Play/Pause
+  (`play`), Next (`next`), the slider (`scrub`), the clock (`clock`, e.g. `0:42 / 2:38`) and full
+  screen (`fullscreen`). They form one row, which may wrap onto a second one on a narrow window. Play,
+  Next and full screen are round buttons with an icon. For screen readers, each has an `aria-label`
+  that names it; its `title`, shown when the pointer rests on it, names its key, e.g. "Next step (→)".
+  All controls are disabled in the HTML until the script has set them up, so that no click is lost
+  while the page loads. There is no Back and no Restart button; at the end, Play starts again from the
+  beginning.
+- **Next:** pauses and jumps to the next stop; after the last stop, to the end.
+- **Slider:** it follows the playback, and moving it pauses the page. If the film has parts, the
+  slider is cut into one segment per part (`segment-1`, …), each as long as its part, with gaps
+  between them, like the chapters of a video; what has been played is green. When the pointer is over
+  such a slider, a tip (`scrub-tip`) above it shows the name of the part and the time at that point. A
+  button per part (`chapter-1`, …) jumps to the start of that part and plays from there. The button
+  of the part on screen is outlined in green; for screen readers, it is marked with `aria-current`.
+- **Keys:** Space plays and pauses wherever the focus is (the control last clicked or reached with
+  Tab). When a button other than Play has the focus, Space does not click it, not even when held down;
+  on Play itself, the browser's own click plays and pauses. The → key does the same as Next, and ←
+  pauses and jumps back to the stop before, or to the start; on the slider, the arrow keys move the
+  slider instead. F switches full screen on and off, also on the slider. Apart from that, keys held
+  down or pressed with Alt, Ctrl or Cmd are left to the browser (e.g. Alt+← for the previous page,
+  Ctrl+F to search).
+- **Full screen:** the button switches the whole page to full screen and back. Browsers that cannot
+  show a page in full screen (e.g. Safari on the iPhone) do not show the button.
+- **Narration:** shown word by word, as if spoken: the words said are white, the current one is
+  underlined, the words still to come are dim, and green marks a word that names a result. Each
+  caption fades in and out. The narration has `aria-live="polite"`, so that a screen reader reads it
+  out; its words are put in only when the caption changes, so that the screen reader reads each
+  caption once.
+- **Fast passages:** while the film runs faster than normal, a badge `▶▶ ×4` (`fast-forward`) says
+  so. On the House DBMS page, these are the ways through the house that the film has already shown
+  once.
+- **At the end:** a card sums up what the picture showed and stays until the end (the legend on the
+  House DBMS page).
+- **Nothing passes through anything:** a robot, a carried thing or anything else that moves never
+  goes through a wall, a floor, a piece of furniture or another thing, not even through a thing that
+  stands still at that moment (e.g. a parked cart). Touching is fine, overlapping is not: a box lies
+  on a table, a robot holds a paper. Check this yourself before you open the merge request, with a
+  small script. The page's code runs inside one function, so a script typed into the browser's console
+  cannot reach it: pause at a breakpoint inside the page's script (e.g. in the function that draws a
+  frame), so that the console runs there, or add a line that hands the scene and the film to
+  `window` for the check and remove it again. Since each frame depends only on the playback time, the
+  script can place everything for a time t without drawing it (on the House DBMS page:
+  `film.motion.apply(t)`, then `scene.updateMatrixWorld()`) and go through the film at short
+  intervals. At each time, test the box of each shown mesh that moves (not of the group it belongs to;
+  skip meshes that are hidden, also through a hidden parent) against the boxes of the shown meshes that
+  do not move and of the other shown meshes that move; count only an overlap deeper than a small
+  tolerance, so that touching does not count. Make the interval so short that between two checks
+  nothing moves further, relative to the thing it could pass through, than the two are thick
+  together (each measured in the direction of the movement), less twice the tolerance; also in fast
+  passages. Read every hit, list the contacts that are meant, run the check
+  again whenever the motion changes, and say in the merge request how you checked and with which
+  tolerance.
+- **Start-up:** the controls answer clicks within a moment of loading, also on a GPU that the browser
+  emulates in software, as in the tests, which give each action 5 s. Such a GPU finishes a shader
+  program only when it first draws with it, so a 3D page with many materials prepares its programs and
+  textures before the first picture, a few per frame, as the House DBMS page does, and marks the end of
+  this with `data-ready` on the picture.
+- **Autoplay:** unless the browser asks for reduced motion or a URL parameter (below) says otherwise,
+  a page starts playing on its own shortly after it has loaded; any control except full screen cancels
+  that start. The tests ask for reduced motion (except the test of autoplay itself), so that they start
+  from a paused page; reduced motion changes nothing else, so that the tests see the frames a reader
+  sees (on a software GPU, after the start-up).
+- **URL parameters:** `t=<seconds>` starts at that time, `paused` keeps the page from starting on its
+  own, and, if the film has parts, `q=<n>` starts at part n; e.g. `?q=3&paused`. The page reads `t` as
+  a number and keeps it within the length of the film, accepts `q` only if it names one of the parts
+  (and then ignores `t`), and never writes a parameter into the page.
+- **Test ids:** every control, and every element that shows a value (e.g. the clock or a counter),
+  has a `data-testid`; those in the table above are needed on every page. The script also writes state
+  for tests into `data-*` attributes, e.g. `data-scene` (the number of the step, `1` … `13` on the
+  House DBMS page) and `data-ready` (see Start-up) on the picture (`stage`), and `data-active` (`true` or
+  `false`) on the fast-forward badge.
+
+#### Where older pages differ
+
+These differences may be removed later.
+
+- The two 2D pages, `validation-interval-to-point.html` and `elasticity-resources-follow-demand.html`,
+  drawn in SVG:
+  - They are laid out like a document, with text above and below the picture, and have no card at
+    the end; their last caption sums up.
+  - They have text buttons, among them Back (`prev`) and Restart (`restart`); Play, Back, Next and
+    Restart have no `title` that names their key. They have no clock and no URL parameters, and the
+    elasticity page puts full screen before the slider. Only the full-screen button starts disabled;
+    Play, Back, Next, Restart and the slider can be clicked before the script has set them up.
+  - Their narration shows the whole text of a step at once and is set with `innerHTML` (from text
+    written in the page); the elasticity page also sets its model description with `innerHTML`.
+  - Space does nothing on the slider and clicks a focused Play, Back, Next or Restart button. Space,
+    → and ← also act when held down or pressed with Alt, Ctrl or Cmd (e.g. Alt+← steps back, and the
+    browser goes back a page as well).
+  - On the elasticity page, the chosen model and size decide the picture as well, not only the
+    playback time; a click on a model or a size while the page waits to start playing on its own
+    starts it at once.
+- The row/column page: its card, the receipt, shows in the second-to-last step, and the film ends on
+  the terminal's result; Space clicks a focused button such as Next; the narration also marks words in
+  red (written `~word~` in its script); and with reduced motion it also leaves out a slight sway of
+  the camera.
+- The row/column page prepares all its programs and textures in one frame after the first picture.
+- All three older pages set no `data-scene` (the elasticity page sets `data-minute` on the picture
+  instead; the validation page has nothing in its place), and they write some values into the page on
+  every frame, changed or not.
+- None of the three older pages shows the name ExplainDB in its header or on a card at the end.
 
 ## Serializability test of the MVCC store
 
