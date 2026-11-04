@@ -276,6 +276,18 @@ every link to another site (checked on 2026-11-01 with GitLab's Markdown API). G
 drops `target` attributes, so on the GitHub mirror the link opens in the same tab. The README
 therefore needs no HTML links to force a new tab.
 
+In the README's section *Visualizations*, each page has a subsection: a heading with its file name
+without `.html`, which links to the page, a preview 480 pixels wide, which links to the page as well,
+the topic, and the notebook with its Binder badge if there is one. The section has no table: GitLab
+shows a Markdown table at most 70 % of the window high and lets a higher one scroll inside itself. The
+preview is written as
+`[<img src="docs/images/visualizations/<page>.jpg" width="480" alt="…">](<link>)`: an HTML image, as
+Markdown's image syntax cannot set a width on GitHub, inside a Markdown link, and an alt text that
+says what the picture shows. The preview is a screenshot of 960×540 pixels, twice its width on the
+screen. It is taken in Chrome at a viewport of 1280×720 with device scale 2 and reduced motion, at a
+moment that shows what the page is about, then shrunk to 960×540 and saved with JPEG quality 85 (about
+45 to 110 KB). A new page needs a preview as well, and a page whose look changes needs a new one.
+
 Playwright is in the dependency group `browser-tests`, which `uv sync` does not install; without
 it, the tests are skipped. To run them locally:
 
@@ -393,7 +405,7 @@ clip of its own (on the row/column page); these are not the segments of the slid
   voice speak while the film plays. At the end, the page shows in writing that the voice is synthetic and
   names its model and voice (on the House DBMS page at the end of the `credit` line, on the clock-scan
   page in the card above it); a comment above the clips names the model, its license (MIT) and how the
-  clips were made, and the README says that the page speaks, in its row of the visualizations table and in
+  clips were made, and the README says that the page speaks, in its subsection of *Visualizations* and in
   the section *License*. The voice's code is the same on the three pages that speak; a new page takes it
   over. The clips are made outside the repository, as decision 034 describes: every new take is checked
   with a speech recogniser for misspoken or cut words and listened to before it goes into the page.

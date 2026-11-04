@@ -14,17 +14,94 @@ DBMS implemented in Python (the `system/` package). The lecture that uses this c
 YouTube: [Database Systems 2024/25](https://www.youtube.com/playlist?list=PLC4UZxBVGKteZpmLGukzu2BpNDifaTe9G)
 (Prof. Dr. Jens Dittrich, Big Data Analytics Group, Saarland University).
 
+## What's Inside the `system/` Package
+
+A small DBMS written for reading, not for speed. Interfaces in
+[`system/interfaces/`](system/interfaces) carry the contracts; the other folders implement them:
+
+- **Storage** ([`storage/`](system/storage)): the storage hierarchy (DRAM, caches, SSD, disk) and RAID
+  block assignment (RAID 0/1/4/5) with a reliability and performance cost model.
+- **Indexes** ([`indexes/`](system/indexes)): B⁺-tree, bitmap indexes (equality- and range-encoded),
+  Bloom filters, radix tries and the "Christmas tree" (a radix trie with node buffers).
+- **Bit sequences** ([`indexes/bit_sequences.py`](system/indexes/bit_sequences.py)): plain and WAH-compressed bit
+  sequences used by the bitmap indexes.
+- **Transactional stores** ([`stores/`](system/stores)): a versioned key-value store and MVCC
+  (multi-version concurrency control) with journaling, also with an index.
+- **Query processing** ([`query_processing/`](system/query_processing)): operators such as scan,
+  filter, hash join, semi-join and count, plus WHERE-clause predicates.
+- **Sorting and queues** ([`query_processing/sorting.py`](system/query_processing/sorting.py),
+  [`query_processing/queues/`](system/query_processing/queues)): external merge sort with in-memory and
+  disk-backed queues.
+- **Query optimization** ([`query_optimization/`](system/query_optimization)): join graphs (chain,
+  star, cycle, clique), cardinality estimation, the C_out cost function, plan tables and the
+  dynamic-programming join-order enumeration algorithms DPsize, DPsub and DPccp.
+
+[`DBMS.py`](system/DBMS.py) ties these parts together: it manages stores, prepared queries and query
+optimization. Unit tests for all of this live in [`system/tests/`](system/tests).
+
+An AI-generated port of the store core to Rust, in progress, lives in [`generated/rust/`](generated/rust): a language
+model generates it from the Python code (change the Python, then regenerate), with the Python names where Rust's
+naming rules allow and Rust versions of the Python tests of the ported parts; see
+[`generated/rust/README.md`](generated/rust/README.md), which also explains the benchmarks that compare both stores
+([`benchmarks/`](benchmarks)).
+
 ## Visualizations
 
 Standalone animations in [`visualizations/`](visualizations).
 
-| Visualization | Topic | Notebook |
-|---|---|---|
-| [validation-interval-to-point](https://htmlpreview.github.io/?https://github.com/explaindb/explaindb/blob/main/visualizations/validation-interval-to-point.html) | MVCC validation under the isolation level serializable: a transaction that passes validation shrinks from its interval [begin, commit] to a single point in time, a read-only transaction to its begin; the points form an equivalent serial schedule | [MVCC-Playground](notebooks/MVCC-Playground.ipynb) [![Open MVCC-Playground on Binder](https://mybinder.org/badge_logo.svg)](https://mybinder.org/v2/gh/explaindb/explaindb/main?urlpath=lab/tree/notebooks/MVCC-Playground.ipynb) |
-| [elasticity-resources-follow-demand](https://htmlpreview.github.io/?https://github.com/explaindb/explaindb/blob/main/visualizations/elasticity-resources-follow-demand.html) | Elasticity: one day of a teaching platform with the tiers App (scales out) and DBMS (scales up), run on premise, with hosting, IaaS, PaaS (also with scheduled scaling by a timetable) or SaaS; shows bottlenecks, scale-up and scale-out, and whether the capacity follows the demand | |
-| [row-or-column](https://htmlpreview.github.io/?https://github.com/explaindb/explaindb/blob/main/visualizations/row-or-column.html) | Row vs. column layout in main memory: eight books stored row by row and column by column; memory is read linearly, one 64-byte cache line at a time, so `SELECT MAX(price)` loads 4 cache lines of the row layout but only 1 of the column layout (in 3D, with three.js; a synthetic voice speaks the narration once the sound is switched on) | [Data-Layout](notebooks/Data-Layout.ipynb) [![Open Data-Layout on Binder](https://mybinder.org/badge_logo.svg)](https://mybinder.org/v2/gh/explaindb/explaindb/main?urlpath=lab/tree/notebooks/Data-Layout.ipynb) |
-| [call-through-dbms](https://htmlpreview.github.io/?https://github.com/explaindb/explaindb/blob/main/visualizations/call-through-dbms.html) | The architecture of a DBMS as a factory building in cross-section: its floors are the layers, box robots are the components; orders go down the stairs on paper, results ride the lift up. `SELECT * FROM R WHERE id = 2` brings up one box; `SELECT a, COUNT(*) FROM R GROUP BY a` reads every row and folds the copies into a bar chart, the only thing that rides up to the application; a prepared query is planned once (`PREPARE q1 … WHERE id = ?`: the DBMS files the plan in a key rack and hands back its name) and then run with a key (`EXECUTE q1 (id = 7)`): a copy of the plan goes on a VIP ticket, and a VIP lift takes it straight down to the store (in 3D, with three.js; a synthetic voice speaks the narration once the sound is switched on) | |
-| [clock-scan](https://htmlpreview.github.io/?https://github.com/explaindb/explaindb/blob/main/visualizations/clock-scan.html) | Clock scan, as in QPipe and Crescando: one scan runs round a key-value store laid out like a clock and never stops; three queries on different attributes get on at any hour, ride exactly once round and get off at their hour again, so the one scan serves them all (19 values read instead of 36 with a scan per query; in 3D, with three.js; a synthetic voice speaks the narration once the sound is switched on) | [Shared-Scan](notebooks/Shared-Scan.ipynb) [![Open Shared-Scan on Binder](https://mybinder.org/badge_logo.svg)](https://mybinder.org/v2/gh/explaindb/explaindb/main?urlpath=lab/tree/notebooks/Shared-Scan.ipynb) |
+### [validation-interval-to-point](https://htmlpreview.github.io/?https://github.com/explaindb/explaindb/blob/main/visualizations/validation-interval-to-point.html)
+
+[<img src="docs/images/visualizations/validation-interval-to-point.jpg" width="480" alt="Transactions as intervals on a time axis, with the validation window and the serial schedule">](https://htmlpreview.github.io/?https://github.com/explaindb/explaindb/blob/main/visualizations/validation-interval-to-point.html)
+
+MVCC validation under the isolation level serializable: a transaction that passes validation shrinks from its interval
+[begin, commit] to a single point in time, a read-only transaction to its begin; the points form an equivalent serial
+schedule.
+
+Notebook: [MVCC-Playground](notebooks/MVCC-Playground.ipynb)
+[![Open MVCC-Playground on Binder](https://mybinder.org/badge_logo.svg)](https://mybinder.org/v2/gh/explaindb/explaindb/main?urlpath=lab/tree/notebooks/MVCC-Playground.ipynb)
+
+### [elasticity-resources-follow-demand](https://htmlpreview.github.io/?https://github.com/explaindb/explaindb/blob/main/visualizations/elasticity-resources-follow-demand.html)
+
+[<img src="docs/images/visualizations/elasticity-resources-follow-demand.jpg" width="480" alt="One day of demand and capacity, with the DBMS tier as the bottleneck during an overload">](https://htmlpreview.github.io/?https://github.com/explaindb/explaindb/blob/main/visualizations/elasticity-resources-follow-demand.html)
+
+Elasticity: one day of a teaching platform with the tiers App (scales out) and DBMS (scales up), run on premise, with
+hosting, IaaS, PaaS (also with scheduled scaling by a timetable) or SaaS; shows bottlenecks, scale-up and scale-out, and
+whether the capacity follows the demand.
+
+### [row-or-column](https://htmlpreview.github.io/?https://github.com/explaindb/explaindb/blob/main/visualizations/row-or-column.html)
+
+[<img src="docs/images/visualizations/row-or-column.jpg" width="480" alt="Row layout in 3D: four cache lines loaded, three quarters of their bytes unused">](https://htmlpreview.github.io/?https://github.com/explaindb/explaindb/blob/main/visualizations/row-or-column.html)
+
+Row vs. column layout in main memory: eight books stored row by row and column by column; memory is read linearly, one
+64-byte cache line at a time, so `SELECT MAX(price)` loads 4 cache lines of the row layout but only 1 of the column
+layout (in 3D, with three.js; a synthetic voice speaks the narration once the sound is switched on).
+
+Notebook: [Data-Layout](notebooks/Data-Layout.ipynb)
+[![Open Data-Layout on Binder](https://mybinder.org/badge_logo.svg)](https://mybinder.org/v2/gh/explaindb/explaindb/main?urlpath=lab/tree/notebooks/Data-Layout.ipynb)
+
+### [call-through-dbms](https://htmlpreview.github.io/?https://github.com/explaindb/explaindb/blob/main/visualizations/call-through-dbms.html)
+
+[<img src="docs/images/visualizations/call-through-dbms.jpg" width="480" alt="The DBMS as a factory building in cross-section, with the store floor and its robots">](https://htmlpreview.github.io/?https://github.com/explaindb/explaindb/blob/main/visualizations/call-through-dbms.html)
+
+The architecture of a DBMS as a factory building in cross-section: its floors are the layers, box robots are the
+components; orders go down the stairs on paper, results ride the lift up. `SELECT * FROM R WHERE id = 2` brings up one
+box; `SELECT a, COUNT(*) FROM R GROUP BY a` reads every row and folds the copies into a bar chart, the only thing that
+rides up to the application; a prepared query is planned once (`PREPARE q1 … WHERE id = ?`: the DBMS files the plan in a
+key rack and hands back its name) and then run with a key (`EXECUTE q1 (id = 7)`): a copy of the plan goes on a VIP
+ticket, and a VIP lift takes it straight down to the store (in 3D, with three.js; a synthetic voice speaks the narration
+once the sound is switched on).
+
+### [clock-scan](https://htmlpreview.github.io/?https://github.com/explaindb/explaindb/blob/main/visualizations/clock-scan.html)
+
+[<img src="docs/images/visualizations/clock-scan.jpg" width="480" alt="Three query robots ride the scan car round the clock">](https://htmlpreview.github.io/?https://github.com/explaindb/explaindb/blob/main/visualizations/clock-scan.html)
+
+Clock scan, as in QPipe and Crescando: one scan runs round a key-value store laid out like a clock and never stops;
+three queries on different attributes get on at any hour, ride exactly once round and get off at their hour again, so
+the one scan serves them all (19 values read instead of 36 with a scan per query; in 3D, with three.js; a synthetic
+voice speaks the narration once the sound is switched on).
+
+Notebook: [Shared-Scan](notebooks/Shared-Scan.ipynb)
+[![Open Shared-Scan on Binder](https://mybinder.org/badge_logo.svg)](https://mybinder.org/v2/gh/explaindb/explaindb/main?urlpath=lab/tree/notebooks/Shared-Scan.ipynb)
 
 ## Notebooks
 
@@ -83,37 +160,6 @@ confidential data, and do not enter passwords in a Binder session.
 | Notebook | Topic | Launch |
 |---|---|---|
 | [Z-Order-Curve](notebooks/Z-Order-Curve.ipynb) | Z-codes (Morton codes): mapping 2-D data to 1-D while preserving locality | [![Open Z-Order-Curve on Binder](https://mybinder.org/badge_logo.svg)](https://mybinder.org/v2/gh/explaindb/explaindb/main?urlpath=lab/tree/notebooks/Z-Order-Curve.ipynb) |
-
-## What's Inside the `system/` Package
-
-A small DBMS written for reading, not for speed. Interfaces in
-[`system/interfaces/`](system/interfaces) carry the contracts; the other folders implement them:
-
-- **Storage** ([`storage/`](system/storage)): the storage hierarchy (DRAM, caches, SSD, disk) and RAID
-  block assignment (RAID 0/1/4/5) with a reliability and performance cost model.
-- **Indexes** ([`indexes/`](system/indexes)): B⁺-tree, bitmap indexes (equality- and range-encoded),
-  Bloom filters, radix tries and the "Christmas tree" (a radix trie with node buffers).
-- **Bit sequences** ([`indexes/bit_sequences.py`](system/indexes/bit_sequences.py)): plain and WAH-compressed bit
-  sequences used by the bitmap indexes.
-- **Transactional stores** ([`stores/`](system/stores)): a versioned key-value store and MVCC
-  (multi-version concurrency control) with journaling, also with an index.
-- **Query processing** ([`query_processing/`](system/query_processing)): operators such as scan,
-  filter, hash join, semi-join and count, plus WHERE-clause predicates.
-- **Sorting and queues** ([`query_processing/sorting.py`](system/query_processing/sorting.py),
-  [`query_processing/queues/`](system/query_processing/queues)): external merge sort with in-memory and
-  disk-backed queues.
-- **Query optimization** ([`query_optimization/`](system/query_optimization)): join graphs (chain,
-  star, cycle, clique), cardinality estimation, the C_out cost function, plan tables and the
-  dynamic-programming join-order enumeration algorithms DPsize, DPsub and DPccp.
-
-[`DBMS.py`](system/DBMS.py) ties these parts together: it manages stores, prepared queries and query
-optimization. Unit tests for all of this live in [`system/tests/`](system/tests).
-
-An AI-generated port of the store core to Rust, in progress, lives in [`generated/rust/`](generated/rust): a language
-model generates it from the Python code (change the Python, then regenerate), with the Python names where Rust's
-naming rules allow and Rust versions of the Python tests of the ported parts; see
-[`generated/rust/README.md`](generated/rust/README.md), which also explains the benchmarks that compare both stores
-([`benchmarks/`](benchmarks)).
 
 ## Setting Up the Environment with uv
 
