@@ -745,20 +745,37 @@ ipynb_test:
   interruptible: true
 
 
+# Script lines shared by the jobs that drive a headless Chromium with
+# Playwright (visualization_test, render_video_test). Playwright is in the
+# dependency group browser-tests; py_test does not install it and skips the
+# tests that open a browser.
+.playwright_setup:
+  script:
+    # Only the group browser-tests (Playwright and its dependencies), not the
+    # project's packages: the tests need nothing else.
+    - uv sync --frozen --only-group browser-tests
+    # --no-sync keeps the environment as installed above; a plain `uv run`
+    # would first install all of the project's packages, which the tests do
+    # not need.
+    # --with-deps installs the system libraries Chromium needs (the job runs as
+    # root); --only-shell installs only the headless Chromium.
+    - uv run --no-sync python -m playwright install --with-deps --only-shell chromium
+    # Fails if Playwright is missing, so the tests can never be skipped here.
+    - uv run --no-sync python -m playwright --version
+
 # Browser smoke test of the pages in visualizations/ (see
 # docs/changes/026-visualization-smoke-test): system/tests/repo/test_visualizations.py
 # opens every page in a headless Chromium, steps through it with its controls
 # and fails on a JavaScript error, a control that does not work, or a request
-# to anything but a local file. Playwright, which drives the browser, is in the
-# dependency group browser-tests; py_test does not install it and skips these
-# tests. The job runs only when one of the files below changes: the pages are
-# self-contained, so nothing else can change the result (unlike the other test
-# jobs, which skip only Markdown-only merge requests, see detect-docs-only).
+# to anything but a local file. The job runs only when one of the files below
+# changes: the pages are self-contained, so nothing else can change the result
+# (unlike the other test jobs, which skip only Markdown-only merge requests, see
+# detect-docs-only).
 # Without a cache (GitLab shares caches between branches, so a browser planted
 # by one merge request could run in another): every run downloads Playwright
 # from PyPI, Chromium from Playwright's servers and the system libraries
 # Chromium needs from the Debian mirrors (about half a minute; the tests take
-# about 15 s).
+# about 6 minutes, as WebGL is drawn without a GPU).
 visualization_test:
   stage: test
   tags:
@@ -777,18 +794,44 @@ visualization_test:
   # A browser that hangs ends the job after 10 minutes, not after an hour.
   timeout: 10m
   script:
-    # Only the group browser-tests (Playwright and its dependencies), not the
-    # project's packages: the tests need nothing else.
-    - uv sync --frozen --only-group browser-tests
-    # --no-sync keeps the environment as installed above; a plain `uv run`
-    # would first install all of the project's packages, which the tests do
-    # not need.
-    # --with-deps installs the system libraries Chromium needs (the job runs as
-    # root); --only-shell installs only the headless Chromium.
-    - uv run --no-sync python -m playwright install --with-deps --only-shell chromium
-    # Fails if Playwright is missing, so the tests can never be skipped here.
-    - uv run --no-sync python -m playwright --version
+    - !reference [.playwright_setup, script]
     - uv run --no-sync python -m unittest -v system.tests.repo.test_visualizations
+  interruptible: true
+
+# Tests of tools/render_video.py, which turns a page of visualizations/ into a
+# video with ffmpeg (see docs/changes/037-render-videos):
+# system/tests/repo/test_render_video.py. A job of its own, so that it runs
+# beside visualization_test and only it installs ffmpeg. It runs when the tool,
+# its test, a page or the page test (whose caption times the tool's tests use)
+# changes. Setup about a minute (as visualization_test, plus ffmpeg); the tests
+# take about half a minute.
+render_video_test:
+  stage: test
+  tags:
+    - test
+  rules:
+    # Not in the nightly scheduled pipeline (see .not_in_scheduled_pipelines),
+    # which system/tests/repo/test_ci_config.py requires:
+    - if: $CI_PIPELINE_SOURCE == 'schedule'
+      when: never
+    - changes:
+        - tools/render_video.py
+        - system/tests/repo/test_render_video.py
+        - visualizations/**/*
+        - system/tests/repo/test_visualizations.py
+        - .gitlab-ci.yml
+        - pyproject.toml
+        - uv.lock
+  # A browser that hangs ends the job after 10 minutes, not after an hour.
+  timeout: 10m
+  script:
+    - !reference [.playwright_setup, script]
+    # ffmpeg encodes the videos; the version checks fail if it is missing, so
+    # the tests of the tool can never be skipped here either.
+    - apt-get update -qq && apt-get install -y -qq --no-install-recommends ffmpeg
+    - ffmpeg -version
+    - ffprobe -version
+    - uv run --no-sync python -m unittest -v system.tests.repo.test_render_video
   interruptible: true
 
 

@@ -31,9 +31,9 @@ uv export --frozen --no-dev --no-hashes --no-header --no-annotate --format requi
 ```
 
 The dependency group `browser-tests` in `pyproject.toml` holds what only the browser test of the
-pages in `visualizations/` needs (see [Visualizations](#visualizations)). `uv sync` does not
-install it, and the export above leaves it out, so it does not reach Binder; the dependency audit
-below covers it.
+pages in `visualizations/` and the tool that turns them into videos need (see
+[Visualizations](#visualizations)). `uv sync` does not install it, and the export above leaves it
+out, so it does not reach Binder; the dependency audit below covers it.
 
 ### Security audit
 
@@ -295,11 +295,12 @@ moment that shows what the page is about, then shrunk to 960×540 and saved with
 45 to 110 KB). A new page needs a preview as well, and a page whose look changes needs a new one.
 
 Playwright is in the dependency group `browser-tests`, which `uv sync` does not install; without
-it, the tests are skipped. To run them locally:
+it, the tests are skipped. The tests of `tools/render_video.py` also need ffmpeg with ffprobe on the
+PATH. To run them locally:
 
 ```sh
 uv run --group browser-tests python -m playwright install --only-shell chromium
-uv run --group browser-tests python -m unittest -v system.tests.repo.test_visualizations
+uv run --group browser-tests python -m unittest -v system.tests.repo.test_visualizations system.tests.repo.test_render_video
 ```
 
 On Linux, add `--with-deps` to the install command: it installs the system libraries Chromium
@@ -493,6 +494,26 @@ These differences may be removed later.
   instead; the validation page has nothing in its place), and they write some values into the page on
   every frame, changed or not.
 - None of the three older pages shows the name ExplainDB in its header or on a card at the end.
+
+### Videos for YouTube
+
+`tools/render_video.py` turns a three.js page with a voice into a video for YouTube: 3840×2160
+pixels, 60 frames per second, with the voice and the subtitles, without the controls
+([`docs/changes/037-render-videos`](docs/changes/037-render-videos/DECISION.md)). It needs Google
+Chrome and ffmpeg (with ffprobe); Chrome must draw with the GPU. The videos are not committed.
+
+```shell
+uv run --group browser-tests python tools/render_video.py visualizations/clock-scan.html ~/Desktop/clock-scan.mp4
+```
+
+It takes about 0.16 s per frame, so about 17 minutes for a film of 1:43. Next to the video it
+writes the picture alone (`clock-scan.video.mp4`) and the voice clips (`clock-scan.voice.json`);
+`--mux-only` mixes the voice in again from these two files, in seconds. `--seconds` renders only the
+start of the film, and `--hold` sets how long the last frame stays (3 s by default).
+
+The CI job `render_video_test` runs the tool's tests (`system/tests/repo/test_render_video.py`) beside
+`visualization_test`, in every merge request that changes the tool, its test, a page, the page
+test, `.gitlab-ci.yml`, `pyproject.toml` or `uv.lock`; only this job installs ffmpeg.
 
 ## Serializability test of the MVCC store
 

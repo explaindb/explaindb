@@ -1484,6 +1484,9 @@ class RowOrColumnPageTest(_SoundPageTestCase):
         "Four lines read, a quarter used.",
     ]
     ROW_LAYOUT_SECOND_SEGMENT: float = 25.8
+    # the column-layout step, the fifth, says its caption in two segments as well; the second one begins at 37.0 s (the
+    # tests of tools/render_video.py check the start of its clip):
+    COLUMN_LAYOUT_SECOND_SEGMENT: float = 37.0
     # a clip longer than its time plays at most this many times as fast (decision 034):
     MAX_RATE: float = 1.15
 
