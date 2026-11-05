@@ -241,6 +241,9 @@ The notebooks live in `notebooks/`. When you add, rename or remove one, also upd
 - the notebook table in the README (section *Notebooks*): one row with the link, a
   one-line topic and the Binder badge. `system/tests/repo/test_readme_notebooks.py` fails if
   the table and `notebooks/` disagree.
+- the line `Notebook: [<name>](notebooks/<name>.ipynb)` and its Binder badge in the README
+  section *Visualizations*, if a page links the notebook.
+  `system/tests/repo/test_readme_visualizations.py` fails if the linked notebook does not exist.
 - `.ci/notebook_weights.tsv` (the notebook's run time, used to balance the parallel CI
   jobs) and the expected packing and notebook count in
   `system/tests/repo/test_assign_notebooks.py`, which fails otherwise.
@@ -276,9 +279,12 @@ every link to another site (checked on 2026-11-01 with GitLab's Markdown API). G
 drops `target` attributes, so on the GitHub mirror the link opens in the same tab. The README
 therefore needs no HTML links to force a new tab.
 
-In the README's section *Visualizations*, each page has a subsection: a heading with its file name
-without `.html`, which links to the page, a preview 480 pixels wide, which links to the page as well,
-the topic, and the notebook with its Binder badge if there is one. The section has no table: GitLab
+In the README's section *Visualizations*, each page has a subsection: a heading with its path in
+`visualizations/` without `.html` (for a page directly in the folder, its file name), which links to
+the page, a preview 480 pixels wide, which links to the page as well, the topic, and, if there is one,
+the line `Notebook: [<name>](notebooks/<name>.ipynb)` with the notebook's Binder badge on the next
+line, written as in the notebook tables. `system/tests/repo/test_readme_visualizations.py` fails if
+the section, the pages, the previews and the notebooks disagree. The section has no table: GitLab
 shows a Markdown table at most 70 % of the window high and lets a higher one scroll inside itself. The
 preview is written as
 `[<img src="docs/images/visualizations/<page>.jpg" width="480" alt="…">](<link>)`: an HTML image, as
