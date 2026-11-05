@@ -37,10 +37,11 @@ import math
 import re
 import tempfile
 import unittest
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
+from contextlib import contextmanager
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, TypedDict
 
 # the tests run only where Playwright is installed (see the module docstring):
 PLAYWRIGHT_AVAILABLE: bool = importlib.util.find_spec("playwright") is not None
@@ -48,15 +49,14 @@ PLAYWRIGHT_AVAILABLE: bool = importlib.util.find_spec("playwright") is not None
 # without the dependency group browser-tests, pylint cannot find playwright:
 # pylint: disable=import-error
 if PLAYWRIGHT_AVAILABLE:
-    from playwright.sync_api import expect, sync_playwright
+    from playwright.sync_api import Error, expect, sync_playwright
 else:
-    # the tests are skipped, so these are never called:
-    expect = sync_playwright = None  # pylint: disable=invalid-name
+    # the tests are skipped, so these are never used:
+    Error = expect = sync_playwright = None  # pylint: disable=invalid-name
 if TYPE_CHECKING:
     from playwright.sync_api import (
         Browser,
         ConsoleMessage,
-        Error,
         FloatRect,
         Page,
         Playwright,
@@ -104,6 +104,26 @@ class OpenedPage:
     errors: list[str] = field(default_factory=list)
     # the URLs of requests and WebSockets to anything but a local file, which were blocked:
     outside_requests: list[str] = field(default_factory=list)
+
+
+class VoiceEntry(TypedDict):
+    """What the voice did at one moment, and its state then, as recorded by ``record_voice_events`` (see there)."""
+
+    at: float
+    event: str
+    voice: float
+    src: bool
+    clip: int | None
+    length: float
+    paused: bool
+    seeking: bool
+    ended: bool
+    ready: int
+    slider: int
+    stage: str | None
+    warmed: str | None
+    play: str | None
+    blocked: bool
 
 
 class _PageTestCase(unittest.TestCase):
@@ -420,19 +440,20 @@ class _SoundPageTestCase(_PageTestCase):
 
     @staticmethod
     def record_voice_events(page: Page) -> None:
-        """Records from now on in ``window.voiceEvents`` what the voice does, so that a failed check can show it.
+        """Records from now on in ``window.voiceEvents`` what the voice does, for checks to read and to show on failure.
 
         An entry is recorded for each event of the audio element that loads, starts, moves, pauses or ends a clip, and
         for each click on Play, each before the page handles it (except a click while the browser holds the voice back:
         the page lets the voice speak on the click's way down to the button, so its entry already shows the voice
-        started). An entry holds the state at that moment: the seconds since the recording began, the event, where the
-        voice is in its clip, whether it holds a clip (its ``src`` attribute, which the page removes to drop a clip),
-        which clip it has loaded (``currentSrc``, numbered in the order the clips first appear, as their sources are
-        long ``data:`` URLs; none before the first), the clip's length, whether the voice is paused, moving to another
-        position or at its end, how much of the clip is loaded (``readyState``), where the slider is, whether the stage
-        marks the voice as playing, the state of Play, and whether the browser holds the voice back. The slider moves in
-        1000 steps over the film, so a step is a thousandth of the film's length (0.1 s on a film of 100 s).
-        ``window.voiceState(name)`` returns such an entry for the moment it is called.
+        started). An entry (see VoiceEntry) holds the state at that moment: the seconds since the recording began, the
+        event, where the voice is in its clip, whether it holds a clip (its ``src`` attribute, which the page removes to
+        drop a clip), which clip it has loaded (``currentSrc``, numbered in the order the clips first appear, as their
+        sources are long ``data:`` URLs; none before the first), the clip's length, whether the voice is paused, moving
+        to another position or at its end, how much of the clip is loaded (``readyState``), where the slider is, whether
+        the stage marks the voice as playing, whether the page has drawn its warm-up frames (``warmed``: the stage's
+        ``data-ready``; none on a page without a warm-up), the state of Play, and whether the browser holds the voice
+        back. The slider moves in 1000 steps over the film, so a step is a thousandth of the film's length (0.1 s on a
+        film of 100 s). ``window.voiceState(name)`` returns such an entry for the moment it is called.
 
         @param page: a page with a voice
         """
@@ -460,6 +481,7 @@ class _SoundPageTestCase(_PageTestCase):
                     ready: audio.readyState,
                     slider: Number(scrub.value),
                     stage: stage.dataset.voice ?? null,
+                    warmed: stage.dataset.ready ?? null,
                     play: play.dataset.state,
                     blocked: sound.hasAttribute("data-blocked"),
                 });
@@ -485,12 +507,67 @@ class _SoundPageTestCase(_PageTestCase):
         @param page: a page whose voice is recorded (see record_voice_events)
         @return: one line for each recorded entry, and a last one for the state now, as ``name=value`` pairs
         """
-        entries: list[dict[str, object]] = page.evaluate(
+        entries: list[VoiceEntry] = page.evaluate(
             '[...window.voiceEvents, window.voiceState("now")]'
         )
         return "\n".join(
             " ".join(f"{name}={value}" for name, value in entry.items())
             for entry in entries
+        )
+
+    @classmethod
+    @contextmanager
+    def voice_reported(cls, page: Page) -> Iterator[None]:
+        """Appends what the voice did (see voice_report) to the message of a check that fails in the with block.
+
+        A failed check is an AssertionError (also one of ``expect``) or an error of Playwright, e.g. the timeout of a
+        wait; either is raised again as an AssertionError whose message ends with the report. If the report cannot be
+        made (the page is closed or has crashed), the error is raised again as it is.
+
+        @param page: a page whose voice is recorded (see record_voice_events)
+        @return: a context manager for the checks
+        """
+        try:
+            yield
+        except (AssertionError, Error) as error:
+            report: str | None
+            try:
+                report = cls.voice_report(page)
+            except Error:
+                report = None
+            if report is None:
+                raise
+            raise AssertionError(
+                f"{error}\n\nwhat the voice did, and its state now:\n{report}"
+            ) from error
+
+    @staticmethod
+    def voice_event_indexes(
+        events: list[VoiceEntry], name: str, start: int = 0
+    ) -> list[int]:
+        """Returns where the recorded entries of an event are, from a given index on.
+
+        @param events: the entries recorded in ``window.voiceEvents`` (see record_voice_events)
+        @param name: the event, e.g. ``"pause"`` of the audio element, or ``"click"`` for a click on Play
+        @param start: the index of the first entry to look at
+        @return: the indexes of the entries of the event, in the order they were recorded
+        """
+        return [i for i in range(start, len(events)) if events[i]["event"] == name]
+
+    @staticmethod
+    def wait_for_voice_event_after_last_click(page: Page, name: str) -> None:
+        """Waits until an entry of an event is recorded after the last recorded click on Play.
+
+        @param page: a page whose voice is recorded (see record_voice_events)
+        @param name: the event, e.g. ``"pause"`` or ``"playing"`` of the audio element
+        """
+        page.wait_for_function(
+            """name => {
+                const click = window.voiceEvents.findLastIndex((entry) => entry.event === "click");
+                return window.voiceEvents.slice(click + 1).some((entry) => entry.event === name);
+            }""",
+            arg=name,
+            timeout=FILM_TIMEOUT,
         )
 
     @staticmethod
@@ -1236,7 +1313,11 @@ class EveryPageWithSoundTest(_SoundPageTestCase):
         self.check_each_page_with_sound(check)
 
     def test_pause_holds_the_clip_and_play_goes_on_in_it(self) -> None:
-        """With sound on, Pause holds the voice's clip where it is, and Play goes on in it, not from its start."""
+        """With sound on, Pause holds the voice's clip where it is, and Play goes on in it, not from its start.
+
+        A listener that the test adds to the page clicks Pause, and the checks read the voice's state at Pause and at
+        Play from the recorded events, as a click or a read of the test may come seconds late on a slow machine.
+        """
 
         def check(page: Page) -> None:
             """Checks one page, opened at its start with sound off."""
@@ -1244,49 +1325,106 @@ class EveryPageWithSoundTest(_SoundPageTestCase):
             stage = page.get_by_test_id("stage")
             voice = page.get_by_test_id("voice")
 
-            # record what the voice does, so that a failed check shows it:
+            # record what the voice does: the checks below read it, and a failed check shows it:
             self.record_voice_events(page)
+            with self.voice_reported(page):
+                # sound on:
+                page.get_by_test_id("sound").click()
+                self.expect_sound(page, on=True)
 
-            # sound on and Play: the voice speaks the first caption, until 2 s of its clip have been played (half of a
-            # clip shorter than 4 s, so that the clip is still playing after Pause and Play):
-            self.play_with_sound(page)
-            page.wait_for_function(
-                "audio => audio.currentTime >= Math.min(2, audio.duration / 2)",
-                arg=voice.element_handle(),
-                timeout=FILM_TIMEOUT,
-            )
+                # a listener that the test adds to the page clicks Pause once the voice plays past 2 s of its clip (half
+                # of a clip shorter than 4 s, so that the clip still plays after Pause and Play). It clicks in a frame,
+                # after the page's own frame callback, and only if stage[data-voice] is "playing" (else it tries again
+                # in the next frame): only then has the page kept the voice at most VOICE_AHEAD (0.25 s) ahead of the
+                # film and VOICE_BEHIND (1.0 s) behind it, which bounds where Play lets the voice go on:
+                voice.evaluate(
+                    """(audio, [play, stage]) => {
+                        const due = () =>
+                            !audio.paused && !audio.ended && audio.currentTime >= Math.min(2, audio.duration / 2);
+                        const pauseInFrame = () => {
+                            if (play.dataset.state !== "playing") return;
+                            if (due() && stage.dataset.voice === "playing") play.click();
+                            else requestAnimationFrame(pauseInFrame);
+                        };
+                        const arm = () => {
+                            if (!due()) return;
+                            audio.removeEventListener("timeupdate", arm);
+                            requestAnimationFrame(pauseInFrame);
+                        };
+                        audio.addEventListener("timeupdate", arm);
+                    }""",
+                    [play.element_handle(), stage.element_handle()],
+                )
 
-            # Pause silences the voice but holds its clip, well past the clip's start; where it holds it, and which
-            # clip, is noted:
-            play.click()
-            expect(play).to_have_attribute("data-state", "paused")
-            expect(stage).not_to_have_attribute("data-voice", "playing")
-            self.assertTrue(voice.evaluate("audio => audio.paused"))
-            expect(voice).to_have_attribute("src", re.compile(r"^data:audio/"))
-            held: float = voice.evaluate(
-                "audio => { window.heldClip = audio.currentSrc; return audio.currentTime; }"
-            )
-            self.assertGreater(held, 0.5)
+                # Play: the voice speaks the first caption until the listener clicks Pause, and the voice's pause is
+                # recorded (the browser sends its event a moment after the click):
+                play.click()
+                expect(play).to_have_attribute(
+                    "data-state", "paused", timeout=FILM_TIMEOUT
+                )
+                self.wait_for_voice_event_after_last_click(page, "pause")
 
-            # Play goes on in the same clip where it was held, not from its start (which is 0.4 s of silence); the page
-            # may move the voice a little, to the film's time:
-            play.click()
-            expect(stage).to_have_attribute(
-                "data-voice", "playing", timeout=FILM_TIMEOUT
-            )
-            same_clip: bool = voice.evaluate(
-                "audio => audio.currentSrc === window.heldClip"
-            )
-            position: float = voice.evaluate("audio => audio.currentTime")
+                # Pause silences the voice but holds its clip:
+                expect(stage).not_to_have_attribute("data-voice", "playing")
+                self.assertTrue(voice.evaluate("audio => audio.paused"))
+                expect(voice).to_have_attribute("src", re.compile(r"^data:audio/"))
 
-            # only after both are read, the report of what the voice did is made (it takes a while, in which the page
-            # might move the voice, and the checks would then see where the page moved it, not where Play started it):
-            report: str = (
-                f"held at {held} s, at {position} s after Play\n"
-                f"{self.voice_report(page)}"
-            )
-            self.assertTrue(same_clip, msg=report)
-            self.assertGreater(position, held - 0.3, msg=report)
+                # the last click on Play was made while the film played, so it is the listener's click on Pause:
+                events: list[VoiceEntry] = page.evaluate("window.voiceEvents")
+                clicks: list[int] = self.voice_event_indexes(events, "click")
+                self.assertTrue(clicks, "no click on Play recorded")
+                pause_click: int = clicks[-1]
+                self.assertEqual(
+                    "playing", events[pause_click]["play"], "no in-page click on Pause"
+                )
+
+                # after that click, the voice was paused before its clip ended, and well past the clip's start:
+                pauses: list[int] = self.voice_event_indexes(
+                    events, "pause", pause_click
+                )
+                self.assertTrue(pauses, "no pause of the voice after the in-page click")
+                paused: VoiceEntry = events[pauses[0]]
+                self.assertFalse(
+                    paused["ended"], "the voice was not paused before its clip ended"
+                )
+                held: float = paused["voice"]
+                self.assertGreater(held, 0.5, "Pause held the clip at its start")
+
+                # Play, and wait until the voice plays again after this click:
+                play.click()
+                self.wait_for_voice_event_after_last_click(page, "playing")
+
+                # where the voice started after Play, as recorded then (a late read of the test does not change it):
+                events = page.evaluate("window.voiceEvents")
+                play_click: int = self.voice_event_indexes(events, "click")[-1]
+                self.assertGreater(
+                    play_click, pause_click, "no click on Play after Pause"
+                )
+                start: int = self.voice_event_indexes(events, "playing", play_click)[0]
+                resumed: VoiceEntry = events[start]
+
+                # Play goes on in the held clip, without loading it again:
+                reloads: list[str] = [
+                    entry["event"]
+                    for entry in events[pause_click:start]
+                    if entry["event"] in ("emptied", "loadstart")
+                ]
+                self.assertEqual([], reloads, "Play loaded a clip again")
+                self.assertEqual(
+                    paused["clip"], resumed["clip"], "Play started another clip"
+                )
+
+                # and near where Pause held it, not from its start (which is 0.4 s of silence): the page may move the
+                # voice to the film's time, back by up to VOICE_AHEAD (0.25 s, plus a margin: 0.3 s), or forward by up
+                # to VOICE_BEHIND (1.0 s) and one frame of the film (plus a margin: 1.5 s):
+                self.assertGreaterEqual(
+                    resumed["voice"],
+                    held - 0.3,
+                    "Play did not go on where Pause held the clip",
+                )
+                self.assertLessEqual(
+                    resumed["voice"], held + 1.5, "Play jumped ahead in the held clip"
+                )
 
         self.check_each_page_with_sound(check)
 
