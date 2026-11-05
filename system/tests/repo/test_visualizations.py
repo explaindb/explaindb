@@ -419,6 +419,81 @@ class _SoundPageTestCase(_PageTestCase):
         )
 
     @staticmethod
+    def record_voice_events(page: Page) -> None:
+        """Records from now on in ``window.voiceEvents`` what the voice does, so that a failed check can show it.
+
+        An entry is recorded for each event of the audio element that loads, starts, moves, pauses or ends a clip, and
+        for each click on Play, each before the page handles it (except a click while the browser holds the voice back:
+        the page lets the voice speak on the click's way down to the button, so its entry already shows the voice
+        started). An entry holds the state at that moment: the seconds since the recording began, the event, where the
+        voice is in its clip, whether it holds a clip (its ``src`` attribute, which the page removes to drop a clip),
+        which clip it has loaded (``currentSrc``, numbered in the order the clips first appear, as their sources are
+        long ``data:`` URLs; none before the first), the clip's length, whether the voice is paused, moving to another
+        position or at its end, how much of the clip is loaded (``readyState``), where the slider is, whether the stage
+        marks the voice as playing, the state of Play, and whether the browser holds the voice back. The slider moves in
+        1000 steps over the film, so a step is a thousandth of the film's length (0.1 s on a film of 100 s).
+        ``window.voiceState(name)`` returns such an entry for the moment it is called.
+
+        @param page: a page with a voice
+        """
+        page.evaluate(
+            """([audio, play, scrub, stage, sound]) => {
+                const begin = performance.now();
+                const rounded = (seconds) => Math.round(seconds * 1000) / 1000;
+                window.voiceSrcs = [];
+                window.voiceEvents = [];
+                const clip = () => {
+                    if (!audio.currentSrc) return null;
+                    if (!window.voiceSrcs.includes(audio.currentSrc)) window.voiceSrcs.push(audio.currentSrc);
+                    return window.voiceSrcs.indexOf(audio.currentSrc);
+                };
+                window.voiceState = (name) => ({
+                    at: rounded((performance.now() - begin) / 1000),
+                    event: name,
+                    voice: rounded(audio.currentTime),
+                    src: audio.hasAttribute("src"),
+                    clip: clip(),
+                    length: rounded(audio.duration),
+                    paused: audio.paused,
+                    seeking: audio.seeking,
+                    ended: audio.ended,
+                    ready: audio.readyState,
+                    slider: Number(scrub.value),
+                    stage: stage.dataset.voice ?? null,
+                    play: play.dataset.state,
+                    blocked: sound.hasAttribute("data-blocked"),
+                });
+                const record = (event) => window.voiceEvents.push(window.voiceState(event.type));
+                const events = [
+                    "loadstart", "emptied", "abort", "error", "loadedmetadata", "seeking", "seeked",
+                    "play", "playing", "waiting", "pause", "ended",
+                ];
+                // listeners of the capture phase run before the page's own listeners on the same element:
+                for (const type of events) audio.addEventListener(type, record, true);
+                play.addEventListener("click", record, true);
+            }""",
+            [
+                page.get_by_test_id(test_id).element_handle()
+                for test_id in ("voice", "play", "scrub", "stage", "sound")
+            ],
+        )
+
+    @staticmethod
+    def voice_report(page: Page) -> str:
+        """Returns what the voice did since record_voice_events, and its state now, as text for a failed check.
+
+        @param page: a page whose voice is recorded (see record_voice_events)
+        @return: one line for each recorded entry, and a last one for the state now, as ``name=value`` pairs
+        """
+        entries: list[dict[str, object]] = page.evaluate(
+            '[...window.voiceEvents, window.voiceState("now")]'
+        )
+        return "\n".join(
+            " ".join(f"{name}={value}" for name, value in entry.items())
+            for entry in entries
+        )
+
+    @staticmethod
     def let_film_play_until(page: Page, position: int) -> None:
         """Waits until the playing film has moved the slider to at least the given position.
 
@@ -1169,6 +1244,9 @@ class EveryPageWithSoundTest(_SoundPageTestCase):
             stage = page.get_by_test_id("stage")
             voice = page.get_by_test_id("voice")
 
+            # record what the voice does, so that a failed check shows it:
+            self.record_voice_events(page)
+
             # sound on and Play: the voice speaks the first caption, until 2 s of its clip have been played (half of a
             # clip shorter than 4 s, so that the clip is still playing after Pause and Play):
             self.play_with_sound(page)
@@ -1196,10 +1274,19 @@ class EveryPageWithSoundTest(_SoundPageTestCase):
             expect(stage).to_have_attribute(
                 "data-voice", "playing", timeout=FILM_TIMEOUT
             )
-            self.assertTrue(
-                voice.evaluate("audio => audio.currentSrc === window.heldClip")
+            same_clip: bool = voice.evaluate(
+                "audio => audio.currentSrc === window.heldClip"
             )
-            self.assertGreater(voice.evaluate("audio => audio.currentTime"), held - 0.3)
+            position: float = voice.evaluate("audio => audio.currentTime")
+
+            # only after both are read, the report of what the voice did is made (it takes a while, in which the page
+            # might move the voice, and the checks would then see where the page moved it, not where Play started it):
+            report: str = (
+                f"held at {held} s, at {position} s after Play\n"
+                f"{self.voice_report(page)}"
+            )
+            self.assertTrue(same_clip, msg=report)
+            self.assertGreater(position, held - 0.3, msg=report)
 
         self.check_each_page_with_sound(check)
 
