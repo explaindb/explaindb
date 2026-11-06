@@ -248,6 +248,12 @@ The notebooks live in `notebooks/`. When you add, rename or remove one, also upd
   jobs) and the expected packing and notebook count in
   `system/tests/repo/test_assign_notebooks.py`, which fails otherwise.
 
+A notebook runs its unit tests with `run_notebook_tests(<test case classes>)` from
+`system/playground/notebook_tests.py`, so that a failing test fails the notebook run and the CI job
+`ipynb_test`; `unittest.main(..., exit=False)` would only print it.
+`system/tests/repo/test_notebook_test_calls.py` fails if a notebook calls `unittest.main` or defines a
+`TestCase` class without calling `run_notebook_tests`.
+
 ## Visualizations
 
 The pages in `visualizations/` are single HTML files with inline JavaScript; they load nothing
