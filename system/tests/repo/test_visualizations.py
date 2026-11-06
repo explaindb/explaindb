@@ -40,6 +40,7 @@ import unittest
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass, field
+from itertools import groupby
 from pathlib import Path
 from typing import TYPE_CHECKING, TypedDict
 
@@ -79,14 +80,17 @@ CLOCK_SCAN_PAGE: Path = PAGES_DIR / "clock-scan.html"
 ROW_OR_COLUMN_PAGE: Path = PAGES_DIR / "row-or-column.html"
 # the House DBMS page, which speaks its narration with the same voice (decision 036):
 HOUSE_DBMS_PAGE: Path = PAGES_DIR / "call-through-dbms.html"
-# the page on Yannakakis' semi-join reduction, which counts the semi-joins done and the tuples left (decision 032):
+# the page on Yannakakis' semi-join reduction, which counts the semi-joins done and the tuples left (decision 032) and
+# speaks its narration with the same voice (decision 038):
 YANNAKAKIS_PAGE: Path = PAGES_DIR / "yannakakis.html"
 # the pages that speak their narration; each must keep its sound button:
 PAGES_WITH_SOUND: frozenset[Path] = frozenset(
-    {CLOCK_SCAN_PAGE, ROW_OR_COLUMN_PAGE, HOUSE_DBMS_PAGE}
+    {CLOCK_SCAN_PAGE, ROW_OR_COLUMN_PAGE, HOUSE_DBMS_PAGE, YANNAKAKIS_PAGE}
 )
 # the pages with sound whose film has parts, with a button (chapter-1, ...) that jumps to the start of each:
-PAGES_WITH_PARTS: frozenset[Path] = frozenset({CLOCK_SCAN_PAGE, HOUSE_DBMS_PAGE})
+PAGES_WITH_PARTS: frozenset[Path] = frozenset(
+    {CLOCK_SCAN_PAGE, HOUSE_DBMS_PAGE, YANNAKAKIS_PAGE}
+)
 
 # Next is clicked at most this often on the way from the start of a page to its end:
 MAX_NEXT_CLICKS: int = 300
@@ -1927,12 +1931,13 @@ class HouseDbmsPageTest(_SoundPageTestCase):
 
 
 @unittest.skipUnless(PLAYWRIGHT_AVAILABLE, SKIP_REASON)
-class YannakakisPageTest(_PageTestCase):
-    """Checks the counts and the steps of the Yannakakis page.
+class YannakakisPageTest(_SoundPageTestCase):
+    """Checks the counts, the steps and the robot of the Yannakakis page, and what is particular to its voice
+    (decision 038).
 
     The counts are how many of the six semi-joins are done and how many tuples are left: the four relations of the film
     have 18 tuples together; each semi-join removes some of them, and 8 are left at the end. The steps are the 19 steps
-    of the film, of which Next shows each at some stop.
+    of the film, of which Next shows each at some stop. The robot carries each semi-join's key column to its place.
     """
 
     # the pairs (semi-joins done, tuples left) that Next shows on the way from the start to the end, in this order:
@@ -1945,6 +1950,33 @@ class YannakakisPageTest(_PageTestCase):
         (5, 10),
         (6, 8),
     ]
+    # the second caption, one of the longest, which wraps to several lines on a phone:
+    SECOND_CAPTION: str = (
+        "Its joins form a tree with root R: T joins R on a, U on b, S on c."
+    )
+    # the buttons of the controls at the bottom:
+    TRANSPORT_BUTTONS: list[str] = [
+        "chapter-1",
+        "chapter-2",
+        "chapter-3",
+        "chapter-4",
+        "play",
+        "next",
+        "sound",
+        "fullscreen",
+    ]
+    # how long the robot leaves (s): from when the camera starts to close in, it walks off and fades:
+    ROBOT_LEAVES: float = 1.7
+    # which way the robot of each semi-join is turned as it starts to carry the key column and when it has left: 1 for a
+    # positive turn, its front towards the right of the picture, -1 for a negative one, towards the left:
+    ROBOT_SIDES: dict[int, tuple[int, int]] = {
+        1: (1, 1),
+        2: (-1, 1),
+        3: (1, 1),
+        4: (1, 1),
+        5: (-1, -1),
+        6: (1, 1),
+    }
 
     def setUp(self) -> None:
         """Opens the page, paused at its start."""
@@ -2032,8 +2064,8 @@ class YannakakisPageTest(_PageTestCase):
         """
         play = self.page.get_by_test_id("play")
 
-        # the button jumps to the start of part 3 and plays; Play pauses at once, long before step 13 begins (about 5 s
-        # later, when the camera starts to close in) and long before semi-join 4 is done (about 11 s later):
+        # the button jumps to the start of part 3 and plays; Play pauses at once, long before step 13 begins (about
+        # 6.7 s later, just after the camera starts to close in) and long before semi-join 4 is done (about 12 s later):
         self.page.get_by_test_id("chapter-3").click()
         play.click()
         expect(play).to_have_attribute("data-state", "paused")
@@ -2044,6 +2076,147 @@ class YannakakisPageTest(_PageTestCase):
         expect(self.page.get_by_test_id("semi-join-4")).to_have_attribute(
             "data-state", "now"
         )
+        self.assert_no_errors(self.opened)
+
+    def test_the_robot_carries_the_key_column_of_each_semi_join_and_leaves(
+        self,
+    ) -> None:
+        """From the start of the film to its end, the robot carries a key column, leaves and is gone again six times,
+        the k-th time while semi-join k is under way; it is gone at the start, between two semi-joins and at the end.
+        Carrying, it looks half towards where it walks and turns softly where it changes sides; leaving, it turns its
+        back to us the short way round.
+
+        A semi-join begins (its compared columns light up) shortly before the robot comes with its key column, and is
+        done (its rows go dark) after the robot has gone. The robot leaves for 1.7 s: once the camera starts to close
+        in, it walks off and fades. The stage shows what it does in ``data-robot`` and how far it is turned about its
+        upright axis in ``data-robot-turn`` (rad, 0: facing the camera, also while it is gone).
+        """
+        page: Page = self.page
+        scrub = page.get_by_test_id("scrub")
+
+        # the slider's step (s): the film's length, as the clock shows it (e.g. "0:00 / 2:14"), over its 1000 steps:
+        minutes, seconds = (
+            page.get_by_test_id("clock").inner_text().split(" / ")[1].split(":")
+        )
+        step: float = (60 * int(minutes) + int(seconds)) / 1000
+
+        # once the page has set up its controls, the slider takes each of its values, which the page draws at once on
+        # the input event, as when a reader drags it; in one call into the browser, so the 1001 values take seconds.
+        # At each value, what the robot does, the semi-join under way (0 for none) and the robot's turn are noted.
+        # Every 25 values and twice at the end, the sweep waits for an animation frame, as a reader's drag lets the
+        # page draw while it moves: else the drawings of all 1001 values pile up in the browser and, on a slow machine
+        # with WebGL in software, keep the next test's page from loading in time:
+        expect(scrub).to_be_enabled()
+        samples: list[tuple[str, int, float]] = [
+            (robot, now, float(turn))
+            for robot, now, turn in page.evaluate(
+                """async ([scrub, stage, semiJoins]) => {
+                    const frame = () => new Promise((resolve) => requestAnimationFrame(() => resolve()));
+                    const samples = [];
+                    for (let value = 0; value <= 1000; value += 1) {
+                        scrub.value = String(value);
+                        scrub.dispatchEvent(new Event("input", { bubbles: true }));
+                        const now = semiJoins.findIndex((item) => item.dataset.state === "now") + 1;
+                        samples.push([stage.dataset.robot, now, stage.dataset.robotTurn]);
+                        if ((value + 1) % 25 === 0) await frame();
+                    }
+                    await frame();
+                    await frame();
+                    return samples;
+                }""",
+                [
+                    scrub.element_handle(),
+                    page.get_by_test_id("stage").element_handle(),
+                    [
+                        page.get_by_test_id(f"semi-join-{k}").element_handle()
+                        for k in range(1, 7)
+                    ],
+                ],
+            )
+        ]
+        # the values in a row with the same robot state and semi-join form a run, with the robot's turn at each value:
+        runs: list[tuple[str, int, list[float]]] = [
+            (robot, now, [turn for _, _, turn in run])
+            for (robot, now), run in groupby(samples, key=lambda sample: sample[:2])
+        ]
+
+        # gone at the start; for each semi-join k: it begins, the robot carries its key column, leaves and is gone,
+        # and the semi-join is done; gone at the end. Each state is seen at one value at least, so it lasts a step or
+        # more, and a reader who drags the slider sees it:
+        expected: list[tuple[str, int]] = [("gone", 0)]
+        for k in range(1, 7):
+            expected += [
+                ("gone", k),
+                ("carrying", k),
+                ("leaving", k),
+                ("gone", k),
+                ("gone", 0),
+            ]
+        self.assertEqual(expected, [(robot, now) for robot, now, _ in runs])
+
+        # at least once (in semi-join 2), the robot changes sides while it carries, from a negative turn to a positive
+        # one, so that the check of a soft turn below has a turn to check:
+        self.assertTrue(
+            any(
+                min(turns) < 0 < max(turns)
+                for robot, _, turns in runs
+                if robot == "carrying"
+            ),
+            "the robot never changes sides while it carries",
+        )
+
+        def side(turn: float) -> int:
+            """Returns 1 for a positive turn (the robot's front towards the right of the picture), -1 for a negative one
+            (towards the left) and 0 for none."""
+            return (turn > 0) - (turn < 0)
+
+        # the robot's turn where it stops carrying, for each semi-join (noted below, before it leaves):
+        carried_until: dict[int, float] = {}
+        for robot, now, turns in runs:
+            # carrying, it is turned by 0.6 towards where it walks, starting to the side the table gives; where it
+            # changes sides at the end of an edge, it turns softly, by at most 0.8 rad from one step to the next (about
+            # 0.5 at the most; a snap would be 1.2). On the upright R–T edge (semi-joins 3 and 4), it stays half
+            # turned, not facing the camera:
+            if robot == "carrying":
+                self.assertEqual(
+                    self.ROBOT_SIDES[now][0],
+                    side(turns[0]),
+                    f"the robot of semi-join {now} starts to carry turned the wrong way: {turns}",
+                )
+                self.assertLessEqual(
+                    max((abs(b - a) for a, b in zip(turns, turns[1:])), default=0.0),
+                    0.8,
+                    f"the robot of semi-join {now} snaps round: {turns}",
+                )
+                if now in (3, 4):
+                    self.assertGreaterEqual(
+                        min(abs(turn) for turn in turns),
+                        0.5,
+                        f"the robot of semi-join {now} faces the camera: {turns}",
+                    )
+                carried_until[now] = turns[-1]
+
+            # leaving, it takes 1.7 s, to within a step, and turns its back to us the short way round: by less than
+            # half a turn from where it stopped carrying, to π − 0.7 to the side the table gives (its front away and
+            # outwards), so that "ExplainDB" on its back shows:
+            if robot == "leaving":
+                self.assertAlmostEqual(
+                    self.ROBOT_LEAVES,
+                    len(turns) * step,
+                    delta=step,
+                    msg=f"the robot of semi-join {now} leaves for {len(turns)} steps",
+                )
+                self.assertLess(
+                    abs(turns[-1] - carried_until[now]),
+                    math.pi,
+                    f"the robot of semi-join {now} spins from {carried_until[now]}: {turns}",
+                )
+                self.assertAlmostEqual(
+                    self.ROBOT_SIDES[now][1] * (math.pi - 0.7),
+                    turns[-1],
+                    delta=0.01,
+                    msg=f"the robot of semi-join {now} does not turn its back: {turns}",
+                )
         self.assert_no_errors(self.opened)
 
     def test_the_end_card_leaves_the_tree_free(self) -> None:
@@ -2097,6 +2270,190 @@ class YannakakisPageTest(_PageTestCase):
                     box["x"],
                     f"S′'s bitmap ends at {right} px, under the card, which begins at {box['x']} px",
                 )
+        self.assert_no_errors(self.opened)
+
+    def test_the_end_card_names_the_voice(self) -> None:
+        """The last line of the end card, the credit, ends by saying that the voice is synthetic and naming its model
+        and voice."""
+        voice_named: str = "The voice is synthetic: Ming-3.0 TTS, voice UK_George."
+
+        # at the end, the end card shows, and its credit ends with the voice's (read as shown, so that the line breaks
+        # of the HTML count as spaces):
+        self.page.get_by_test_id("scrub").fill("1000")
+        expect(self.page.get_by_test_id("legend")).to_have_css("opacity", "1")
+        expect(self.page.get_by_test_id("credit")).to_have_text(
+            re.compile(re.escape(voice_named) + "$"), use_inner_text=True
+        )
+        self.assert_no_errors(self.opened)
+
+    def test_the_sound_hint_gives_way_to_the_end_card(self) -> None:
+        """With sound off, the hint "Switch on audio (M)" fades out while the end card fades in, which it would cover on
+        a narrow window, and shows again before it."""
+        hint = self.page.get_by_test_id("sound-hint")
+        scrub = self.page.get_by_test_id("scrub")
+
+        # at the start, the hint shows in full:
+        expect(hint).to_have_text("Switch on audio (M)")
+        expect(hint).to_have_css("opacity", "1")
+
+        # at the end, where the end card shows, the hint has faded out:
+        scrub.fill("1000")
+        expect(self.page.get_by_test_id("legend")).to_have_css("opacity", "1")
+        expect(hint).to_have_css("opacity", "0")
+
+        # back at the start, it shows again:
+        scrub.fill("0")
+        expect(hint).to_have_css("opacity", "1")
+        self.assert_no_errors(self.opened)
+
+    def test_the_sound_hint_sits_above_the_narration_and_leaves_it_the_list_and_the_controls_free(
+        self,
+    ) -> None:
+        """The hint sits at the bottom right, just above the narration, its right edge where the controls end, and
+        covers neither the narration's text, nor the list of the semi-joins, nor a button of the controls: on a phone
+        held upright (360 × 800 px) and sideways (800 × 360 and 844 × 390 px), on a window 500 px tall (900 × 500 px),
+        on a tablet held upright (820 × 1180 px) and on a laptop (1280 × 720 px); neither "Switch on audio (M)" with
+        sound off nor the longer "Click or press a key for sound" while the browser holds the voice back.
+
+        The place is the decision's (038): at the bottom, above the controls on the right, as on the row/column page;
+        at the top, it would cover the root R of the tree. On a window up to 500 px tall, the list shows its two
+        passes side by side, so that it ends above the hint. Checked while the second caption shows, which wraps to
+        several lines on a phone, so that the narration reaches up towards the hint.
+        """
+        page: Page = self.page
+        text = page.get_by_test_id("nar-text")
+        hint = page.get_by_test_id("sound-hint")
+        play = page.get_by_test_id("play")
+        scrub = page.get_by_test_id("scrub")
+
+        def box_of(test_id: str) -> FloatRect:
+            """Returns the box of the element with the given test id, and fails if it has none (e.g. is hidden)."""
+            box: FloatRect | None = page.get_by_test_id(test_id).bounding_box()
+            if box is None:
+                self.fail(f"{test_id} has no box")
+            return box
+
+        def apart(one: FloatRect, other: FloatRect) -> bool:
+            """Returns whether two boxes do not overlap (they may touch)."""
+            return (
+                one["x"] >= other["x"] + other["width"]
+                or other["x"] >= one["x"] + one["width"]
+                or one["y"] >= other["y"] + other["height"]
+                or other["y"] >= one["y"] + one["height"]
+            )
+
+        def expect_hint_in_place_and_apart(hint_text: str) -> None:
+            """On each of the six screens, expects the second caption and the hint to show, the hint in its place,
+            and the hint's box to overlap neither the caption's, nor the list's, nor a button's.
+            """
+            for width, height in [
+                (360, 800),
+                (800, 360),
+                (844, 390),
+                (900, 500),
+                (820, 1180),
+                (1280, 720),
+            ]:
+                with self.subTest(width=width, height=height, hint=hint_text):
+                    # the window takes the size, which the page lays out at once:
+                    page.set_viewport_size({"width": width, "height": height})
+                    expect(text).to_have_text(self.SECOND_CAPTION)
+                    expect(hint).to_have_text(hint_text)
+                    hint_box: FloatRect = box_of("sound-hint")
+
+                    # the hint sits 8 px above the narration, which begins at the top of the bottom bar (the CSS puts
+                    # the hint's bottom edge 8 px above the bar's top), and its right edge is the bar's, where the
+                    # controls end:
+                    narration_box: FloatRect = box_of("narration")
+                    transport_box: FloatRect = box_of("transport")
+                    self.assertAlmostEqual(
+                        8,
+                        narration_box["y"] - (hint_box["y"] + hint_box["height"]),
+                        delta=1,
+                        msg=f"the hint {hint_box} is not just above the narration {narration_box}",
+                    )
+                    self.assertAlmostEqual(
+                        transport_box["x"] + transport_box["width"],
+                        hint_box["x"] + hint_box["width"],
+                        delta=1,
+                        msg=f"the hint {hint_box} does not end where the controls {transport_box} end",
+                    )
+
+                    # the hint's box lies apart from the caption's, the list's and each button's:
+                    for test_id in ["nar-text", "semi-joins", *self.TRANSPORT_BUTTONS]:
+                        box: FloatRect = box_of(test_id)
+                        self.assertTrue(
+                            apart(hint_box, box),
+                            f"the hint {hint_box} covers {test_id} {box}",
+                        )
+
+        # with sound off, Next stops where the first caption and then the second one are shown in full (the slider's
+        # value there is noted); the hint "Switch on audio (M)" shows:
+        page.get_by_test_id("next").click()
+        page.get_by_test_id("next").click()
+        shown_in_full: str = scrub.input_value()
+        self.expect_sound(page, on=False)
+        expect_hint_in_place_and_apart("Switch on audio (M)")
+
+        # sound on, and ← stops where the second caption begins; Play while the browser refuses sound: the voice is
+        # held back, and the hint "Click or press a key for sound" shows while the film plays on in the second caption
+        # (which lasts about 7.6 s):
+        page.get_by_test_id("sound").click()
+        self.expect_sound(page, on=True)
+        page.keyboard.press("ArrowLeft")
+        expect(text).to_have_text(self.SECOND_CAPTION)
+        self.play_until_held_back(page)
+
+        # the slider moves back to where the second caption was shown in full, which pauses the film, so that it does
+        # not play past the caption while the window changes size six times (on a slow machine, that takes a while).
+        # Moving the slider is no click or key press on the page, so the voice stays held back:
+        scrub.fill(shown_in_full)
+        expect(play).to_have_attribute("data-state", "paused")
+        self.expect_sound(page, on=True, held_back=True)
+        expect_hint_in_place_and_apart("Click or press a key for sound")
+        self.assert_no_errors(self.opened)
+
+    def test_the_page_stops_if_a_clip_of_its_voice_does_not_belong_to_its_caption(
+        self,
+    ) -> None:
+        """At start-up, the page checks that each clip of its voice belongs to its caption: a copy whose first clip was
+        made for another text stops with an error that says so, whereas the page itself passes the check.
+
+        The clips are matched to the captions by their order (decision 038), so a voice built for other captions would
+        otherwise speak the wrong words; with the error, the page fails its tests instead.
+        """
+        # a copy of the page, in a folder of its own that is removed after the test, whose voice notes another text
+        # for its first clip than the first caption's:
+        html: str = YANNAKAKIS_PAGE.read_text(encoding="utf-8")
+        first_clip: str = 'const VOICE = [{"text": "'
+        self.assertEqual(1, html.count(first_clip), "the page's voice was not found")
+        # enterContext removes the folder with addCleanup, which runs after the copy's browser context is closed (the
+        # cleanups run in reverse order); pylint does not know that, so it asks for a with block:
+        # pylint: disable-next=consider-using-with
+        folder: str = self.enterContext(tempfile.TemporaryDirectory())
+        changed_page: Path = Path(folder) / YANNAKAKIS_PAGE.name
+        changed_page.write_text(
+            html.replace(first_clip, first_clip + "Once more: "), encoding="utf-8"
+        )
+
+        # the copy throws the error once it has loaded its fonts, which may be after open_page has returned; the error
+        # is recorded as soon as Playwright has handled it (at most 5 s). The copy requests nothing but local files:
+        opened: OpenedPage = self.open_page(changed_page)
+        error: str = (
+            "uncaught: the voice does not match caption 1: rebuild it with voice.py"
+        )
+        for _ in range(50):
+            if error in opened.errors:
+                break
+            opened.page.wait_for_timeout(100)
+        self.assertIn(error, opened.errors)
+        self.assertEqual([], opened.outside_requests)
+
+        # the copy stops there: it never sets up its controls, so Play stays disabled, as the HTML writes it:
+        expect(opened.page.get_by_test_id("play")).to_be_disabled()
+
+        # the page itself passes the check: it sets up its controls, which comes after the check, without an error:
+        expect(self.page.get_by_test_id("play")).to_be_enabled()
         self.assert_no_errors(self.opened)
 
 

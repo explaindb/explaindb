@@ -391,7 +391,7 @@ clip of its own (on the row/column page); these are not the segments of the slid
   ([decision 034](docs/changes/034-narration-voice/DECISION.md); e.g. the clock-scan page,
   `clock-scan.html`). Each caption has a clip (a caption said in segments, as on the row/column page, has
   one per segment), embedded as an MP3 `data:` URL (mono, at a constant 48 or 64 kbit/s; at 48 kbit/s the
-  voice adds about 0.5 MB to the page per minute of speech, 0.3 to 0.6 MB on the three pages that speak),
+  voice adds about 0.5 MB to the page per minute of speech, 0.3 to 0.8 MB on the four pages that speak),
   which the page's Content-Security-Policy allows with `media-src data:` (see the note at the end of
   decision 030). Its words light up at the moments the voice says them, so that the subtitles keep the
   voice's pace also with sound off. Sound is off at load, as browsers allow sound only after a click or
@@ -413,7 +413,7 @@ clip of its own (on the row/column page); these are not the segments of the slid
   names its model and voice (on the House DBMS page at the end of the `credit` line, on the clock-scan
   page in the card above it); a comment above the clips names the model, its license (MIT) and how the
   clips were made, and the README says that the page speaks, in its subsection of *Visualizations* and in
-  the section *License*. The voice's code is the same on the three pages that speak; a new page takes it
+  the section *License*. The voice's code is the same on the four pages that speak; a new page takes it
   over. The clips are made outside the repository, as decision 034 describes: every new take is checked
   with a speech recogniser for misspoken or cut words and listened to before it goes into the page.
 - **Fast passages:** while the film runs faster than normal, a badge `▶▶ ×4` (`fast-forward`) says
