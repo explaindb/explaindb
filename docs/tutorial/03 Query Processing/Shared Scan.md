@@ -11,9 +11,10 @@ currently is until it has seen the whole table.
 
 ## In this repo
 
-- **Notebook:** [`Shared-Scan.ipynb`](../../../notebooks/Shared-Scan.ipynb) — motivates the technique with a
-  simple `SELECT * FROM stuff WHERE a = 7`-style query and shows several concurrent scans sharing one
-  pass over the data.
+- **Notebook:** [`Shared-Scan.ipynb`](../../../notebooks/Shared-Scan.ipynb) — starts from a simple
+  `SELECT * FROM stuff WHERE a = 7`-style query, runs several such queries with one scan each, and then with
+  one shared scan, once with a result list per query and once with a single list of tagged tuples. All
+  queries are known before the scan starts, so the notebook shows a single plain pass, not the cyclic scan.
 
 ## The idea in one picture
 
@@ -27,5 +28,6 @@ currently is until it has seen the whole table.
 
 ## Try it
 
-In `Shared-Scan.ipynb`, compare the total bytes read when *N* queries each scan the table independently
-versus when they share a single scan.
+In `Shared-Scan.ipynb`, count for *N* queries how many tuples Algorithm 2 (one scan per query) and
+Algorithm 3 (shared scan) read, and how many predicates they test: the shared scan reads each tuple once
+instead of *N* times, but tests just as many predicates.
