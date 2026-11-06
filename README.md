@@ -103,6 +103,19 @@ voice speaks the narration once the sound is switched on).
 Notebook: [Shared-Scan](notebooks/Shared-Scan.ipynb)
 [![Open Shared-Scan on Binder](https://mybinder.org/badge_logo.svg)](https://mybinder.org/v2/gh/explaindb/explaindb/main?urlpath=lab/tree/notebooks/Shared-Scan.ipynb)
 
+### [yannakakis](https://htmlpreview.github.io/?https://github.com/explaindb/explaindb/blob/main/visualizations/yannakakis.html)
+
+[<img src="docs/images/visualizations/yannakakis.jpg" width="480" alt="The join tree of R′, T′′′, U′ and S′ with the eight rows left outlined green, beside the query on the original relations and, equal to it, on the reduced ones">](https://htmlpreview.github.io/?https://github.com/explaindb/explaindb/blob/main/visualizations/yannakakis.html)
+
+Yannakakis' semi-join reduction on an acyclic query: the joins of R, T, U and S form a tree with root R; each relation
+shows only its keys and join attributes, as colours. A semi-join sends just a column of keys along an edge; at the other
+end the column is drawn out beside the rows of that relation, and a row stays only if its key is in the column.
+Bottom-up (T′, T″, R′), then top-down (T′′′, U′, S′): 18 rows become 8, each one a part of the join, and the query on
+the reduced relations gives the same result as on the original ones (with three.js).
+
+Notebook: [Result-DB](notebooks/Result-DB.ipynb)
+[![Open Result-DB on Binder](https://mybinder.org/badge_logo.svg)](https://mybinder.org/v2/gh/explaindb/explaindb/main?urlpath=lab/tree/notebooks/Result-DB.ipynb)
+
 ## Notebooks
 
 The notebooks are grouped by the chapters of the [tutorial](docs/tutorial/README.md), which explains each
@@ -231,10 +244,10 @@ dependencies, notebooks and the API documentation are maintained.
 ExplainDB is licensed under the [GNU Affero General Public License v3.0](LICENSE) (AGPL-3.0).
 Copyright (C) 2026 Prof. Dr. Jens Dittrich, Saarland University.
 
-The pages `visualizations/row-or-column.html`, `visualizations/call-through-dbms.html` and
-`visualizations/clock-scan.html` also embed third-party code and fonts under their own licenses: three.js (MIT
-License) and the fonts Archivo and JetBrains Mono (SIL Open Font License 1.1). Each page gives their copyright and
-license notices. All three pages also embed a synthetic voice, spoken with the model
+The pages `visualizations/row-or-column.html`, `visualizations/call-through-dbms.html`,
+`visualizations/clock-scan.html` and `visualizations/yannakakis.html` also embed third-party code and fonts under their
+own licenses: three.js (MIT License) and the fonts Archivo and JetBrains Mono (SIL Open Font License 1.1). Each page
+gives their copyright and license notices. The first three pages also embed a synthetic voice, spoken with the model
 Ming-3.0-tts (MIT License, voice UK_George); each page names it.
 
 ## Contributors

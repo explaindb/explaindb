@@ -79,6 +79,8 @@ CLOCK_SCAN_PAGE: Path = PAGES_DIR / "clock-scan.html"
 ROW_OR_COLUMN_PAGE: Path = PAGES_DIR / "row-or-column.html"
 # the House DBMS page, which speaks its narration with the same voice (decision 036):
 HOUSE_DBMS_PAGE: Path = PAGES_DIR / "call-through-dbms.html"
+# the page on Yannakakis' semi-join reduction, which counts the semi-joins done and the tuples left (decision 032):
+YANNAKAKIS_PAGE: Path = PAGES_DIR / "yannakakis.html"
 # the pages that speak their narration; each must keep its sound button:
 PAGES_WITH_SOUND: frozenset[Path] = frozenset(
     {CLOCK_SCAN_PAGE, ROW_OR_COLUMN_PAGE, HOUSE_DBMS_PAGE}
@@ -1922,6 +1924,180 @@ class HouseDbmsPageTest(_SoundPageTestCase):
         self.play_until_held_back(page)
         expect_hint_beside_order_3s_card()
         self.assert_no_errors(opened)
+
+
+@unittest.skipUnless(PLAYWRIGHT_AVAILABLE, SKIP_REASON)
+class YannakakisPageTest(_PageTestCase):
+    """Checks the counts and the steps of the Yannakakis page.
+
+    The counts are how many of the six semi-joins are done and how many tuples are left: the four relations of the film
+    have 18 tuples together; each semi-join removes some of them, and 8 are left at the end. The steps are the 19 steps
+    of the film, of which Next shows each at some stop.
+    """
+
+    # the pairs (semi-joins done, tuples left) that Next shows on the way from the start to the end, in this order:
+    COUNTS: list[tuple[int, int]] = [
+        (0, 18),
+        (1, 17),
+        (2, 15),
+        (3, 13),
+        (4, 12),
+        (5, 10),
+        (6, 8),
+    ]
+
+    def setUp(self) -> None:
+        """Opens the page, paused at its start."""
+        self.opened: OpenedPage = self.open_page(YANNAKAKIS_PAGE)
+        self.page: Page = self.opened.page
+
+    def counts(self) -> tuple[int, int]:
+        """Returns the semi-joins done and the tuples left, as the page shows them.
+
+        Also asserts that the semi-joins done are the first ones and that the counter shows the tuples left.
+
+        @return: how many of the six semi-joins are done (``data-state`` of ``semi-join-1`` … ``semi-join-6``), and
+            how many tuples are left (``data-tuples-left`` of the stage)
+        """
+        states: list[str] = [
+            self.page.get_by_test_id(f"semi-join-{k}").get_attribute("data-state") or ""
+            for k in range(1, 7)
+        ]
+        done: int = states.count("done")
+        # the semi-joins are done in their order: those done are semi-joins 1 to done:
+        self.assertEqual(["done"] * done, states[:done], f"out of order: {states}")
+
+        # the counter shows the tuples left that the stage holds:
+        left: str = (
+            self.page.get_by_test_id("stage").get_attribute("data-tuples-left") or ""
+        )
+        self.assertEqual(left, self.page.get_by_test_id("tuples-left").text_content())
+        return done, int(left)
+
+    def seen_at_each_stop[T](self, read: Callable[[], T]) -> list[T]:
+        """Clicks Next from the start to the end and returns what read returns at the start and after each click.
+
+        A value is noted only when it differs from the one noted before, so stops in a row that show the same value
+        give it once.
+
+        @param read: reads what the paused page shows, e.g. its counts
+        @return: the values in the order in which Next showed them
+        """
+        play = self.page.get_by_test_id("play")
+        seen: list[T] = [read()]
+        clicks: int = 0
+        while play.get_attribute("data-state") != "ended":
+            self.assertLess(clicks, MAX_NEXT_CLICKS, "Next did not reach the end")
+            self.page.get_by_test_id("next").click()
+            clicks += 1
+            # read right after the click, as Next draws its stop at once (the page's show() renders before returning):
+            value: T = read()
+            if value != seen[-1]:
+                seen.append(value)
+        return seen
+
+    def test_next_shows_each_semi_join_done_and_the_tuples_left_after_it(self) -> None:
+        """Next leads from the start to the end through the six semi-joins, done one after the other in their order,
+        and shows the tuples left at the start and after each: 18, 17, 15, 13, 12, 10 and 8.
+        """
+        # at the start, no semi-join is done and all 18 tuples are left:
+        expect(self.page.get_by_test_id("stage")).to_have_attribute(
+            "data-tuples-left", "18"
+        )
+
+        # Next leads to the end; the counts after each click are noted when they differ from those before:
+        self.assertEqual(self.COUNTS, self.seen_at_each_stop(self.counts))
+        self.assert_no_errors(self.opened)
+
+    def test_next_stops_in_every_step(self) -> None:
+        """Next leads from the start to the end through the 19 steps of the film in their order and stops in each.
+
+        A step that began and ended between two stops would never be shown to a reader who clicks Next.
+        """
+        stage = self.page.get_by_test_id("stage")
+
+        # at the start, the page shows step 1:
+        expect(stage).to_have_attribute("data-scene", "1")
+
+        # Next leads to the end; the step after each click is noted when it differs from the one before:
+        steps: list[str] = self.seen_at_each_stop(
+            lambda: stage.get_attribute("data-scene") or ""
+        )
+        self.assertEqual([str(n) for n in range(1, 20)], steps)
+        self.assert_no_errors(self.opened)
+
+    def test_top_down_starts_with_three_semi_joins_done(self) -> None:
+        """The button of part 3, "Top-down", jumps to the start of semi-join 4 (its first step, the 12th of the film),
+        with semi-joins 1 to 3 done and 13 tuples left.
+        """
+        play = self.page.get_by_test_id("play")
+
+        # the button jumps to the start of part 3 and plays; Play pauses at once, long before step 13 begins (about 5 s
+        # later, when the camera starts to close in) and long before semi-join 4 is done (about 11 s later):
+        self.page.get_by_test_id("chapter-3").click()
+        play.click()
+        expect(play).to_have_attribute("data-state", "paused")
+        expect(self.page.get_by_test_id("stage")).to_have_attribute("data-scene", "12")
+
+        # semi-joins 1 to 3 are done, semi-join 4 is under way, and 13 tuples are left:
+        self.assertEqual((3, 13), self.counts())
+        expect(self.page.get_by_test_id("semi-join-4")).to_have_attribute(
+            "data-state", "now"
+        )
+        self.assert_no_errors(self.opened)
+
+    def test_the_end_card_leaves_the_tree_free(self) -> None:
+        """The card at the end leaves the whole tree free, from U′'s bitmap on the left to S′'s on the right, on
+        windows from 1920 × 1080 down to 700 px wide (and up to about 1.75 times as tall as wide).
+
+        The camera's position at the end follows the card's width: at a fixed x, the card would cover S′ on windows
+        narrower than about 1165 px. On a phone the card cannot be cleared, so phones are not checked.
+        """
+        stage = self.page.get_by_test_id("stage")
+        scrub = self.page.get_by_test_id("scrub")
+        legend = self.page.get_by_test_id("legend")
+
+        # from a big screen down to a tablet held upright, a narrow window and a tall one (about 1.75 times as tall as
+        # wide); each size differs from the one before
+        # (the first from the browser's 1280 × 720), so that the window fires a resize event for each:
+        for width, height in [
+            (1920, 1080),
+            (1280, 720),
+            (1024, 768),
+            (820, 1180),
+            (700, 900),
+            (700, 1220),
+        ]:
+            with self.subTest(width=width, height=height):
+                # the window takes the size; the wait lasts until it has fired its resize event, on which the page
+                # fits the camera to the window and notes where the card begins (a jump to the end before that would
+                # be drawn for the size before):
+                self.page.evaluate("""() => {
+                        window.resized = false;
+                        addEventListener("resize", () => { window.resized = true; }, { once: true });
+                    }""")
+                self.page.set_viewport_size({"width": width, "height": height})
+                self.page.wait_for_function("() => window.resized")
+
+                # the slider jumps to the end, which the page draws at once, and the card shows:
+                scrub.fill("1000")
+                expect(legend).to_have_css("opacity", "1")
+
+                # U′'s bitmap begins in the window, and S′'s ends left of the card:
+                box: FloatRect | None = legend.bounding_box()
+                if box is None:
+                    self.fail("the card has no box")
+                left: int = int(stage.get_attribute("data-tree-left") or "")
+                right: int = int(stage.get_attribute("data-tree-right") or "")
+                self.assertLessEqual(
+                    0, left, f"U′'s bitmap begins at {left} px, left of the window"
+                )
+                self.assertLess(
+                    right,
+                    box["x"],
+                    f"S′'s bitmap ends at {right} px, under the card, which begins at {box['x']} px",
+                )
+        self.assert_no_errors(self.opened)
 
 
 @unittest.skipUnless(PLAYWRIGHT_AVAILABLE, SKIP_REASON)
