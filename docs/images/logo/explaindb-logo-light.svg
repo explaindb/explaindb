@@ -1,0 +1,44 @@
+<!--
+    This is ExplainDB, educational database systems materials.
+
+    Copyright (C) 2026 Prof. Dr. Jens Dittrich, Saarland University
+
+    This program is free software: you can redistribute it and/or modify
+    it under the terms of the GNU Affero General Public License as
+    published by the Free Software Foundation, either version 3 of the
+    License, or (at your option) any later version.
+
+    This program is distributed in the hope that it will be useful,
+    but WITHOUT ANY WARRANTY; without even the implied warranty of
+    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+    GNU Affero General Public License for more details.
+
+    You should have received a copy of the GNU Affero General Public License
+    along with this program.  If not, see <https://www.gnu.org/licenses/>.
+
+    The ExplainDB logo for light backgrounds: an orange robot sits on the writing line in place of the letters
+    ai, which stand on its belly, and lets its legs dangle. The README shows this file or its dark twin
+    explaindb-logo-dark.svg, whichever fits the reader's theme.
+    The wordmark is set in Space Grotesk Bold (Copyright 2020 The Space Grotesk Project Authors, SIL Open Font
+    License 1.1) and converted to outlines, so the file needs no font.
+-->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="-50.0 -155.0 604.0 220.0" width="604" height="220" role="img" aria-label="ExplainDB: a robot sits on the writing line in place of the letters ai, which stand on its belly">
+  <rect x="-50.0" y="-155.0" width="604.0" height="220.0" rx="14.0" fill="#ffffff"/>
+  <rect x="-12.0" y="0" width="528.0" height="3.5" rx="2.0" fill="#1c2128" opacity="0.45"/>
+  <path d="M6.6 0V-70H51.6V-58H19.8V-41.3H48.8V-29.3H19.8V-12H52.2V0Z" fill="#1c2128"/>
+  <path d="M56 0 74 -25 56.2 -49.6H70.8L82.1 -33.1H83.9L95.2 -49.6H109.8L92 -25L110 0H95.2L83.9 -16.7H82.1L70.8 0Z" fill="#1c2128"/>
+  <path d="M117.6 20V-49.6H130V-43.6H131.8Q133.5 -46.5 137.1 -48.8Q140.7 -51 147.4 -51Q153.4 -51 158.5 -48Q163.6 -45.1 166.7 -39.4Q169.8 -33.7 169.8 -25.6V-24Q169.8 -15.9 166.7 -10.2Q163.6 -4.5 158.5 -1.5Q153.4 1.4 147.4 1.4Q142.9 1.4 139.9 0.4Q136.8 -0.7 134.9 -2.4Q133.1 -4 132 -5.7H130.2V20ZM143.6 -9.6Q149.5 -9.6 153.3 -13.4Q157.2 -17.1 157.2 -24.3V-25.3Q157.2 -32.5 153.3 -36.2Q149.4 -40 143.6 -40Q137.8 -40 133.9 -36.2Q130 -32.5 130 -25.3V-24.3Q130 -17.1 133.9 -13.4Q137.8 -9.6 143.6 -9.6Z" fill="#1c2128"/>
+  <path d="M179.4 0V-70H192V0Z" fill="#1c2128"/>
+  <path d="M320.4 0V-49.6H332.8V-43.1H334.6Q335.8 -45.7 339.1 -48.1Q342.4 -50.4 349.1 -50.4Q354.9 -50.4 359.2 -47.8Q363.6 -45.1 366 -40.5Q368.4 -35.8 368.4 -29.6V0H355.8V-28.6Q355.8 -34.2 353 -37Q350.3 -39.8 345.2 -39.8Q339.4 -39.8 336.2 -36Q333 -32.1 333 -25.2V0Z" fill="#1c2128"/>
+  <path d="M377.6 0V-11.6H386.8V-58.4H377.6V-70H406.4Q420.5 -70 427.9 -62.9Q435.2 -55.7 435.2 -41.6V-28.4Q435.2 -14.3 427.9 -7.2Q420.5 0 406.4 0ZM400 -12H406.6Q414.6 -12 418.3 -16.2Q422 -20.4 422 -28V-42Q422 -49.7 418.3 -53.9Q414.6 -58 406.6 -58H400Z" fill="#13803a"/>
+  <path d="M442.2 0V-11.6H451.4V-58.4H442.2V-70H478.2Q484.6 -70 489.4 -67.8Q494.1 -65.7 496.8 -61.8Q499.4 -57.8 499.4 -52.3V-51.3Q499.4 -46.5 497.6 -43.5Q495.8 -40.4 493.4 -38.8Q490.9 -37.1 488.7 -36.4V-34.6Q490.9 -34 493.5 -32.4Q496.1 -30.7 498 -27.6Q499.8 -24.5 499.8 -19.5V-18.5Q499.8 -12.7 497.1 -8.6Q494.4 -4.4 489.7 -2.2Q484.9 0 478.6 0ZM464.6 -12H477Q481.3 -12 484 -14.1Q486.6 -16.2 486.6 -20.1V-21.1Q486.6 -25 484 -27.1Q481.4 -29.2 477 -29.2H464.6ZM464.6 -41.2H476.8Q480.9 -41.2 483.6 -43.3Q486.2 -45.4 486.2 -49.1V-50.1Q486.2 -53.9 483.6 -56Q481 -58 476.8 -58H464.6Z" fill="#13803a"/>
+  <rect x="210.0" y="-70.6" width="90.4" height="70.6" rx="10.0" fill="#e8743b"/>
+  <path d="M210.0 -60.6 A10.0 10.0 0 0 1 220.0 -70.6 H290.4 A10.0 10.0 0 0 1 300.4 -60.6 Z" fill="#000000" opacity="0.13"/>
+  <path d="M237.4 1.4Q232.1 1.4 227.9 -0.5Q223.7 -2.3 221.2 -5.9Q218.8 -9.4 218.8 -14.5Q218.8 -19.6 221.2 -23.1Q223.7 -26.5 228 -28.2Q232.4 -30 238 -30H251.6V-32.8Q251.6 -36.3 249.4 -38.6Q247.2 -40.8 242.4 -40.8Q237.7 -40.8 235.4 -38.7Q233.1 -36.5 232.4 -33.1L220.8 -37Q222 -40.8 224.6 -44Q227.3 -47.1 231.8 -49Q236.2 -51 242.6 -51Q252.4 -51 258.1 -46.1Q263.8 -41.2 263.8 -31.9V-13.4Q263.8 -10.4 266.6 -10.4H270.6V0H262.2Q258.5 0 256.1 -1.8Q253.7 -3.6 253.7 -6.6V-6.7H251.8Q251.4 -5.5 250 -3.5Q248.6 -1.6 245.6 -0.1Q242.6 1.4 237.4 1.4ZM239.6 -8.8Q244.9 -8.8 248.2 -11.8Q251.6 -14.7 251.6 -19.6V-20.6H238.9Q235.4 -20.6 233.4 -19.1Q231.4 -17.6 231.4 -14.9Q231.4 -12.2 233.5 -10.5Q235.6 -8.8 239.6 -8.8Z" fill="#1c2128"/>
+  <path d="M277.8 0V-49.6H290.4V0ZM284.1 -55.4Q280.7 -55.4 278.3 -57.6Q276 -59.8 276 -63.4Q276 -67 278.3 -69.2Q280.7 -71.4 284.1 -71.4Q287.6 -71.4 289.9 -69.2Q292.2 -67 292.2 -63.4Q292.2 -59.8 289.9 -57.6Q287.6 -55.4 284.1 -55.4Z" fill="#1c2128"/>
+  <rect x="-4.5" y="0" width="9.0" height="38.0" rx="4.5" fill="#e8743b" transform="translate(206.5 -48.6) rotate(6)"/>
+  <rect x="-4.5" y="0" width="9.0" height="38.0" rx="4.5" fill="#e8743b" transform="translate(303.9 -48.6) rotate(-6)"/>
+  <g transform="translate(221.2 -126.7) scale(0.7391) translate(-4 -9)"><path d="M15 29 A35 9.8 0 0 1 85 29 V80.8 A35 9.8 0 0 1 15 80.8 Z" fill="#000000" opacity="0.3" transform="translate(0 4.06)"/><path d="M15.0 29.0 A35.0 9.8 0 0 1 85.0 29.0 V80.80000000000001 A35.0 9.8 0 0 1 15.0 80.80000000000001 Z" fill="#e8743b"/><path d="M15.0 29.00 A35.0 9.8 0 0 0 85.0 29.00" fill="none" stroke="#0b0f16" stroke-width="4.9"/><rect x="23.40" y="44.40" width="53.20" height="23.80" rx="4.20" fill="#0b0f16"/><rect x="33.20" y="52.80" width="8.40" height="8.40" rx="1.12" fill="#7ff7ff"/><rect x="58.40" y="52.80" width="8.40" height="8.40" rx="1.12" fill="#7ff7ff"/><path d="M40.20 72.40 Q50 79.40 59.80 72.40" fill="none" stroke="#0b0f16" stroke-width="4.20" stroke-linecap="round"/><polygon points="5.199999999999996,26.19999999999999 50,42.77599999999999 94.80000000000001,26.19999999999999 94.80000000000001,31.57599999999999 50,48.15199999999999 5.199999999999996,31.57599999999999" fill="#1a9c48"/><polygon points="50,9.623999999999988 94.80000000000001,26.19999999999999 50,42.77599999999999 5.199999999999996,26.19999999999999" fill="#2ee66b"/><circle cx="50" cy="26.19999999999999" r="3.14" fill="#0b0f16"/><path d="M50 26.19999999999999 L91.22 29.52 V50.84" fill="none" stroke="#e6edf3" stroke-width="3.14" stroke-linejoin="round"/><rect x="87.63" y="48.60" width="7.17" height="11.65" rx="2.24" fill="#e6edf3"/></g>
+  <g transform="translate(235.4 -2.0) rotate(8)"><rect x="-10.0" y="0" width="20.0" height="40.0" rx="4.0" fill="#8b949e"/><rect x="-13.5" y="34.5" width="28.0" height="8.5" rx="4.0" fill="#6e7681"/></g>
+  <g transform="translate(275.0 -2.0) rotate(-3)"><rect x="-10.0" y="0" width="20.0" height="40.0" rx="4.0" fill="#8b949e"/><rect x="-13.5" y="34.5" width="28.0" height="8.5" rx="4.0" fill="#6e7681"/></g>
+</svg>

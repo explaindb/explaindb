@@ -1,3 +1,11 @@
+<p>
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="docs/images/logo/explaindb-logo-dark.svg">
+    <img src="docs/images/logo/explaindb-logo-light.svg" width="360"
+         alt="ExplainDB logo: an orange robot sits on the line in place of the letters ai, which stand on its belly">
+  </picture>
+</p>
+
 # ExplainDB - a Database System built for Understandability
 
 [![License: AGPL v3](https://img.shields.io/github/license/explaindb/explaindb)](LICENSE)

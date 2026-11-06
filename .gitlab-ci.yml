@@ -56,8 +56,9 @@ stages:
 # conservative: it only skips when *every* changed file is Markdown, and it never
 # skips on the default branch -- anything else leaves DOCS_ONLY=false. The
 # top-level README.md does not count as docs-only: unit tests
-# (system/tests/repo/test_readme_notebooks.py and test_readme_visualizations.py)
-# check its notebook table and its section Visualizations. Neither
+# (system/tests/repo/test_readme_notebooks.py, test_readme_visualizations.py and
+# test_logo.py) check its notebook table, its section Visualizations and its
+# logo. Neither
 # does generated/rust/README.md: rust_test runs its code example as a test.
 # Nor does .claude/commands/regenerate-rust.md: a unit test checks the options it names.
 detect-docs-only:
@@ -77,7 +78,7 @@ detect-docs-only:
         echo "Changed files vs $BASE:"
         printf '%s\n' "$CHANGED"
         # docs-only: at least one change, no changed file is a non-.md file, and
-        # none of README.md (its notebook table and section Visualizations are tested),
+        # none of README.md (its notebook table, section Visualizations and logo are tested),
         # generated/rust/README.md (its code example is tested) and
         # .claude/commands/regenerate-rust.md (its options are tested) is among them
         if [ -n "$CHANGED" ] && ! printf '%s\n' "$CHANGED" | grep -qvE '\.md$' \

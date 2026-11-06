@@ -11,7 +11,7 @@ code, so run `black .` before every push.
 The unit tests live in `system/tests/`, whose folders mirror the packages of `system/`: the tests of
 `system/stores/` are in `system/tests/stores/`, and the tests of modules directly in `system/` (e.g.
 `system/DBMS.py`) are directly in `system/tests/`. Tests that check the repository itself (CI configuration,
-notebooks and the README, the Javadoc hook of the API documentation in `docs/api/javadoc.py`, the pages in
+notebooks and the README, the logo, the Javadoc hook of the API documentation in `docs/api/javadoc.py`, the pages in
 `visualizations/`) are in `system/tests/repo/`. Every test folder below `system/tests/` needs an `__init__.py`;
 without it, `unittest discover` silently skips its tests. Run all tests with:
 
@@ -520,6 +520,18 @@ start of the film, and `--hold` sets how long the last frame stays (3 s by defau
 The CI job `render_video_test` runs the tool's tests (`system/tests/repo/test_render_video.py`) beside
 `visualization_test`, in every merge request that changes the tool, its test, a page, the page
 test, `.gitlab-ci.yml`, `pyproject.toml` or `uv.lock`; only this job installs ffmpeg.
+
+## Logo
+
+The logo comes in two files in [`docs/images/logo/`](docs/images/logo): `explaindb-logo-light.svg` for light and
+`explaindb-logo-dark.svg` for dark backgrounds, each on its own background. The README shows them above the title
+in a `<picture>`, which picks the one that fits the reader's theme. The letters are converted to outlines, so the
+files need no font. `explaindb-avatar.png` is the project avatar; it is exported from `explaindb-avatar.svg` with
+the command in that file's header comment. Each of the three SVGs holds its own copy of the robot: change them
+together, and export the PNG again after changing the avatar SVG.
+`system/tests/repo/test_logo.py` checks that the SVGs use only plain drawing elements (no scripts, style sheets or
+links), that the PNG is 512 × 512 and that the README shows the logo above the title with a meaningful alt text; it
+cannot tell whether the PNG still matches its SVG.
 
 ## Serializability test of the MVCC store
 
