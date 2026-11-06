@@ -11,9 +11,10 @@ modern compiling query engines (the "produce/consume" model).
 
 ## In this repo
 
-- **Notebook:** [`CodeGen.ipynb`](../../../notebooks/CodeGen.ipynb) — takes the same join query as
-  [Result DB](<Operators & the Push Model.md>) and generates Python code for it, then runs the generated
-  code; you can read the emitted program and compare it to the interpreted pipeline.
+- **Notebook:** [`CodeGen.ipynb`](../../../notebooks/CodeGen.ipynb) — builds an operator plan for a one-join
+  query (`persons ⋈ books ON name = author WHERE price < 10`), interprets it, generates Python code for it
+  and runs that code, then compares the running times of both; you can read the emitted program and
+  compare it to the interpreted pipeline.
 - **Implementation:** the `compile(...)`/emit methods on the operators in
   [`system/query_processing/operators.py`](../../../system/query_processing/operators.py).
 - **Tests:**

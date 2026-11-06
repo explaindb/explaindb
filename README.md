@@ -154,8 +154,8 @@ confidential data, and do not enter passwords in a Binder session.
 
 | Notebook | Topic | Launch |
 |---|---|---|
-| [Result-DB](notebooks/Result-DB.ipynb) | Running a query with two joins as a pipeline of operators (push model) | [![Open Result-DB on Binder](https://mybinder.org/badge_logo.svg)](https://mybinder.org/v2/gh/explaindb/explaindb/main?urlpath=lab/tree/notebooks/Result-DB.ipynb) |
-| [CodeGen](notebooks/CodeGen.ipynb) | Generating Python code for the Result-DB query and running it | [![Open CodeGen on Binder](https://mybinder.org/badge_logo.svg)](https://mybinder.org/v2/gh/explaindb/explaindb/main?urlpath=lab/tree/notebooks/CodeGen.ipynb) |
+| [Result-DB](notebooks/Result-DB.ipynb) | Result subdatabases (`SELECT RESULTDB`): only the tuples of each relation that take part in a join result, via SQL rewrites or Yannakakis' semi-joins | [![Open Result-DB on Binder](https://mybinder.org/badge_logo.svg)](https://mybinder.org/v2/gh/explaindb/explaindb/main?urlpath=lab/tree/notebooks/Result-DB.ipynb) |
+| [CodeGen](notebooks/CodeGen.ipynb) | Compiling a join query plan into Python code and comparing its speed with interpreting the plan | [![Open CodeGen on Binder](https://mybinder.org/badge_logo.svg)](https://mybinder.org/v2/gh/explaindb/explaindb/main?urlpath=lab/tree/notebooks/CodeGen.ipynb) |
 | [Shared-Scan](notebooks/Shared-Scan.ipynb) | Several concurrent queries sharing one pass over the data | [![Open Shared-Scan on Binder](https://mybinder.org/badge_logo.svg)](https://mybinder.org/v2/gh/explaindb/explaindb/main?urlpath=lab/tree/notebooks/Shared-Scan.ipynb) |
 | [External-Merge-Sort](notebooks/External-Merge-Sort.ipynb) | Sorting data larger than main memory: sort chunks, then merge them | [![Open External-Merge-Sort on Binder](https://mybinder.org/badge_logo.svg)](https://mybinder.org/v2/gh/explaindb/explaindb/main?urlpath=lab/tree/notebooks/External-Merge-Sort.ipynb) |
 | [Top-k](notebooks/Top-k.ipynb) | `ORDER BY title LIMIT 10` without sorting all rows | [![Open Top-k on Binder](https://mybinder.org/badge_logo.svg)](https://mybinder.org/v2/gh/explaindb/explaindb/main?urlpath=lab/tree/notebooks/Top-k.ipynb) |

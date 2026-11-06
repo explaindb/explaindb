@@ -21,8 +21,9 @@ other.
 - **Interfaces:**
   [`system/interfaces/query_processing/operators.py`](../../../system/interfaces/query_processing/operators.py),
   [`system/interfaces/query_processing/query_processing.py`](../../../system/interfaces/query_processing/query_processing.py).
-- **Notebook:** [`Result-DB.ipynb`](../../../notebooks/Result-DB.ipynb) — executes a two-join query
-  (`persons ⋈ orders ⋈ books WHERE price < 10`) by assembling and running the operator pipeline.
+- **Notebook:** [`Result-DB.ipynb`](../../../notebooks/Result-DB.ipynb) — assembles and runs an operator
+  pipeline for a two-join query (`persons ⋈ orders ⋈ books WHERE price < 10`) with a semi-join (`SemiJ`) on
+  top; the notebook's main topic is result subdatabases.
 - **Tests:**
   [`system/tests/query_processing/test_query_processing.py`](../../../system/tests/query_processing/test_query_processing.py),
   [`system/tests/query_processing/test_code_gen.py`](../../../system/tests/query_processing/test_code_gen.py).
@@ -39,5 +40,5 @@ Collect                         open() flows down; tuples are pushed up:
 
 ## Try it
 
-Open `Result-DB.ipynb` and follow one tuple from a leaf `Relation` up through the join to the `Collect`
+Open `Result-DB.ipynb` and follow one tuple from a leaf `Relation` up through the joins to the `Print`
 sink; then compare with the *compiled* version in [Code Generation](<Code Generation.md>).
