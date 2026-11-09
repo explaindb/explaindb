@@ -33,7 +33,21 @@ from system.stores.VersionedKeyValueStore import VersionedKeyValueStore
 
 
 class IndexedTransactionalKeyValueStore(TransactionalKeyValueStore, IndexedACIDStore):
-    """A fully transactional versioned (MVCC) key value store adding support for indexes."""
+    """A fully transactional versioned (MVCC) key value store with indexes on object attributes.
+
+    An index maps an attribute value to the ids of the objects that have it (the store maps an object id to the
+    versions of the object). Every version whose object has the indexed attribute is in that index: committed versions
+    and the work-in-progress versions of running transactions; delete markers carry no object. A version leaves the
+    index only when its transaction writes the object again or aborts.
+
+    So an index is a filter index: for a value it returns the ids of a superset of the objects whose version visible
+    to a transaction has that value, and an object id appears once per indexed version. A lookup would take the
+    distinct candidate ids, get the version visible to the transaction (snapshot read) and check it against the where
+    clause. Reads do not use the indexes yet: :meth:`~system.stores.MVCC.TransactionalKeyValueStore.read_objects`
+    scans all objects.
+
+    At most one index per attribute and operator; only equality indexes are supported.
+    """
 
     @dataclass
     class IndexCatalogueEntry:
@@ -57,7 +71,7 @@ class IndexedTransactionalKeyValueStore(TransactionalKeyValueStore, IndexedACIDS
         :param isolation_level: the isolation level of the underlying store, "serializable" or "snapshot isolation"
             (see :class:`~system.stores.MVCC.TransactionalKeyValueStore`).
         """
-        # a dictionary of indexes:
+        # set up the transactional store:
         super().__init__(
             use_brute_force_validation=use_brute_force_validation,
             isolation_level=isolation_level,
@@ -91,14 +105,13 @@ class IndexedTransactionalKeyValueStore(TransactionalKeyValueStore, IndexedACIDS
         index: Index, attribute: str, object_id: str, old_object: object
     ) -> None:
         """De-indexes the object with the given object_id and object.
-        @param index: the index to use for indexing
-        @param attribute: the attribute to index
-        @param object_id: the object id of the object to be indexed
-        @param old_object: the old object version of the object to be indexed
+        @param index: the index to remove the entry from
+        @param attribute: the indexed attribute
+        @param object_id: the object id of the object to be de-indexed
+        @param old_object: the version of the object to be de-indexed
         """
-        # does the _object have that attribute:
+        # does the old object have that attribute (only then it was indexed):
         if hasattr(old_object, attribute):
-            # only then we can add the object_id to the index:
             # get the value of that attribute
             attribute_value: object = getattr(old_object, attribute)
 
@@ -115,7 +128,7 @@ class IndexedTransactionalKeyValueStore(TransactionalKeyValueStore, IndexedACIDS
         @param object_id: the object id of the object to be indexed
         @param new_object: the new version of the object to be indexed
         """
-        # does the _object have that attribute:
+        # does the new object have that attribute:
         if hasattr(new_object, attribute):
             # only then we can add the object_id to the index:
             # get the value of that attribute:
@@ -124,7 +137,7 @@ class IndexedTransactionalKeyValueStore(TransactionalKeyValueStore, IndexedACIDS
             # add an entry to the index:
             # here is where the inversion happens,
             # i.e. the index maps from the attribute value (key) of the object to the object_id (value)
-            # whereas the store maps from the object_id (key) to the object (value)
+            # whereas the store maps from the object_id (key) to the versions of the object (value)
             index.put(attribute_value, object_id)
 
     def create_index(self, index_name: str, attribute: str, operator: str) -> None:
@@ -153,21 +166,9 @@ class IndexedTransactionalKeyValueStore(TransactionalKeyValueStore, IndexedACIDS
                 "already exists"
             )
 
-        # an index (to start only a python dict) maps from an attribute value to the list of object_ids where there is
-        # at least one version in the committed list or the wip-entry qualifying (not all have to match)
-        # This means, that every index is a filter index, i.e. it does not return the precise result set but a superset
-        # of the result set which then has to be post-filtered.
-
-        # So an index lookup works like this:
-        # 1. call the index to get the object_ids with potential matches
-        # 2. for each object_id returned, get the most recent version of the object visible in the snapshot of
-        # TA <TA_id>
-        # 3. check whether the object matches the where clause
-        # 4. if it does, add it to the result set
-
         # the only type of index supported at the moment is a PythonDictionary (wrapping a python dict) with support
         # for duplicates:
-        index: KeyValueStore[str, object] = PythonDictionaryIndex()
+        index: KeyValueStore[object, str] = PythonDictionaryIndex()
 
         # add metadata to the catalog:
         self.indexes_by_name[index_name] = (
@@ -177,8 +178,7 @@ class IndexedTransactionalKeyValueStore(TransactionalKeyValueStore, IndexedACIDS
         )
         self.indexes_by_properties[index_properties] = index_name
 
-        # bulkload the index:
-        # get all (current) items from the store:
+        # bulkload the index with every version of every object in the store:
         # TODO: delegate to bulkload method of the index?
         object_id: str
         _object: object
@@ -238,7 +238,7 @@ class IndexedTransactionalKeyValueStore(TransactionalKeyValueStore, IndexedACIDS
             # maintain the indexes for this change, i.e. remove this wip entry from all indexes:
             self._maintain_indexes(
                 object_id,
-                object_to_index=None,  # we are deleting the object
+                object_to_index=None,  # nothing new to index
                 object_to_deindex=old_object,  # object to be de-indexed
             )
 
@@ -267,19 +267,18 @@ class IndexedTransactionalKeyValueStore(TransactionalKeyValueStore, IndexedACIDS
         object_to_index: object = None,
         object_to_deindex: object = None,
     ) -> None:
-        """Maintains (index de-indexes) the given entries for all indexes.
+        """Indexes and/or de-indexes the given versions of an object in all indexes.
 
         @param object_id: the object id of the object to maintain/reindex
         @param object_to_index: the new object version to be indexed in all existing indexes
         @param object_to_deindex: an old version of the object to be deindexed from all existing indexes. This can only
         happen when...
-        1. pruning a committed version from the committed list (pruning not implemeneted yet)
+        1. pruning a committed version from the committed list (pruning not implemented yet)
         2. superseding a wip-entry from the same TA, i.e. the TA is updating and/or deleting the object multiple times
         3. aborting a transaction
         """
 
-        # update all indexes, i.e. call _reindex() for each index for the given object_id:
-        # index the new object version only (recall: we are in an append-only store!):
+        # in every index, add the new version and remove the old one, if given (the other versions stay indexed):
         for index in self.indexes_by_name.values():
             if object_to_index is not None:
                 IndexedTransactionalKeyValueStore._index_object(
@@ -372,6 +371,6 @@ class IndexedTransactionalKeyValueStore(TransactionalKeyValueStore, IndexedACIDS
         if existing_wip_entry_object is not None:
             self._maintain_indexes(
                 object_id,
-                object_to_index=None,  # again: we keep all versions even under deletes!
+                object_to_index=None,  # a delete marker carries no object to index
                 object_to_deindex=existing_wip_entry_object,
             )

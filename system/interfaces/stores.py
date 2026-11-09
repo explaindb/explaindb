@@ -87,11 +87,11 @@ class IndexedACIDStore(ACIDStore, ABC):
     def get_suitable_indexes(
         self, attribute: str, operator: str
     ) -> Iterator[IndexProperties]:
-        """Returns a list of suitable indexes for the given clause.
+        """Returns the properties of the indexes suitable for the given clause.
 
         @param attribute: the attribute of the clause
         @param operator: the operator of the clause
-        @return: a list of suitable indexes
+        @return: an iterator over the IndexProperties of the suitable indexes
         """
 
 
