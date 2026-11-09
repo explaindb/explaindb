@@ -31,6 +31,7 @@ from system.indexes.indexes import (
     PythonDictionaryIndex,
 )
 from system.indexes.radix_trie import RadixTrie, PrefixDigitMapping
+from system.interfaces.indexing.Index import IndexProperties
 from system.query_processing.predicates import TrueClause, WHERE_Clause
 from system.stores.IndexedMVCC import IndexedTransactionalKeyValueStore
 from system.stores.MVCC import TransactionAbortedException
@@ -127,6 +128,42 @@ class IndexingTest(AbstractUnitTest):
 
         # index must have as many entries as unique keys:
         self.assertEqual(index_entry_b.index.size(), no_unique_keys_on_b)
+
+    def test_create_index_rejects_second_index_on_same_attribute_and_operator(self):
+        """Creating a second index on an attribute and operator that are already indexed raises a KeyError and
+        leaves the catalogue unchanged; once the first index is dropped, the second one can be created.
+        """
+        store = IndexedTransactionalKeyValueStore()
+        store.put("1", IndexingTest.Stuff(2, 3))
+        store.create_index("a1", "a", "=")
+
+        # a second equality index on a is rejected:
+        with self.assertRaises(KeyError):
+            store.create_index("a2", "a", "=")
+
+        # both catalogues still know only a1, and a1 is the suitable index for a = ...:
+        self.assertEqual(list(store.indexes_by_name), ["a1"])
+        self.assertEqual(store.indexes_by_properties, {IndexProperties("a", "="): "a1"})
+        self.assertEqual(
+            list(store.get_suitable_indexes("a", "=")), [IndexProperties("a", "=")]
+        )
+
+        # a1 still holds "1":
+        index_entry_a1: IndexedTransactionalKeyValueStore.IndexCatalogueEntry = (
+            store.indexes_by_name["a1"]
+        )
+        self.assertEqual(index_entry_a1.index.size(), 1)
+        self.assertEqual(list(index_entry_a1.index.get(2)), ["1"])
+
+        # dropping a1 empties both catalogues:
+        store.drop_index("a1")
+        self.assertEqual(store.indexes_by_name, {})
+        self.assertEqual(store.indexes_by_properties, {})
+
+        # now a2 can be created and is the index for a = ...:
+        store.create_index("a2", "a", "=")
+        self.assertEqual(list(store.indexes_by_name), ["a2"])
+        self.assertEqual(store.indexes_by_properties, {IndexProperties("a", "="): "a2"})
 
     def test_index_maintenance_transactional_store_commits(self):
         """The indexes hold every object version: an update adds its new version at once, a delete and the commit

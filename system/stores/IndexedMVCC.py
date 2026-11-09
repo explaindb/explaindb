@@ -131,9 +131,9 @@ class IndexedTransactionalKeyValueStore(TransactionalKeyValueStore, IndexedACIDS
         """See :meth:`IndexedACIDStore.create_index`.
 
         Only equality indexes (operator ``"="``) are supported; any other operator raises. Raises as well if an
-        index with the given name already exists. The index is backed by a
-        :class:`~system.indexes.indexes.PythonDictionaryIndex` and acts as a filter index, i.e. lookups return a
-        superset of matches that still has to be post-filtered.
+        index with the given name, or an index on the same attribute with the same operator, already exists. The
+        index is backed by a :class:`~system.indexes.indexes.PythonDictionaryIndex` and acts as a filter index, i.e.
+        lookups return a superset of matches that still has to be post-filtered.
         """
         if index_name in self.indexes_by_name:
             raise KeyError(f"index {index_name} already exists")
@@ -141,6 +141,17 @@ class IndexedTransactionalKeyValueStore(TransactionalKeyValueStore, IndexedACIDS
         # only equality indexes are supported at the moment:
         if operator not in ["="]:
             raise NotImplementedError(f"operator {operator} not supported")
+
+        # the catalogue maps the index properties to a single index name, so at most one index per attribute and
+        # operator:
+        index_properties: IndexProperties = IndexProperties(
+            attribute=attribute, operator=operator
+        )
+        if index_properties in self.indexes_by_properties:
+            raise KeyError(
+                f"index {self.indexes_by_properties[index_properties]} on {attribute} with operator {operator} "
+                "already exists"
+            )
 
         # an index (to start only a python dict) maps from an attribute value to the list of object_ids where there is
         # at least one version in the committed list or the wip-entry qualifying (not all have to match)
@@ -154,14 +165,11 @@ class IndexedTransactionalKeyValueStore(TransactionalKeyValueStore, IndexedACIDS
         # 3. check whether the object matches the where clause
         # 4. if it does, add it to the result set
 
-        # add metadata to the catalog:
-        index_properties: IndexProperties = IndexProperties(
-            attribute=attribute, operator=operator
-        )
-
         # the only type of index supported at the moment is a PythonDictionary (wrapping a python dict) with support
         # for duplicates:
         index: KeyValueStore[str, object] = PythonDictionaryIndex()
+
+        # add metadata to the catalog:
         self.indexes_by_name[index_name] = (
             IndexedTransactionalKeyValueStore.IndexCatalogueEntry(
                 index_properties, index
