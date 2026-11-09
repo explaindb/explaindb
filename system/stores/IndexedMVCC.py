@@ -288,6 +288,22 @@ class IndexedTransactionalKeyValueStore(TransactionalKeyValueStore, IndexedACIDS
                     object_to_deindex,
                 )
 
+    def put(self, object_id: str, _object: object) -> None:
+        """See :meth:`VersionedKeyValueStore.put`.
+
+        After delegating to the base implementation, indexes the new committed version in all indexes.
+        """
+        # store the object as a committed version (raises if the object_id exists already, before any index work):
+        super().put(object_id, _object)
+
+        # index the stored copy like every other version:
+        self._maintain_indexes(
+            object_id,
+            object_to_index=IndexedTransactionalKeyValueStore._object_of(
+                self.key_value_store[object_id].committed[-1]
+            ),
+        )
+
     def update_object(self, object_id: str, updated_object: object, TA_id: int) -> None:
         """See :meth:`TransactionalKeyValueStore.update_object`.
 

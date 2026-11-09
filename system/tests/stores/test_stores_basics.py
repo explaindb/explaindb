@@ -47,8 +47,8 @@ class StoreTestBasics(AbstractUnitTest):
 
     def test_KeyValueStore_basics(self):
         """Test basic bulkload functionality of KeyValueStore"""
-        # run the same checks on all three store variants; the transactional stores override neither bulkload nor
-        # put, so all must behave identically here:
+        # run the same checks on all three store variants; the indexed store overrides put only to maintain its
+        # indexes and has none here, so all three must behave identically:
         kvs: VersionedKeyValueStore
         for kvs in [
             VersionedKeyValueStore(),

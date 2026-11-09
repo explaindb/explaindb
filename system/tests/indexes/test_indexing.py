@@ -390,6 +390,57 @@ class IndexingTest(AbstractUnitTest):
         self.assertEqual(list(store.indexes_by_name["a_idx"].index.get(2)), ["1"])
         self.assertEqual(list(store.indexes_by_name["a_idx"].index.get(4)), ["2"])
 
+    def test_put_after_create_index_indexes_the_object(self):
+        """A non-transactional put after create_index adds the object to every index; a put of an existing
+        object_id fails and leaves the indexes unchanged, and a non-transactional delete keeps the old version
+        indexed.
+        """
+        store = IndexedTransactionalKeyValueStore()
+        store.create_index("a_idx", "a", "=")
+        store.create_index("b_idx", "b", "=")
+
+        # put "1" into the store that already has its indexes:
+        store.put("1", IndexingTest.Stuff(2, 3))
+        self.assertEqual(store.indexes_by_name["a_idx"].index.size(), 1)
+        self.assertEqual(store.indexes_by_name["b_idx"].index.size(), 1)
+        self.assertEqual(list(store.indexes_by_name["a_idx"].index.get(2)), ["1"])
+        self.assertEqual(list(store.indexes_by_name["b_idx"].index.get(3)), ["1"])
+
+        # a second put of "1" fails:
+        with self.assertRaises(KeyError):
+            store.put("1", IndexingTest.Stuff(5, 5))
+
+        # the failed put left the indexes unchanged:
+        self.assertEqual(store.indexes_by_name["a_idx"].index.size(), 1)
+        self.assertEqual(store.indexes_by_name["b_idx"].index.size(), 1)
+        self.assertEqual(list(store.indexes_by_name["a_idx"].index.get(2)), ["1"])
+        self.assertEqual(list(store.indexes_by_name["b_idx"].index.get(3)), ["1"])
+        with self.assertRaises(KeyError):
+            list(store.indexes_by_name["a_idx"].index.get(5))
+
+        # a non-transactional delete only appends a delete marker, the old version stays indexed:
+        store.delete("1")
+        self.assertEqual(store.indexes_by_name["a_idx"].index.size(), 1)
+        self.assertEqual(list(store.indexes_by_name["a_idx"].index.get(2)), ["1"])
+
+    def test_bulkload_after_create_index_indexes_every_object(self):
+        """A bulkload after create_index adds every loaded object to every index."""
+        store = IndexedTransactionalKeyValueStore()
+        store.create_index("a_idx", "a", "=")
+        store.create_index("b_idx", "b", "=")
+
+        # bulkload two objects that share the value of b:
+        store.bulkload(
+            iter([("1", IndexingTest.Stuff(2, 3)), ("2", IndexingTest.Stuff(4, 3))])
+        )
+        self.assertEqual(store.indexes_by_name["a_idx"].index.size(), 2)
+        self.assertEqual(store.indexes_by_name["b_idx"].index.size(), 1)
+
+        # each object is found under its values of a and b:
+        self.assertEqual(list(store.indexes_by_name["a_idx"].index.get(2)), ["1"])
+        self.assertEqual(list(store.indexes_by_name["a_idx"].index.get(4)), ["2"])
+        self.assertEqual(list(store.indexes_by_name["b_idx"].index.get(3)), ["1", "2"])
+
     def test_index_contains_uncommitted_version_but_concurrent_reader_sees_snapshot(
         self,
     ):
