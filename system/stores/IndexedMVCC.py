@@ -152,7 +152,8 @@ class IndexedTransactionalKeyValueStore(TransactionalKeyValueStore, IndexedACIDS
         Only equality indexes (operator ``"="``) are supported; any other operator raises. Raises as well if an
         index with the given name, or an index on the same attribute with the same operator, already exists. The
         index is backed by a :class:`~system.indexes.indexes.PythonDictionaryIndex` and acts as a filter index, i.e.
-        lookups return a superset of matches that still has to be post-filtered.
+        lookups return a superset of matches that still has to be post-filtered. If filling the index fails, no index
+        is created.
         """
         if index_name in self.indexes_by_name:
             raise KeyError(f"index {index_name} already exists")
@@ -176,14 +177,6 @@ class IndexedTransactionalKeyValueStore(TransactionalKeyValueStore, IndexedACIDS
         # for duplicates:
         index: KeyValueStore[object, str] = PythonDictionaryIndex()
 
-        # add metadata to the catalog:
-        self.indexes_by_name[index_name] = (
-            IndexedTransactionalKeyValueStore.IndexCatalogueEntry(
-                index_properties, index
-            )
-        )
-        self.indexes_by_properties[index_properties] = index_name
-
         # bulkload the index with every version of every object in the store:
         # TODO: delegate to bulkload method of the index?
         object_id: str
@@ -202,6 +195,15 @@ class IndexedTransactionalKeyValueStore(TransactionalKeyValueStore, IndexedACIDS
                     IndexedTransactionalKeyValueStore._index_object(
                         index, attribute, object_id, version_object
                     )
+
+        # register the index only now that it is complete, so a failing bulkload (e.g. an attribute value that cannot
+        # be hashed) leaves no index behind:
+        self.indexes_by_name[index_name] = (
+            IndexedTransactionalKeyValueStore.IndexCatalogueEntry(
+                index_properties, index
+            )
+        )
+        self.indexes_by_properties[index_properties] = index_name
 
     def drop_index(self, index_name: str) -> None:
         """See :meth:`IndexedACIDStore.drop_index`.

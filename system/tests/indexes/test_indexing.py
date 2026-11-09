@@ -25,6 +25,7 @@
 
 import unittest
 from collections import Counter
+from dataclasses import dataclass
 from typing import Iterable
 from unittest import mock
 
@@ -168,6 +169,61 @@ class IndexingTest(AbstractUnitTest):
         store.create_index("a2", "a", "=")
         self.assertEqual(list(store.indexes_by_name), ["a2"])
         self.assertEqual(store.indexes_by_properties, {IndexProperties("a", "="): "a2"})
+
+    def test_failing_create_index_leaves_no_index(self):
+        """A create_index that fails on an attribute value that cannot be hashed leaves no index behind; reads of
+        a==5 still scan and return "1" and "3", and other indexes can still be created.
+        """
+
+        @dataclass
+        class Row:
+            """An object whose attribute a may hold a value that cannot be hashed."""
+
+            a: object
+            b: int
+
+        store = IndexedTransactionalKeyValueStore()
+        store.put("1", Row(5, 1))
+        store.put("2", Row([5], 2))
+        store.put("3", Row(5, 3))
+
+        # the index on a cannot hash the list [5] of "2":
+        with self.assertRaises(TypeError):
+            store.create_index("a_idx", "a", "=")
+
+        # no index is left in the catalogues, and no read of a==5 can use one:
+        self.assertEqual(store.indexes_by_name, {})
+        self.assertEqual(store.indexes_by_properties, {})
+        self.assertEqual(list(store.get_suitable_indexes("a", "=")), [])
+        self.assertIsNone(store._index_for(WHERE_Clause("a", "==", 5)))
+
+        # a running transaction reads a==5 through the scan and sees "1" and "3":
+        TA_ID_1: int = store.begin_transaction()
+        result: list[tuple[str, object]] = store.read_objects(
+            TA_ID_1, WHERE_Clause("a", "==", 5)
+        )
+        self.assertEqual(
+            IndexingTest._sorted_by_object_id(result),
+            [("1", Row(5, 1)), ("3", Row(5, 3))],
+        )
+
+        # a second attempt fails the same way instead of finding a_idx already there:
+        with self.assertRaises(TypeError):
+            store.create_index("a_idx", "a", "=")
+
+        # an index on b can still be created and is the only index in both catalogues:
+        store.create_index("b_idx", "b", "=")
+        self.assertEqual(list(store.indexes_by_name), ["b_idx"])
+        self.assertEqual(
+            store.indexes_by_properties, {IndexProperties("b", "="): "b_idx"}
+        )
+
+        # a read of b==2 goes through that index and returns "2":
+        self.assertIsNotNone(store._index_for(WHERE_Clause("b", "==", 2)))
+        self.assertEqual(
+            store.read_objects(TA_ID_1, WHERE_Clause("b", "==", 2)),
+            [("2", Row([5], 2))],
+        )
 
     def test_index_maintenance_transactional_store_commits(self):
         """The indexes hold every object version: an update adds its new version at once, a delete and the commit
