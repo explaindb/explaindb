@@ -455,6 +455,131 @@ class IndexingTest(AbstractUnitTest):
             store.read_objects(TA_ID_3, where_a_5), [("1", IndexingTest.Stuff(5, 5))]
         )
 
+    def test_index_maintenance_transactional_store_insert(self):
+        """A transaction may insert a new object; the index holds the new version at once, and the commit leaves the
+        index unchanged.
+
+        t1                          t2
+        begin
+        insert "2" as (4, 5)
+        read a==4 -> sees (4, 5)
+        commit
+                                    begin
+                                    read a==4 -> sees (4, 5)
+
+        Before t1 begins, the store holds "1"=(2, 3) with an equality index on a.
+        """
+        store = IndexedTransactionalKeyValueStore()
+        store.put("1", IndexingTest.Stuff(2, 3))
+        store.create_index("a_idx", "a", "=")
+        where_a_4: WHERE_Clause = WHERE_Clause("a", "==", 4)
+
+        # TA 1 inserts a new object and sees it:
+        TA_ID_1: int = store.begin_transaction()
+        store.update_object("2", IndexingTest.Stuff(4, 5), TA_ID_1)
+        self.assertEqual(
+            store.read_objects(TA_ID_1, where_a_4), [("2", IndexingTest.Stuff(4, 5))]
+        )
+
+        # the uncommitted new version is indexed next to the existing object:
+        self.assertEqual(store.indexes_by_name["a_idx"].index.size(), 2)
+        self.assertEqual(list(store.indexes_by_name["a_idx"].index.get(2)), ["1"])
+        self.assertEqual(list(store.indexes_by_name["a_idx"].index.get(4)), ["2"])
+
+        # the commit leaves the index unchanged:
+        store.commit_transaction(TA_ID_1)
+        self.assertEqual(store.indexes_by_name["a_idx"].index.size(), 2)
+        self.assertEqual(list(store.indexes_by_name["a_idx"].index.get(2)), ["1"])
+        self.assertEqual(list(store.indexes_by_name["a_idx"].index.get(4)), ["2"])
+
+        # a transaction that starts now sees the inserted object:
+        TA_ID_2: int = store.begin_transaction()
+        self.assertEqual(
+            store.read_objects(TA_ID_2, where_a_4), [("2", IndexingTest.Stuff(4, 5))]
+        )
+
+    def test_index_maintenance_transactional_store_insert_overwrite_abort(self):
+        """A second write to an object inserted by the same transaction replaces its version in the index; after the
+        abort, the index is as before the transaction.
+
+        t1                          t2
+        begin
+        insert "2" as (4, 5)
+        update "2" to (6, 6)
+        abort
+                                    begin
+                                    read all -> sees only "1"
+
+        Before t1 begins, the store holds "1"=(2, 3) with an equality index on a.
+        """
+        store = IndexedTransactionalKeyValueStore()
+        store.put("1", IndexingTest.Stuff(2, 3))
+        store.create_index("a_idx", "a", "=")
+
+        # TA 1 inserts a new object and overwrites it:
+        TA_ID_1: int = store.begin_transaction()
+        store.update_object("2", IndexingTest.Stuff(4, 5), TA_ID_1)
+        store.update_object("2", IndexingTest.Stuff(6, 6), TA_ID_1)
+
+        # only the latest version of the inserted object is indexed:
+        self.assertEqual(store.indexes_by_name["a_idx"].index.size(), 2)
+        self.assertEqual(list(store.indexes_by_name["a_idx"].index.get(2)), ["1"])
+        self.assertEqual(list(store.indexes_by_name["a_idx"].index.get(6)), ["2"])
+        with self.assertRaises(KeyError):
+            list(store.indexes_by_name["a_idx"].index.get(4))
+
+        # the abort removes the inserted object from the index:
+        store.abort_transaction(TA_ID_1)
+        self.assertEqual(store.indexes_by_name["a_idx"].index.size(), 1)
+        self.assertEqual(list(store.indexes_by_name["a_idx"].index.get(2)), ["1"])
+        with self.assertRaises(KeyError):
+            list(store.indexes_by_name["a_idx"].index.get(4))
+        with self.assertRaises(KeyError):
+            list(store.indexes_by_name["a_idx"].index.get(6))
+
+        # a later transaction sees only the original object:
+        TA_ID_2: int = store.begin_transaction()
+        self.assertEqual(
+            store.read_objects(TA_ID_2, TrueClause()),
+            [("1", IndexingTest.Stuff(2, 3))],
+        )
+
+    def test_index_maintenance_transactional_store_insert_conflicts_with_insert(
+        self,
+    ):
+        """A transaction cannot insert an object that another transaction has inserted but not yet committed.
+
+        t1                          t2
+        begin
+                                    begin
+        insert "2" as (4, 5)
+                                    insert "2" as (6, 6) -> aborted
+        commit
+
+        Before t1 begins, the store holds "1"=(2, 3) with an equality index on a.
+        """
+        store = IndexedTransactionalKeyValueStore()
+        store.put("1", IndexingTest.Stuff(2, 3))
+        store.create_index("a_idx", "a", "=")
+
+        TA_ID_1: int = store.begin_transaction()
+        TA_ID_2: int = store.begin_transaction()
+        store.update_object("2", IndexingTest.Stuff(4, 5), TA_ID_1)
+
+        # TA 2 conflicts with the insert of TA 1 and is aborted:
+        with self.assertRaises(TransactionAbortedException):
+            store.update_object("2", IndexingTest.Stuff(6, 6), TA_ID_2)
+        self.assertNotIn(TA_ID_2, store.TD)
+
+        store.commit_transaction(TA_ID_1)
+
+        # the index holds only the version inserted by TA 1:
+        self.assertEqual(store.indexes_by_name["a_idx"].index.size(), 2)
+        self.assertEqual(list(store.indexes_by_name["a_idx"].index.get(2)), ["1"])
+        self.assertEqual(list(store.indexes_by_name["a_idx"].index.get(4)), ["2"])
+        with self.assertRaises(KeyError):
+            list(store.indexes_by_name["a_idx"].index.get(6))
+
 
 num_runs = 10
 max_num_keys = 400

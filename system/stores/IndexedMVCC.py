@@ -295,14 +295,12 @@ class IndexedTransactionalKeyValueStore(TransactionalKeyValueStore, IndexedACIDS
         is indexed and any superseded work-in-progress version of the same transaction is de-indexed.
         """
 
-        # pre-condition: this is not a delete operation: the object must exist in the store either in the commited list
-        # or in the wip entry
-        assert object_id in self.key_value_store
-
-        # 1. get the existing wip entry if it exists:
-        wip_entry: VersionedKeyValueStore.VersionEntry | None = self.key_value_store[
-            object_id
-        ].wip
+        # 1. get the existing wip entry if there is one (an insert of a new object_id has none yet):
+        wip_entry: VersionedKeyValueStore.VersionEntry | None = (
+            self.key_value_store[object_id].wip
+            if object_id in self.key_value_store
+            else None
+        )
 
         # the object of that wip entry (None for no wip entry or a delete marker):
         existing_wip_entry_object: object | None = (

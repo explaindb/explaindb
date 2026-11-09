@@ -1638,9 +1638,9 @@ class StoreTestAnomalies(AbstractUnitTest):
         update, delete or insert x -> aborted
 
         t_i is removed from the transaction dictionary, its journal holds only Begin and Abort, and x has no wip entry.
-        Checked for every combination of t_j updating or deleting x and t_i updating or deleting x, on both store
-        classes (the indexed store checks that the isolation level is forwarded), and for t_j and t_i inserting the
-        same new key on TransactionalKeyValueStore (the indexed store does not support inserts).
+        Checked on both store classes (the indexed store checks that the isolation level is forwarded) for every
+        combination of t_j updating or deleting x and t_i updating or deleting x, and for t_j and t_i inserting the
+        same new key x.
         """
         write_kinds: list[WriteKind] = ["update", "delete"]
         variants: list[
@@ -1654,7 +1654,8 @@ class StoreTestAnomalies(AbstractUnitTest):
             for write_j in write_kinds
             for write_i in write_kinds
         ] + [
-            (TransactionalKeyValueStore, "insert", "insert")
+            (TransactionalKeyValueStore, "insert", "insert"),
+            (IndexedTransactionalKeyValueStore, "insert", "insert"),
         ]
 
         for store_class, write_j, write_i in variants:
