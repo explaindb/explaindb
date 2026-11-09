@@ -28,6 +28,7 @@ from typing import Dict, Iterator
 from system.indexes.indexes import PythonDictionaryIndex
 from system.interfaces.indexing.Index import IndexProperties, Index, KeyValueStore
 from system.interfaces.stores import IndexedACIDStore
+from system.query_processing.predicates import Clause, WHERE_Clause
 from system.stores.MVCC import IsolationLevel, TransactionalKeyValueStore
 from system.stores.VersionedKeyValueStore import VersionedKeyValueStore
 
@@ -41,10 +42,15 @@ class IndexedTransactionalKeyValueStore(TransactionalKeyValueStore, IndexedACIDS
     index only when its transaction writes the object again or aborts.
 
     So an index is a filter index: for a value it returns the ids of a superset of the objects whose version visible
-    to a transaction has that value, and an object id appears once per indexed version. A lookup would take the
-    distinct candidate ids, get the version visible to the transaction (snapshot read) and check it against the where
-    clause. Reads do not use the indexes yet: :meth:`~system.stores.MVCC.TransactionalKeyValueStore.read_objects`
-    scans all objects.
+    to a transaction has that value, and an object id appears once per indexed version with that value. A read with
+    the where clause ``attribute == constant`` on an indexed attribute uses the index: it takes the distinct
+    candidate ids, gets the version visible to the transaction (snapshot read) and checks it against the where
+    clause. The index names the candidates, the snapshot decides. Any other read scans all objects. Both return the
+    same objects.
+
+    This relies on two assumptions: attribute values hash consistently with ``==`` (as Python's built-in types do),
+    and callers do not change the objects a read returns (reads return the stored versions, not copies), as the index
+    would then still list the old value.
 
     At most one index per attribute and operator; only equality indexes are supported.
     """
@@ -260,6 +266,61 @@ class IndexedTransactionalKeyValueStore(TransactionalKeyValueStore, IndexedACIDS
             )
 
         return filter(is_suitable, self.indexes_by_properties.keys())
+
+    def _index_for(self, where: Clause | None) -> KeyValueStore[object, str] | None:
+        """Returns the index that can answer a read with the given where clause.
+
+        @param where: the where clause of the read; None selects all objects
+        @return: the equality index on the attribute of a clause ``attribute == constant``; None for any other clause
+        or if there is no index on that attribute
+        """
+        # only a single equality comparison can use an equality index:
+        if not isinstance(where, WHERE_Clause) or where.operator != "==":
+            return None
+
+        # the where clause writes equality as "==", the index properties as "="; there is at most one index per
+        # attribute and operator (see create_index):
+        index_properties: IndexProperties | None = next(
+            self.get_suitable_indexes(where.attribute, "="), None
+        )
+        if index_properties is None:
+            return None
+        return self.indexes_by_name[self.indexes_by_properties[index_properties]].index
+
+    def _read_objects_iterable(
+        self, timestamp: int, where: Clause | None = None, ignore_wip: bool = False
+    ) -> Iterator[tuple[str, object]]:
+        """See :meth:`TransactionalKeyValueStore._read_objects_iterable`.
+
+        Reads through the index if the where clause is ``attribute == constant`` and there is an index on the
+        attribute; any other read scans all objects. A read through the index yields its results in ascending order
+        of the object ids (as strings) instead of the order of the store. It never looks at objects that are no
+        candidates, so it does not raise where the scan raises for such an object (e.g. one without the attribute).
+        """
+        index: KeyValueStore[object, str] | None = self._index_for(where)
+        if index is None:
+            yield from super()._read_objects_iterable(
+                timestamp, where, ignore_wip=ignore_wip
+            )
+            return
+
+        # the index names the candidates: every object with an indexed version that has the constant, each id once
+        # and sorted, as a fixed order keeps the checksum of the brute force validation independent of the order in
+        # which the versions entered the index (get is a generator that raises KeyError for a value that no version
+        # has, so only this line is guarded):
+        try:
+            candidate_ids: list[str] = sorted(set(index.get(where.constant)))
+        except KeyError:
+            return
+
+        # the snapshot decides: keep a candidate only if its version visible at <timestamp> exists and matches:
+        object_id: str
+        for object_id in candidate_ids:
+            _object: object | None = self._get_visible_object_version(
+                object_id, timestamp, ignore_wip=ignore_wip
+            )
+            if _object is not None and where.evaluate(_object):
+                yield object_id, _object
 
     def _maintain_indexes(
         self,

@@ -24,6 +24,9 @@
 """Tests for the index implementations (B+-tree, radix trie, Christmas tree)."""
 
 import unittest
+from collections import Counter
+from typing import Iterable
+from unittest import mock
 
 from system.indexes.btree import BPlusTree
 from system.indexes.christmas_tree import ChristmasTree
@@ -31,10 +34,11 @@ from system.indexes.indexes import (
     PythonDictionaryIndex,
 )
 from system.indexes.radix_trie import RadixTrie, PrefixDigitMapping
-from system.interfaces.indexing.Index import IndexProperties
-from system.query_processing.predicates import TrueClause, WHERE_Clause
+from system.interfaces.indexing.Index import IndexProperties, KeyValueStore
+from system.query_processing.predicates import Clause, TrueClause, WHERE_Clause
 from system.stores.IndexedMVCC import IndexedTransactionalKeyValueStore
-from system.stores.MVCC import TransactionAbortedException
+from system.stores.MVCC import TransactionAbortedException, TransactionalKeyValueStore
+from system.stores.VersionedKeyValueStore import VersionedKeyValueStore
 from faker import Faker
 
 from system.tests.abstract_unit_test import AbstractUnitTest
@@ -495,8 +499,9 @@ class IndexingTest(AbstractUnitTest):
                                                                 begin
                                                                 read a==5 -> sees (5, 5)
 
-        The index holds all versions of an object, including uncommitted ones. Reads do not consult the index;
-        which version a transaction sees is decided by the store's snapshot read.
+        The index holds all versions of an object, including uncommitted ones. The reads of a==2 and a==5 go through
+        the index, which offers "1" for both values; which version a transaction sees is decided by the store's
+        snapshot read.
         """
         store = IndexedTransactionalKeyValueStore()
         store.put("1", IndexingTest.Stuff(2, 3))
@@ -512,7 +517,7 @@ class IndexingTest(AbstractUnitTest):
         self.assertEqual(list(store.indexes_by_name["a_idx"].index.get(2)), ["1"])
         self.assertEqual(list(store.indexes_by_name["a_idx"].index.get(5)), ["1"])
 
-        # a read using the index would get "1" as a candidate for a==5, but TA 2's visible version does not
+        # the read through the index gets "1" as a candidate for a==5, but TA 2's visible version does not
         # satisfy a==5:
         self.assertEqual(
             store._get_visible_object_version("1", TA_ID_2), IndexingTest.Stuff(2, 3)
@@ -667,6 +672,586 @@ class IndexingTest(AbstractUnitTest):
         self.assertEqual(list(store.indexes_by_name["a_idx"].index.get(4)), ["2"])
         with self.assertRaises(KeyError):
             list(store.indexes_by_name["a_idx"].index.get(6))
+
+    @staticmethod
+    def _sorted_by_object_id(
+        pairs: Iterable[tuple[str, object]],
+    ) -> list[tuple[str, object]]:
+        """Returns the (object id, object) pairs of a read sorted by object id.
+
+        The order of a read result is undefined, so two results are compared as sorted lists; a repeated object id
+        stays in the list and makes the comparison fail.
+        """
+        return sorted(pairs, key=lambda pair: pair[0])
+
+    def test_index_read_visits_only_the_candidates(self):
+        """A read of a==5 through the index reads the visible version of each object the index offers for 5, each
+        object once, and of no other object.
+
+        t1                          t2
+        begin
+        update "x" to (5, 1)
+        commit
+                                    begin
+                                    read a==5 -> sees (5, 1) for "x" and (5, 0) for "y"
+
+        Before t1 begins, the store holds 98 objects with a == 0 plus "x"=(5, 0) and "y"=(5, 0), with an equality
+        index on a. After t1, the index offers "x" twice for 5, once per version.
+        """
+        store = IndexedTransactionalKeyValueStore()
+        store.bulkload(
+            iter(
+                [(str(i), IndexingTest.Stuff(0, i)) for i in range(98)]
+                + [("x", IndexingTest.Stuff(5, 0)), ("y", IndexingTest.Stuff(5, 0))]
+            )
+        )
+        store.create_index("a_idx", "a", "=")
+
+        # t1 commits an update of "x" that keeps a == 5, so the index lists "x" once per version:
+        TA_ID_1: int = store.begin_transaction()
+        store.update_object("x", IndexingTest.Stuff(5, 1), TA_ID_1)
+        store.commit_transaction(TA_ID_1)
+        self.assertEqual(store.size(), 100)
+        self.assertEqual(
+            list(store.indexes_by_name["a_idx"].index.get(5)), ["x", "y", "x"]
+        )
+
+        # t2 reads a==5 while a spy records every snapshot read of a single object:
+        TA_ID_2: int = store.begin_transaction()
+        with mock.patch.object(
+            store,
+            "_get_visible_object_version",
+            wraps=store._get_visible_object_version,
+        ) as spy:
+            result: list[tuple[str, object]] = list(
+                store._read_objects_iterable(TA_ID_2, WHERE_Clause("a", "==", 5))
+            )
+
+        # only the two candidates were read, each once, and t2 sees the current version of both:
+        self.assertEqual(spy.call_count, 2)
+        self.assertEqual(
+            sorted(call.args[0] for call in spy.call_args_list), ["x", "y"]
+        )
+        self.assertEqual(
+            IndexingTest._sorted_by_object_id(result),
+            [("x", IndexingTest.Stuff(5, 1)), ("y", IndexingTest.Stuff(5, 0))],
+        )
+
+    def test_read_without_suitable_index_scans_all_objects(self):
+        """A read whose where clause the index cannot answer scans all objects and returns the result of the scan.
+
+        The store holds "0" to "9" with object i = (i % 2, i) and an equality index on a. One transaction reads with
+        b == 3 (no index on b), a < 1 (the index only answers ==), TrueClause and no where clause at all.
+        """
+        store = IndexedTransactionalKeyValueStore()
+        store.bulkload(
+            iter([(str(i), IndexingTest.Stuff(i % 2, i)) for i in range(10)])
+        )
+        store.create_index("a_idx", "a", "=")
+        TA_ID_1: int = store.begin_transaction()
+
+        label: str
+        where: Clause | None
+        for label, where in [
+            ("b == 3", WHERE_Clause("b", "==", 3)),
+            ("a < 1", WHERE_Clause("a", "<", 1)),
+            ("TrueClause", TrueClause()),
+            ("no where clause", None),
+        ]:
+            with self.subTest(where=label):
+                # the reference result is the scan of the base class:
+                expected: list[tuple[str, object]] = IndexingTest._sorted_by_object_id(
+                    TransactionalKeyValueStore._read_objects_iterable(
+                        store, TA_ID_1, where
+                    )
+                )
+
+                # the indexed store reads the visible version of every object and returns the same pairs:
+                with mock.patch.object(
+                    store,
+                    "_get_visible_object_version",
+                    wraps=store._get_visible_object_version,
+                ) as spy:
+                    result: list[tuple[str, object]] = list(
+                        store._read_objects_iterable(TA_ID_1, where)
+                    )
+                self.assertEqual(spy.call_count, 10)
+                self.assertEqual(IndexingTest._sorted_by_object_id(result), expected)
+
+    def test_index_read_of_an_absent_value_returns_nothing(self):
+        """A read of a==7 returns no objects and reads none if no version has a == 7, although the index raises a
+        KeyError for 7.
+        """
+        store = IndexedTransactionalKeyValueStore()
+        store.bulkload(
+            iter([("1", IndexingTest.Stuff(2, 3)), ("2", IndexingTest.Stuff(4, 3))])
+        )
+        store.create_index("a_idx", "a", "=")
+
+        # no version has a == 7, so the index has no entry for 7:
+        with self.assertRaises(KeyError):
+            list(store.indexes_by_name["a_idx"].index.get(7))
+
+        # the read returns an empty result without reading a single object:
+        TA_ID_1: int = store.begin_transaction()
+        with mock.patch.object(
+            store,
+            "_get_visible_object_version",
+            wraps=store._get_visible_object_version,
+        ) as spy:
+            self.assertEqual(
+                store.read_objects(TA_ID_1, WHERE_Clause("a", "==", 7)), []
+            )
+        self.assertEqual(spy.call_count, 0)
+
+    def test_index_read_returns_the_same_results_as_the_scan(self):
+        """A read of a==v through the index returns the same (object id, object) pairs as the scan, for every value
+        v, for every running transaction, and with and without the transaction's own uncommitted versions.
+
+        t1                          t2                          t3
+        begin
+        update "1" to (1, 1)
+        delete "2"
+        update "5" to (1, 6)
+        commit
+                                    begin
+                                                                begin
+                                                                update "3" to (0, 3)
+                                    update "4" to (2, 4)
+                                    read a==v for v in 0..4
+                                                                read a==v for v in 0..4
+
+        Before t1 begins, the store holds "1"=(0, 1), "2"=(1, 2), "3"=(2, 3), "4"=(3, 4) and "5"=(1, 5) with an
+        equality index on a. So the index offers candidates whose visible version does not match: the old version
+        of "1", the deleted "2" and the other transaction's uncommitted version. It lists "5" twice for 1, once per
+        version, and no version has a == 4.
+        """
+        store = IndexedTransactionalKeyValueStore()
+        store.bulkload(
+            iter(
+                [
+                    ("1", IndexingTest.Stuff(0, 1)),
+                    ("2", IndexingTest.Stuff(1, 2)),
+                    ("3", IndexingTest.Stuff(2, 3)),
+                    ("4", IndexingTest.Stuff(3, 4)),
+                    ("5", IndexingTest.Stuff(1, 5)),
+                ]
+            )
+        )
+        store.create_index("a_idx", "a", "=")
+
+        # t1 commits an update of "1", a delete of "2" and an update of "5" that keeps a == 1:
+        TA_ID_1: int = store.begin_transaction()
+        store.update_object("1", IndexingTest.Stuff(1, 1), TA_ID_1)
+        store.delete_object("2", TA_ID_1)
+        store.update_object("5", IndexingTest.Stuff(1, 6), TA_ID_1)
+        store.commit_transaction(TA_ID_1)
+        self.assertEqual(
+            list(store.indexes_by_name["a_idx"].index.get(1)), ["2", "5", "1", "5"]
+        )
+
+        # t2 and t3 each update a different object and keep running:
+        TA_ID_2: int = store.begin_transaction()
+        TA_ID_3: int = store.begin_transaction()
+        store.update_object("3", IndexingTest.Stuff(0, 3), TA_ID_3)
+        store.update_object("4", IndexingTest.Stuff(2, 4), TA_ID_2)
+
+        # every read goes through the index and returns the same pairs as the scan of the base class:
+        TA_id: int
+        value: int
+        ignore_wip: bool
+        for TA_id in [TA_ID_2, TA_ID_3]:
+            for value in range(5):
+                for ignore_wip in [False, True]:
+                    with self.subTest(TA_id=TA_id, value=value, ignore_wip=ignore_wip):
+                        where: WHERE_Clause = WHERE_Clause("a", "==", value)
+                        self.assertIsNotNone(store._index_for(where))
+                        self.assertEqual(
+                            IndexingTest._sorted_by_object_id(
+                                store._read_objects_iterable(
+                                    TA_id, where, ignore_wip=ignore_wip
+                                )
+                            ),
+                            IndexingTest._sorted_by_object_id(
+                                TransactionalKeyValueStore._read_objects_iterable(
+                                    store, TA_id, where, ignore_wip=ignore_wip
+                                )
+                            ),
+                        )
+
+    def _assert_index_reads_equal_scans(
+        self, store: IndexedTransactionalKeyValueStore, events: Counter[str]
+    ) -> None:
+        """Asserts that every read of a==v for v in 0..4 goes through the index on a and returns the same
+        (object id, object) pairs as the scan of the base class, and counts in <events> the cases the reads met.
+
+        Reads for every running transaction, with and without its own uncommitted versions, and for the committed
+        state at the next timestamp, which no transaction has yet (as the validation re-reads at a commit).
+        """
+        index: KeyValueStore[object, str] = store.indexes_by_name["a_idx"].index
+
+        # the readers: every running transaction with and without its own uncommitted versions, and the committed
+        # state:
+        readers: list[tuple[int, bool]] = [
+            (TA_id, ignore_wip)
+            for TA_id in sorted(store.TD)
+            if store.TD[TA_id].committed_timestamp is None
+            for ignore_wip in [False, True]
+        ] + [(store.TA_id, False)]
+
+        timestamp: int
+        ignore_wip: bool
+        value: int
+        for timestamp, ignore_wip in readers:
+            for value in range(5):
+                # the read goes through the index and returns the same pairs as the scan:
+                where: WHERE_Clause = WHERE_Clause("a", "==", value)
+                self.assertIsNotNone(store._index_for(where))
+                self.assertEqual(
+                    IndexingTest._sorted_by_object_id(
+                        store._read_objects_iterable(
+                            timestamp, where, ignore_wip=ignore_wip
+                        )
+                    ),
+                    IndexingTest._sorted_by_object_id(
+                        TransactionalKeyValueStore._read_objects_iterable(
+                            store, timestamp, where, ignore_wip=ignore_wip
+                        )
+                    ),
+                    msg=f"read of a=={value} at {timestamp}, ignore_wip={ignore_wip}",
+                )
+
+                # count the cases: no version has the value, or the index offers candidates:
+                try:
+                    candidate_ids: list[str] = list(index.get(value))
+                except KeyError:
+                    events["absent value"] += 1
+                    continue
+
+                # a candidate whose visible version does not match, an id listed more than once whose visible version
+                # matches, and an id offered for another transaction's uncommitted version:
+                object_id: str
+                for object_id in sorted(set(candidate_ids)):
+                    visible: object | None = store._get_visible_object_version(
+                        object_id, timestamp, ignore_wip=ignore_wip
+                    )
+                    if visible is None or not where.evaluate(visible):
+                        events["candidate rejected"] += 1
+                    elif candidate_ids.count(object_id) > 1:
+                        events["repeated candidate"] += 1
+                    wip: VersionedKeyValueStore.VersionEntry | None = (
+                        store.key_value_store[object_id].wip
+                    )
+                    if (
+                        isinstance(wip, VersionedKeyValueStore.UpdateEntry)
+                        and wip.start_validity != timestamp
+                        and where.evaluate(wip.value)
+                    ):
+                        events["uncommitted version of another transaction"] += 1
+
+    def test_index_reads_equal_scans_under_random_concurrent_transactions(self):
+        """Under a random workload of concurrent transactions, every read of a==v through the index returns the same
+        (object id, object) pairs as the scan, with validation method 2 (the default), with validation method 1
+        (brute force) and under snapshot isolation.
+
+        The store starts with "0" to "4" and no index. In each of 300 steps, the workload begins a transaction (at
+        most three run at the same time), or a running transaction inserts or updates one of "0" to "9" with a random
+        a in 0..3, deletes an object, reads a==v, commits or aborts. A write or a commit may abort the transaction
+        (write conflict, failed validation); the workload goes on with the other transactions. The equality index on
+        a is created part-way through: from step 60 on, as soon as a transaction holds an uncommitted version.
+
+        From then on, after every step, each read of a==v for v in 0..4 (no version has a == 4) goes through the
+        index and returns the same pairs as the scan: for every running transaction with and without its own
+        uncommitted versions, and for the committed state. The workload uses its own seeded random generator, so it
+        is the same in every run. Each configuration must meet these cases of the index read: a candidate whose
+        visible version does not match, an id listed more than once, another transaction's uncommitted version, an
+        absent value; and these events that change the index or the store: deletes, aborts, write conflicts and,
+        under serializable, failed validations.
+        """
+        object_ids: list[str] = [str(i) for i in range(10)]
+
+        label: str
+        store: IndexedTransactionalKeyValueStore
+        for label, store in [
+            ("validation method 2", IndexedTransactionalKeyValueStore()),
+            (
+                "validation method 1",
+                IndexedTransactionalKeyValueStore(use_brute_force_validation=True),
+            ),
+            (
+                "snapshot isolation",
+                IndexedTransactionalKeyValueStore(isolation_level="snapshot isolation"),
+            ),
+        ]:
+            with self.subTest(configuration=label):
+                # a private generator (never the module-wide random) and a counter for the cases met:
+                rng: random.Random = random.Random(41)
+                events: Counter[str] = Counter[str]()
+
+                # start with five committed objects and no index:
+                store.bulkload(
+                    iter(
+                        [
+                            (object_id, IndexingTest.Stuff(rng.randrange(4), 0))
+                            for object_id in object_ids[:5]
+                        ]
+                    )
+                )
+
+                step: int
+                for step in range(1, 301):
+                    running: list[int] = sorted(
+                        TA_id
+                        for TA_id, entry in store.TD.items()
+                        if entry.committed_timestamp is None
+                    )
+
+                    # create the index part-way through, from step 60 on, once a transaction holds an uncommitted
+                    # version:
+                    if (
+                        not store.indexes_by_name
+                        and step >= 60
+                        and any(store.TD[TA_id].write_set for TA_id in running)
+                    ):
+                        store.create_index("a_idx", "a", "=")
+
+                    # begin a transaction, or let a running one do one operation (b = step keeps versions distinct):
+                    operation: str = "begin"
+                    if not running or (len(running) < 3 and rng.random() < 0.3):
+                        store.begin_transaction()
+                    else:
+                        TA_id: int = rng.choice(running)
+                        operation = rng.choices(
+                            ["write", "delete", "read", "commit", "abort"],
+                            weights=[4, 1, 3, 2, 1],
+                        )[0]
+                        try:
+                            if operation == "write":
+                                store.update_object(
+                                    rng.choice(object_ids),
+                                    IndexingTest.Stuff(rng.randrange(4), step),
+                                    TA_id,
+                                )
+                            elif operation == "delete":
+                                store.delete_object(
+                                    rng.choice(sorted(store.key_value_store)), TA_id
+                                )
+                            elif operation == "read":
+                                store.read_objects(
+                                    TA_id, WHERE_Clause("a", "==", rng.randrange(4))
+                                )
+                            elif operation == "commit":
+                                store.commit_transaction(TA_id)
+                            else:
+                                store.abort_transaction(TA_id)
+                        except TransactionAbortedException:
+                            # the store aborted the transaction:
+                            operation = (
+                                "validation abort"
+                                if operation == "commit"
+                                else "write conflict"
+                            )
+
+                    # once the index exists, count the operation and compare every read through the index with the
+                    # scan:
+                    if store.indexes_by_name:
+                        events[operation] += 1
+                        self._assert_index_reads_equal_scans(store, events)
+
+                # the index was created, and every case occurred at least once (snapshot isolation does not
+                # validate reads):
+                self.assertIn("a_idx", store.indexes_by_name)
+                required: list[str] = [
+                    "candidate rejected",
+                    "repeated candidate",
+                    "uncommitted version of another transaction",
+                    "absent value",
+                    "delete",
+                    "abort",
+                    "write conflict",
+                ]
+                if store.isolation_level == "serializable":
+                    required.append("validation abort")
+                event: str
+                for event in required:
+                    self.assertGreater(events[event], 0, msg=event)
+
+    def test_validation_aborts_a_phantom_read_through_the_index(self):
+        """A transaction that read a==5 through the index and found nothing is aborted at its commit if another
+        transaction inserted an object with a == 5 and committed in the meantime (phantom); with validation method 1
+        and method 2.
+
+        t1                          t2
+        begin
+        read a==5 -> sees nothing
+                                    begin
+                                    insert "2" as (5, 5)
+                                    commit
+        update "1" to (2, 4)
+        commit -> aborted
+
+        Before t1 begins, the store holds "1"=(2, 3) with an equality index on a. Method 1 reads a==5 again at the
+        commit of t1, through the index, which now offers "2"; method 2 does not read again, but finds "2" in the
+        write set of t2.
+        """
+        label: str
+        use_brute_force_validation: bool
+        for label, use_brute_force_validation in [
+            ("validation method 1", True),
+            ("validation method 2", False),
+        ]:
+            with self.subTest(configuration=label):
+                store = IndexedTransactionalKeyValueStore(
+                    use_brute_force_validation=use_brute_force_validation
+                )
+                store.put("1", IndexingTest.Stuff(2, 3))
+                store.create_index("a_idx", "a", "=")
+                where_a_5: WHERE_Clause = WHERE_Clause("a", "==", 5)
+
+                # t1 reads a==5 through the index and sees nothing:
+                TA_ID_1: int = store.begin_transaction()
+                self.assertIsNotNone(store._index_for(where_a_5))
+                self.assertEqual(store.read_objects(TA_ID_1, where_a_5), [])
+
+                # t2 inserts an object with a == 5 and commits:
+                TA_ID_2: int = store.begin_transaction()
+                store.update_object("2", IndexingTest.Stuff(5, 5), TA_ID_2)
+                store.commit_transaction(TA_ID_2)
+
+                # t1 writes and fails validation, as its read of a==5 would now see "2":
+                store.update_object("1", IndexingTest.Stuff(2, 4), TA_ID_1)
+                with self.assertRaises(TransactionAbortedException):
+                    store.commit_transaction(TA_ID_1)
+                self.assertNotIn(TA_ID_1, store.TD)
+
+    def test_brute_force_validation_passes_although_an_abort_reordered_the_index(
+        self,
+    ):
+        """With validation method 1, a transaction whose read of a==5 returns the same objects at its commit commits,
+        although an aborted transaction changed the order of the ids in the index list for 5.
+
+        t1                          t2
+        begin
+        read a==5 -> sees "1" and "2"
+                                    begin
+                                    update "1" to (5, 6)
+                                    abort
+        update "3" to (7, 8)
+        commit -> passes
+
+        Before t1 begins, the store holds "1"=(5, 3), "2"=(5, 4) and "3"=(7, 7) with an equality index on a, which
+        lists ["1", "2"] for 5. The update of t2 appends "1", and its abort removes the first "1", so the list is
+        ["2", "1"] when t1 commits. The read visits the candidates in sorted order, so the read again at the commit
+        returns the pairs in the same order and the checksum is unchanged.
+        """
+        store = IndexedTransactionalKeyValueStore(use_brute_force_validation=True)
+        store.put("1", IndexingTest.Stuff(5, 3))
+        store.put("2", IndexingTest.Stuff(5, 4))
+        store.put("3", IndexingTest.Stuff(7, 7))
+        store.create_index("a_idx", "a", "=")
+        index: KeyValueStore[object, str] = store.indexes_by_name["a_idx"].index
+        self.assertEqual(list(index.get(5)), ["1", "2"])
+
+        # t1 reads a==5 and sees both objects:
+        TA_ID_1: int = store.begin_transaction()
+        self.assertEqual(
+            IndexingTest._sorted_by_object_id(
+                store.read_objects(TA_ID_1, WHERE_Clause("a", "==", 5))
+            ),
+            [("1", IndexingTest.Stuff(5, 3)), ("2", IndexingTest.Stuff(5, 4))],
+        )
+
+        # t2 updates "1" without changing a and aborts, which reorders the list for 5:
+        TA_ID_2: int = store.begin_transaction()
+        store.update_object("1", IndexingTest.Stuff(5, 6), TA_ID_2)
+        self.assertEqual(list(index.get(5)), ["1", "2", "1"])
+        store.abort_transaction(TA_ID_2)
+        self.assertEqual(list(index.get(5)), ["2", "1"])
+
+        # t1 writes another object and passes validation:
+        store.update_object("3", IndexingTest.Stuff(7, 8), TA_ID_1)
+        store.commit_transaction(TA_ID_1)
+        self.assertIsNotNone(store.TD[TA_ID_1].committed_timestamp)
+
+    def test_index_lists_an_object_once_per_version_with_the_same_value(self):
+        """An update that keeps the value of a lists the object a second time under that value, and a read of the
+        value returns the object once; the abort removes the uncommitted version from the index.
+
+        t1
+        begin
+        update "1" to (2, 4)
+        read a==2 -> sees (2, 4)
+        abort
+
+        Before t1 begins, the store holds "1"=(2, 3) with an equality index on a.
+        """
+        store = IndexedTransactionalKeyValueStore()
+        store.put("1", IndexingTest.Stuff(2, 3))
+        store.create_index("a_idx", "a", "=")
+        index: KeyValueStore[object, str] = store.indexes_by_name["a_idx"].index
+
+        # the update keeps a == 2, so the index lists "1" once per version:
+        TA_ID_1: int = store.begin_transaction()
+        store.update_object("1", IndexingTest.Stuff(2, 4), TA_ID_1)
+        self.assertEqual(list(index.get(2)), ["1", "1"])
+
+        # the read returns "1" once, in the version of t1:
+        self.assertEqual(
+            store.read_objects(TA_ID_1, WHERE_Clause("a", "==", 2)),
+            [("1", IndexingTest.Stuff(2, 4))],
+        )
+
+        # the abort removes the uncommitted version:
+        store.abort_transaction(TA_ID_1)
+        self.assertEqual(list(index.get(2)), ["1"])
+
+    def test_create_index_while_a_transaction_runs_indexes_every_version(self):
+        """An index created while a transaction runs holds every version of an object, committed and uncommitted;
+        the transaction reads its own version through the index, and its abort removes that version from the index.
+
+        t1                          t2
+        begin
+        update "1" to (3, 3)
+        commit
+                                    begin
+                                    update "1" to (4, 3)
+                                    read a==4 -> sees (4, 3)
+                                    abort
+
+        Before t1 begins, the store holds "1"=(2, 3) and no index; the equality index on a is created after the
+        update of t2, before its read.
+        """
+        store = IndexedTransactionalKeyValueStore()
+        store.put("1", IndexingTest.Stuff(2, 3))
+
+        # t1 commits an update of "1"; t2 updates "1" again and keeps running:
+        TA_ID_1: int = store.begin_transaction()
+        store.update_object("1", IndexingTest.Stuff(3, 3), TA_ID_1)
+        store.commit_transaction(TA_ID_1)
+        TA_ID_2: int = store.begin_transaction()
+        store.update_object("1", IndexingTest.Stuff(4, 3), TA_ID_2)
+
+        # the new index holds the two committed versions and the uncommitted one:
+        store.create_index("a_idx", "a", "=")
+        index: KeyValueStore[object, str] = store.indexes_by_name["a_idx"].index
+        self.assertEqual(index.size(), 3)
+        self.assertEqual(list(index.get(2)), ["1"])
+        self.assertEqual(list(index.get(3)), ["1"])
+        self.assertEqual(list(index.get(4)), ["1"])
+
+        # t2 reads its own version through the index:
+        where_a_4: WHERE_Clause = WHERE_Clause("a", "==", 4)
+        self.assertIsNotNone(store._index_for(where_a_4))
+        self.assertEqual(
+            store.read_objects(TA_ID_2, where_a_4), [("1", IndexingTest.Stuff(4, 3))]
+        )
+
+        # the abort removes the uncommitted version; the committed ones stay:
+        store.abort_transaction(TA_ID_2)
+        with self.assertRaises(KeyError):
+            list(index.get(4))
+        self.assertEqual(list(index.get(2)), ["1"])
+        self.assertEqual(list(index.get(3)), ["1"])
 
 
 num_runs = 10
