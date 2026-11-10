@@ -58,6 +58,82 @@ class SplitHappens[Key](PutInfo):
     pivot: Key
 
 
+def _leftmost_leaf(node: BPlusTree.AbstractNode) -> BPlusTree.Leaf:
+    """Returns the leftmost leaf of the subtree of a node, i.e. the one reached by always following the first pointer.
+
+    :param node: an inner node or a leaf
+    :return: the leftmost leaf below ``node`` (``node`` itself if it is a leaf)
+    """
+    while isinstance(node, BPlusTree.Inner):
+        node = node.children[0]
+    return cast(BPlusTree.Leaf, node)
+
+
+def _rightmost_leaf(node: BPlusTree.AbstractNode) -> BPlusTree.Leaf:
+    """Returns the rightmost leaf of the subtree of a node, i.e. the one reached by always following the last pointer.
+
+    :param node: an inner node or a leaf
+    :return: the rightmost leaf below ``node`` (``node`` itself if it is a leaf)
+    """
+    while isinstance(node, BPlusTree.Inner):
+        node = node.children[-1]
+    return cast(BPlusTree.Leaf, node)
+
+
+def _height(node: BPlusTree.AbstractNode) -> int:
+    """Returns the number of pointers on the way from a node down to its leftmost leaf.
+
+    :param node: an inner node or a leaf
+    :return: 0 for a leaf, 1 for an inner node above leaves, and so on
+    """
+    height: int = 0
+    while isinstance(node, BPlusTree.Inner):
+        node = node.children[0]
+        height += 1
+    return height
+
+
+def _fill_of(node: BPlusTree.AbstractNode) -> str:
+    """Describes how full a node is, for the message of a broken invariant Inv2.
+
+    :param node: an inner node or a leaf
+    :return: e.g. "the leaf [39] holds 1 of 4 entries" or "the inner node [] has 1 of 4 pointers"
+    """
+    if isinstance(node, BPlusTree.Inner):
+        return f"the inner node {node.keys} has {len(node.children)} of {node.capacity + 1} pointers"
+    return f"the leaf {node.keys} holds {len(node.keys)} of {node.capacity} entries"
+
+
+def _nodes_reached_once(root: BPlusTree.AbstractNode) -> list[BPlusTree.AbstractNode]:
+    """Returns all nodes of a tree, after checking that the pointers reach each of them exactly once from the root.
+
+    A node reached twice, through a pointer back up or because two inner nodes point to it, would make the other
+    checks of :meth:`BPlusTree.consistency_check` run forever or look at the node twice.
+
+    :param root: the root of the tree
+    :return: the nodes, the root first
+    :raise AssertionError: if a node is reached twice
+    :raise NotImplementedError: if the tree has counting leaves, which the consistency check does not support
+    """
+    nodes: list[BPlusTree.AbstractNode] = []
+    seen: set[int] = set()
+    to_visit: list[BPlusTree.AbstractNode] = [root]
+    while to_visit:
+        node: BPlusTree.AbstractNode = to_visit.pop()
+        assert (
+            id(node) not in seen
+        ), "the pointers reach a node twice from the root: a pointer leads back up, or a node has two parents"
+        if isinstance(node, BPlusTree.CountingLeaf):
+            raise NotImplementedError(
+                "the consistency check does not support trees with counting leaves"
+            )
+        seen.add(id(node))
+        nodes.append(node)
+        if isinstance(node, BPlusTree.Inner):
+            to_visit.extend(node.children)
+    return nodes
+
+
 class BPlusTree[Key, Value](AbstractBTree[Key, Value]):
     """A simple, educational B+tree implementation with support for inserts, splits, as well as
     point, and range queries.
@@ -116,6 +192,16 @@ class BPlusTree[Key, Value](AbstractBTree[Key, Value]):
             """Returns true if the node is full, otherwise false."""
 
         @abstractmethod
+        def is_at_least_half_full(self) -> bool:
+            """Returns true if the node is at least half full, otherwise false.
+
+            Every node of a B+-tree except the root must be at least half full (invariant Inv2 of lecture 06a, slide
+            "B-Tree Invariants and Rules"). For a leaf this counts its entries, for an inner node its pointers to
+            children (one more than its keys): after a split, an inner node may hold fewer keys than half its
+            capacity c, but never fewer pointers than half of the c + 1 it can hold.
+            """
+
+        @abstractmethod
         def size(self) -> int:
             """Returns the number of keys in the subtree."""
 
@@ -125,7 +211,27 @@ class BPlusTree[Key, Value](AbstractBTree[Key, Value]):
 
         @abstractmethod
         def consistency_check(self) -> None:
-            """Check if the node is consistent, i.e., all keys are sorted and the number of children is correct."""
+            """Checks that the subtree of this node is a valid B+-tree with this node as its root.
+
+            Raises ``AssertionError`` if the structure of a node is broken (an inner node with not exactly one more
+            child than keys or with a child twice, a leaf with not as many values as keys), or if one of the
+            invariants of lecture 06a (slide "B-Tree Invariants and Rules") does not hold; the message then starts
+            with the name of the invariant:
+
+            - Inv1: each node partitions the keys of its subtree: the subtree of the child between the separators a
+              and b holds only keys k with a <= k < b;
+            - Inv2: every node of the subtree except this one is at least half full (see :meth:`is_at_least_half_full`);
+            - Inv3: all leaves of the subtree lie at the same depth;
+            - Inv4: the keys inside each node are sorted in ascending order, without duplicates, and no node holds
+              more keys than its capacity;
+            - Inv5: each leaf of the subtree is linked to its left and right neighbour in key order.
+
+            The links of the leftmost and rightmost leaf may point outside the subtree, as the subtree may be part of
+            a larger tree. :meth:`BPlusTree.consistency_check` checks in addition that the chain of leaves begins at
+            the tree's first leaf and ends at its last, that every node has the capacity of the tree, and that the
+            pointers reach every node exactly once (a pointer back up would make this check run forever). The check
+            consists of ``assert`` statements, so it does nothing when Python runs with ``-O``.
+            """
 
         def delete(self, key: Key, value: Value = None) -> None:
             """See :meth:`Index.delete`.
@@ -273,6 +379,16 @@ class BPlusTree[Key, Value](AbstractBTree[Key, Value]):
 
             return len(self.keys) == self.capacity
 
+        def is_at_least_half_full(self) -> bool:
+            """See :meth:`AbstractNode.is_at_least_half_full`.
+
+            Counts the pointers to children: a node with capacity c has up to c + 1 of them, so it needs at least
+            (c + 1) / 2, rounded up.
+            """
+
+            # x / 2 rounded up is (x + 1) // 2, here with x = c + 1:
+            return len(self.children) >= (self.capacity + 2) // 2
+
         def size(self) -> int:
             """Returns the number of keys mapped by this subtree.
 
@@ -304,19 +420,70 @@ class BPlusTree[Key, Value](AbstractBTree[Key, Value]):
             return s
 
         def consistency_check(self) -> None:
-            """Check if this node is consistent, i.e., all keys are sorted and the number of children is correct,
-            etc."""
+            """See :meth:`AbstractNode.consistency_check`.
+
+            Checks this node and the borders between the subtrees of its children, then the subtree of each child.
+            That is enough: in a valid subtree the keys ascend from its leftmost to its rightmost leaf, its leaves lie
+            at one depth, and its leaves are linked to each other. So this node only needs to compare the first and
+            the last key of each subtree with its separators, the heights of the subtrees, and the one link where two
+            neighbouring subtrees meet. A node is walked over at most once per level above it, and in total the check
+            takes time about linear in the size of the tree.
+            """
+
+            # the structure of the node: one more child than keys, each child only once:
             assert len(self.keys) + 1 == len(
                 self.children
             ), "an inner node has to contain one more child than keys"
-
-            assert sorted(self.keys) == self.keys, "keys need to be sorted"
-
             assert len(set(self.children)) == len(
                 self.children
-            ), "no duplicate children"
+            ), "an inner node has to point to each child only once"
 
-            # recurse consistency check:
+            # at most `capacity` keys, in strictly ascending order (Inv4):
+            assert (
+                len(self.keys) <= self.capacity
+            ), f"Inv4: the inner node {self.keys} holds {len(self.keys)} keys, more than its capacity {self.capacity}"
+            assert all(
+                key < next_key for key, next_key in zip(self.keys, self.keys[1:])
+            ), f"Inv4: the keys of the inner node {self.keys} are not sorted in ascending order without duplicates"
+
+            # each child is at least half full, as it is not the root (Inv2):
+            for child in self.children:
+                assert (
+                    child.is_at_least_half_full()
+                ), f"Inv2: {_fill_of(child)}, less than half, although it is not the root"
+
+            # the subtree of each child holds only keys between the separators left and right of its pointer (Inv1);
+            # the first and the last child have no separator on one side. The keys of a valid subtree ascend from its
+            # leftmost to its rightmost leaf, so the first key of the one and the last key of the other suffice:
+            for i, child in enumerate(self.children):
+                first: BPlusTree.Leaf = _leftmost_leaf(child)
+                last: BPlusTree.Leaf = _rightmost_leaf(child)
+                if i > 0 and first.keys:
+                    assert (
+                        first.keys[0] >= self.keys[i - 1]
+                    ), f"Inv1: key {first.keys[0]} is less than the separator {self.keys[i - 1]} left of the pointer that leads to its leaf"
+                if i < len(self.keys) and last.keys:
+                    assert (
+                        last.keys[-1] < self.keys[i]
+                    ), f"Inv1: key {last.keys[-1]} is not less than the separator {self.keys[i]} right of the pointer that leads to its leaf"
+
+            # the subtrees of all children are equally high (Inv3); in a valid subtree all leaves lie at one depth,
+            # so all leaves below this node then lie at the same depth:
+            heights: list[int] = [_height(child) for child in self.children]
+            assert (
+                len(set(heights)) == 1
+            ), f"Inv3: the subtrees below the inner node {self.keys} have different heights {heights}, so its leaves lie at different depths"
+
+            # where two neighbouring subtrees meet, the rightmost leaf of the left one and the leftmost leaf of the
+            # right one are linked to each other, in both directions (Inv5):
+            for left_child, right_child in zip(self.children, self.children[1:]):
+                left_leaf: BPlusTree.Leaf = _rightmost_leaf(left_child)
+                right_leaf: BPlusTree.Leaf = _leftmost_leaf(right_child)
+                assert (
+                    left_leaf.next is right_leaf and right_leaf.previous is left_leaf
+                ), f"Inv5: the neighbouring leaves {left_leaf.keys} and {right_leaf.keys} are not linked to each other in both directions"
+
+            # the same inside the subtree of each child:
             for child in self.children:
                 child.consistency_check()
 
@@ -496,6 +663,14 @@ class BPlusTree[Key, Value](AbstractBTree[Key, Value]):
             """Returns true if the node is full, otherwise false."""
             return len(self.keys) == self.capacity
 
+        def is_at_least_half_full(self) -> bool:
+            """See :meth:`AbstractNode.is_at_least_half_full`.
+
+            Counts the entries: a leaf with capacity c needs at least c / 2 of them, rounded up.
+            """
+            # x / 2 rounded up is (x + 1) // 2, here with x = c:
+            return len(self.keys) >= (self.capacity + 1) // 2
+
         def size(self) -> int:
             """Returns the number of keys mapped by this leaf, i.e., the number of keys in the leaf."""
             return len(self.keys)
@@ -520,35 +695,47 @@ class BPlusTree[Key, Value](AbstractBTree[Key, Value]):
             return s
 
         def consistency_check(self) -> None:
-            """Check if this node is consistent, i.e., all keys are sorted and the number of children is correct,
-            etc."""
+            """See :meth:`AbstractNode.consistency_check`.
+
+            A leaf on its own is a tree of one node, its root, so Inv2 does not apply to it; its parent checks it.
+            """
             assert len(self.keys) == len(
                 self.values
             ), "keys and values need to have same length"
             assert (
                 len(self.keys) <= self.capacity
-            ), "number of leaf entries exceeds max capacity"
-            assert sorted(self.keys) == self.keys, "keys need to be sorted"
-            assert len(set(self.keys)) == len(self.keys), "no duplicate keys"
+            ), f"Inv4: the leaf {self.keys} holds {len(self.keys)} entries, more than its capacity {self.capacity}"
+            assert (
+                sorted(self.keys) == self.keys
+            ), f"Inv4: the keys of the leaf {self.keys} are not sorted in ascending order"
+            assert len(set(self.keys)) == len(
+                self.keys
+            ), f"Inv4: the leaf {self.keys} holds a key twice"
 
             # check ISAM links:
             # check pointer to left sibling:
             if self.previous:
                 assert (
                     self.previous.next == self
-                ), "previous.next link not pointing to self"
+                ), f"Inv5: the left neighbour of the leaf {self.keys} does not link back to it"
                 assert (
                     type(self.previous) == BPlusTree.Leaf
-                ), "previous link is not a leaf"
-                assert self.previous is not self, "previous link is pointing to self"
+                ), f"Inv5: the left neighbour of the leaf {self.keys} is not a leaf"
+                assert (
+                    self.previous is not self
+                ), f"Inv5: the leaf {self.keys} is its own left neighbour"
 
             # check pointer to right sibling:
             if self.next:
                 assert (
                     self.next.previous == self
-                ), "next.previous link is not pointing to self"
-                assert type(self.next) == BPlusTree.Leaf, "previous link is not a leaf"
-                assert self.next is not self, "next link is pointing to self"
+                ), f"Inv5: the right neighbour of the leaf {self.keys} does not link back to it"
+                assert (
+                    type(self.next) == BPlusTree.Leaf
+                ), f"Inv5: the right neighbour of the leaf {self.keys} is not a leaf"
+                assert (
+                    self.next is not self
+                ), f"Inv5: the leaf {self.keys} is its own right neighbour"
 
     class CountingLeaf(AbstractNode):
         """A leaf node that does not store values but counts the number of put-calls."""
@@ -584,6 +771,10 @@ class BPlusTree[Key, Value](AbstractBTree[Key, Value]):
             raise NotImplementedError
 
         def is_full(self) -> bool:
+            """Not supported for counting leaves: always raises ``NotImplementedError``."""
+            raise NotImplementedError
+
+        def is_at_least_half_full(self) -> bool:
             """Not supported for counting leaves: always raises ``NotImplementedError``."""
             raise NotImplementedError
 
@@ -686,10 +877,41 @@ class BPlusTree[Key, Value](AbstractBTree[Key, Value]):
         return self.root.size()
 
     def consistency_check(self) -> None:
-        """Check if the B+tree is consistent, i.e., all keys are sorted and the number of children is correct."""
+        """Checks that the tree is a valid B+-tree, i.e. that the five invariants of lecture 06a hold (slide "B-Tree
+        Invariants and Rules").
+
+        See :meth:`AbstractNode.consistency_check`, applied to the root. In addition: the pointers reach every node
+        exactly once from the root, every node has the capacity of the tree (``inner_capacity`` or
+        ``leaf_capacity``), and the chain of leaves begins at the tree's first leaf and ends at its last (Inv5): the
+        first has no left neighbour, the last no right neighbour.
+
+        Raises ``NotImplementedError`` for a tree with counting leaves (see :meth:`convert_to_counting_leaf_tree`).
+        """
+        assert self.root is not None, "root is None"
+
+        # every node is reached exactly once and has the capacity of the tree; without the first, the checks below
+        # could run forever, and without the second, a node of another size could seem half full:
+        for node in _nodes_reached_once(self.root):
+            if isinstance(node, BPlusTree.Inner):
+                assert (
+                    node.capacity == self.inner_capacity
+                ), f"the inner node {node.keys} has capacity {node.capacity}, the tree's inner nodes {self.inner_capacity}"
+            else:
+                assert (
+                    node.capacity == self.leaf_capacity
+                ), f"the leaf {node.keys} has capacity {node.capacity}, the tree's leaves {self.leaf_capacity}"
+
         self.root.consistency_check()
 
-        assert self.root is not None, "root is None"
+        # the chain of leaves begins at the first leaf and ends at the last one (Inv5):
+        first: BPlusTree.Leaf = _leftmost_leaf(self.root)
+        last: BPlusTree.Leaf = _rightmost_leaf(self.root)
+        assert (
+            first.previous is None
+        ), f"Inv5: the first leaf {first.keys} has a left neighbour"
+        assert (
+            last.next is None
+        ), f"Inv5: the last leaf {last.keys} has a right neighbour"
 
     def show(self) -> None:
         """Displays the B+tree using graphviz."""

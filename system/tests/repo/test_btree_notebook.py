@@ -21,15 +21,16 @@
 # Test modules use self-documenting method/class names and module-level
 # fixtures, so pylint's naming and docstring checks are relaxed here.
 # pylint: disable=invalid-name,missing-class-docstring,missing-function-docstring
-"""Tests that the example B+-tree of ``notebooks/B-tree.ipynb`` finds every stored key.
+"""Tests that every tree the example cell of ``notebooks/B-tree.ipynb`` shows is valid.
 
 The example cell of B-tree.ipynb builds a B+-tree by hand from six linked leaves and
 three inner nodes, shows it, inserts four keys and shows the tree after each insert.
 If a leaf holds a key for which the inner nodes send a search to another leaf, the
 picture shows that pair, but no search returns it as stored. These tests run the cell
-and check every tree it shows with ``get`` and with a range query on each stored key
-alone; the number of pairs of each shown tree makes sure that the hand-built leaves
-are among the trees checked. Tests on small hand-built trees check the helper itself.
+and check every tree it shows with ``BPlusTree.consistency_check``, and then with
+``get`` and a range query on each stored key alone; the number of pairs of each shown
+tree makes sure that the hand-built leaves are among the trees checked. Tests on small
+hand-built trees check the search helper itself.
 """
 
 import contextlib
@@ -150,16 +151,17 @@ class EntriesNotFoundExactlyTest(unittest.TestCase):
 
 
 class NotebookTreeTest(unittest.TestCase):
-    """The example B+-tree of B-tree.ipynb finds every key it stores."""
+    """Every tree the example cell of B-tree.ipynb shows is a valid B+-tree."""
 
-    def test_every_shown_tree_finds_each_stored_key(self) -> None:
-        """Every tree the example cell of B-tree.ipynb shows finds each key it stores.
+    def test_every_shown_tree_is_valid_and_finds_each_stored_key(self) -> None:
+        """Every tree the example cell of B-tree.ipynb shows is valid and finds its keys.
 
-        Each stored key is found with ``get`` and with a range query on that key alone.
-        Would fail if a leaf of the example held a key that the inner nodes route to
-        another leaf, so that the picture shows a pair that no search returns as stored.
-        Would also fail if the cell no longer showed the hand-built tree, e.g. if it
-        showed trees built by ``put`` alone: the numbers of pairs would then differ.
+        Each shown tree keeps the invariants of a B+-tree, and each stored key is found
+        with ``get`` and with a range query on that key alone. Would fail if a leaf of
+        the example held a key that the inner nodes route to another leaf, or if two
+        leaves were not linked to each other. Would also fail if the cell no longer
+        showed the hand-built tree, e.g. if it showed trees built by ``put`` alone: the
+        numbers of pairs would then differ.
         """
         # the example cell is the only code cell that builds leaves by hand; a notebook
         # stores the source as a list of lines or as a single string, and joining
@@ -183,20 +185,30 @@ class NotebookTreeTest(unittest.TestCase):
         )
 
         # instead of drawing the tree, each call of show records the number of pairs
-        # of the shown tree and the pairs that are not found exactly; the tree changes
-        # between the calls:
+        # of the shown tree, the first invariant that BPlusTree.consistency_check finds
+        # broken (None if all hold), and the pairs that are not found exactly; the tree
+        # changes between the calls:
         pair_counts: list[int] = []
-        not_found_per_tree: list[list[tuple[int, int]]] = []
+        broken_invariant_per_tree: list[str | None] = []
+        not_found_per_tree: list[list[tuple[int, int]] | None] = []
 
         def record(tree: BPlusTree[int, int]) -> None:
-            """Record the number of pairs of the shown tree and those not found exactly.
+            """Record the pairs, the broken invariant and the pairs not found of a tree.
 
             Patched in as ``BPlusTree.show``, so it is bound as a method and receives
-            the tree.
+            the tree. The searches run only on a valid tree: in a broken one, a leaf
+            linked back to an earlier one would make a range query run forever.
 
             @param tree: the tree whose ``show`` the cell calls.
             """
             pair_counts.append(len(leaf_entries(tree.root)))
+            try:
+                tree.consistency_check()
+            except AssertionError as error:
+                broken_invariant_per_tree.append(str(error))
+                not_found_per_tree.append(None)
+                return
+            broken_invariant_per_tree.append(None)
             not_found_per_tree.append(entries_not_found_exactly(tree))
 
         # run the cell in a fresh namespace, without its printed headings; the cell is
@@ -204,7 +216,7 @@ class NotebookTreeTest(unittest.TestCase):
         namespace: dict[str, Any] = {}
         with mock.patch.object(BPlusTree, "show", new=record):
             with contextlib.redirect_stdout(io.StringIO()):
-                exec(example_cells[0], namespace)
+                exec(example_cells[0], namespace)  # nosec B102
 
         # the cell shows the hand-built tree and the tree after each insert; the
         # numbers of pairs also make sure that the hand-built leaves were checked. A
@@ -221,9 +233,24 @@ class NotebookTreeTest(unittest.TestCase):
                 "the cell was changed on purpose, adapt EXPECTED_PAIR_COUNTS.",
             )
 
-        # each shown tree finds all of its pairs exactly:
+        # each shown tree keeps all invariants of a B+-tree, among them the links
+        # between neighbouring leaves, which a search on a single key does not use:
+        for number, broken in enumerate(broken_invariant_per_tree, start=1):
+            with self.subTest(shown_tree=number, check="invariants"):
+                self.assertIsNone(
+                    broken,
+                    f"Tree number {number} shown by the example cell of "
+                    f"{NOTEBOOK_PATH.name} (number 1 is the hand-built tree) breaks an "
+                    "invariant of a B+-tree; BPlusTree.consistency_check says: "
+                    f"{broken}",
+                )
+
+        # each valid shown tree finds all of its pairs exactly (a broken one was
+        # reported above and not searched):
         for number, not_found in enumerate(not_found_per_tree, start=1):
-            with self.subTest(shown_tree=number):
+            if not_found is None:
+                continue
+            with self.subTest(shown_tree=number, check="searches"):
                 self.assertEqual(
                     [],
                     not_found,
