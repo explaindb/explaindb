@@ -1093,6 +1093,51 @@ class StoreTestAnomalies(AbstractUnitTest):
                 tkvs.commit_transaction(t_i)
                 self.assertEqual(tkvs.committed_transactions_trace[-1], t_i)
 
+    def test_validation_ignores_concurrent_write_that_leaves_read_object_unchanged(
+        self,
+    ) -> None:
+        """A TA that read an object commits if another TA meanwhile committed a write that left its value unchanged.
+
+        t_i                                 t_j
+        begin
+                                            begin
+        read a==42 -> sees A=(42, 0)
+                                            update A to (42, 0)
+                                            commit
+        update A to (5, 0)
+        commit -> succeeds
+
+        A is in the write set of t_j, so validation method 2 compares the version of A in t_i's snapshot with its
+        newest committed version; both are (42, 0), so the read of t_i is still valid. The same schedule with a change
+        of the value of A aborts, see test_validation_detects_lost_update_on_read_object. Checked for both validation
+        methods.
+        """
+        for use_brute_force_validation in [True, False]:
+            with self.subTest(use_brute_force_validation=use_brute_force_validation):
+                tkvs: TransactionalKeyValueStore = TransactionalKeyValueStore(
+                    use_brute_force_validation=use_brute_force_validation
+                )
+                tkvs.put("A", StoreTestAnomalies.Stuff(42, 0))
+
+                t_i: int = tkvs.begin_transaction()
+                t_j: int = tkvs.begin_transaction()
+
+                # t_i reads A:
+                result: list[tuple[str, object]] = tkvs.read_objects(
+                    t_i, WHERE_Clause("a", "==", 42)
+                )
+                self.assertEqual(result, [("A", StoreTestAnomalies.Stuff(42, 0))])
+
+                # t_j writes the value A already has and commits; this puts A in the write set of t_j:
+                tkvs.update_object("A", StoreTestAnomalies.Stuff(42, 0), t_j)
+                tkvs.commit_transaction(t_j)
+                self.assertIn("A", tkvs.TD[t_j].write_set)
+
+                # t_i overwrites A and must commit, as the version it read is still the newest committed one:
+                tkvs.update_object("A", StoreTestAnomalies.Stuff(5, 0), t_i)
+                tkvs.commit_transaction(t_i)
+                self.assertEqual(tkvs.committed_transactions_trace[-1], t_i)
+
     def test_read_only_transaction_commits_despite_concurrent_change_of_read_object(
         self,
     ):

@@ -23,6 +23,9 @@
 # pylint: disable=invalid-name,missing-class-docstring,missing-function-docstring
 """Tests for basic key-value store operations."""
 
+import contextlib
+import io
+import re
 import unittest
 from collections.abc import Iterator
 
@@ -124,6 +127,43 @@ class StoreTestBasics(AbstractUnitTest):
 
         # TA 1's own commit does not change the trace position it stored at its begin:
         self.assertEqual(tkvs.TD[TA_ID].last_committed_TA_index_in_TA_trace, -1)
+
+    def test_show_transaction_dictionary_prints_one_entry_per_transaction(self) -> None:
+        """`show_transaction_dictionary` prints a heading and then the transaction dictionary: one entry per TA,
+        sorted by transaction id, with its write set and its commit timestamp.
+
+        TA 1                                TA 2
+        begin
+                                            begin
+                                            insert B
+                                            commit
+        """
+        tkvs: TransactionalKeyValueStore = TransactionalKeyValueStore()
+        TA_1: int = tkvs.begin_transaction()
+        TA_2: int = tkvs.begin_transaction()
+
+        # TA 2 inserts B and commits, while TA 1 is still running:
+        tkvs.update_object("B", StoreTestBasics.Stuff(1, 0), TA_2)
+        tkvs.commit_transaction(TA_2)
+
+        # capture what the method prints:
+        output: io.StringIO = io.StringIO()
+        with contextlib.redirect_stdout(output):
+            tkvs.show_transaction_dictionary()
+        printed: str = output.getvalue()
+
+        # the heading comes first, then one entry per TA, sorted by transaction id:
+        self.assertTrue(printed.startswith("Transaction dictionary:\n"))
+        self.assertEqual(
+            re.findall(r"(\d+): TDEntry\(", printed), [str(TA_1), str(TA_2)]
+        )
+
+        # TA 1 wrote nothing and has no commit timestamp yet; TA 2 wrote B and got the commit timestamp 3 from the
+        # counter that also hands out the transaction ids:
+        self.assertIn("write_set=set()", printed)
+        self.assertIn("committed_timestamp=None", printed)
+        self.assertIn("write_set={'B'}", printed)
+        self.assertIn("committed_timestamp=3", printed)
 
     def test_journaling(self):
         """The journal holds one list of entries per TA: `Begin` at the start, then `Update` and `Delete` for its
