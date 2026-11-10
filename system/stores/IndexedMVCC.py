@@ -38,15 +38,16 @@ class IndexedTransactionalKeyValueStore(TransactionalKeyValueStore, IndexedACIDS
 
     An index maps an attribute value to the ids of the objects that have it (the store maps an object id to the
     versions of the object). Every version whose object has the indexed attribute is in that index: committed versions
-    and the work-in-progress versions of running transactions; delete markers carry no object. A version leaves the
-    index only when its transaction writes the object again or aborts.
+    and the work-in-progress versions of running transactions (except one whose indexing raised or was interrupted,
+    see update_object); delete markers carry no object. A version leaves the index only when its transaction writes
+    the object again or aborts.
 
     So an index is a filter index: for a value it returns the ids of a superset of the objects whose version visible
-    to a transaction has that value, and an object id appears once per indexed version with that value. A read with
-    the where clause ``attribute == constant`` on an indexed attribute uses the index: it takes the distinct
-    candidate ids, gets the version visible to the transaction (snapshot read) and checks it against the where
-    clause. The index names the candidates, the snapshot decides. Any other read scans all objects. Both return the
-    same objects.
+    to a transaction has that value, and an object id appears once per indexed version with that value (more often
+    only after indexing raised or was interrupted, see _deindex_wip_version). A read with the where clause
+    ``attribute == constant`` on an indexed attribute uses the index: it takes the distinct candidate ids, gets the
+    version visible to the transaction (snapshot read) and checks it against the where clause. The index names the
+    candidates, the snapshot decides. Any other read scans all objects. Both return the same objects.
 
     This relies on two assumptions: attribute values hash consistently with ``==`` (as Python's built-in types do),
     and callers do not change the objects a read returns (reads return the stored versions, not copies), as the index
@@ -106,26 +107,73 @@ class IndexedTransactionalKeyValueStore(TransactionalKeyValueStore, IndexedACIDS
         @param version_entry: a committed or work-in-progress version entry, or None
         @return: the value of an UpdateEntry; None for a DeleteEntry (a delete marker carries no object) or no entry
         """
+        # only an UpdateEntry carries an object; a DeleteEntry (delete marker) or no entry yields None:
         if isinstance(version_entry, VersionedKeyValueStore.UpdateEntry):
             return version_entry.value
         return None
 
-    @staticmethod
-    def _deindex_object(
-        index: Index, attribute: str, object_id: str, old_object: object
+    def _deindex_wip_version(
+        self,
+        index: KeyValueStore[object, str],
+        attribute: str,
+        object_id: str,
+        wip_object: object,
     ) -> None:
-        """De-indexes the object with the given object_id and object.
+        """Removes the entry of a discarded work-in-progress version of an object from the index, if the index has it.
+
+        A work-in-progress version may be missing from an index: update_object stores it before it indexes it, so
+        indexing that raised (an attribute value that cannot be hashed) or was interrupted leaves it out. The entries
+        of an object under a value do not say which version they belong to, so this method removes one only if the
+        index lists the object under the value more often than the committed versions of the object have that value.
+        It never removes an entry that a committed version needs; an entry it leaves behind is one more candidate,
+        which the snapshot read filters out. Call it before the new version of the object is indexed (see
+        _maintain_indexes), so that the entry of the new version is not counted as that of the discarded one.
+
         @param index: the index to remove the entry from
         @param attribute: the indexed attribute
-        @param object_id: the object id of the object to be de-indexed
-        @param old_object: the version of the object to be de-indexed
+        @param object_id: the object id of the object
+        @param wip_object: the discarded work-in-progress version of the object
         """
-        # does the old object have that attribute (only then it was indexed):
-        if hasattr(old_object, attribute):
-            # get the value of that attribute
-            attribute_value: object = getattr(old_object, attribute)
+        # only a version that has the attribute was indexed:
+        if not hasattr(wip_object, attribute):
+            return
+        attribute_value: object = getattr(wip_object, attribute)
 
-            # delete the entry from the index:
+        # how often the index lists the object under the value (a value that cannot be hashed is in no index):
+        try:
+            listed: int = list(index.get(attribute_value)).count(object_id)
+        except (KeyError, TypeError):
+            return
+
+        # how many committed versions of the object have the value, compared as the dictionary of the index compares
+        # its keys:
+        committed: int = 0
+        version_entry: VersionedKeyValueStore.VersionEntry
+        for version_entry in self.key_value_store[object_id].committed:
+            # the object of the committed version; a delete marker carries none, so it has no attribute and is skipped
+            # below (it was never indexed):
+            committed_object: object | None = (
+                IndexedTransactionalKeyValueStore._object_of(version_entry)
+            )
+            if hasattr(committed_object, attribute):
+                committed_value: object = getattr(committed_object, attribute)
+
+                # the dictionary of the index finds a key if it is the same object or an equal one, so the version is
+                # listed under <attribute_value> in the same cases: e.g. 1, 1.0 and True share a key, and a float nan,
+                # which is not equal to itself, still finds its own key:
+                if (
+                    committed_value is attribute_value
+                    or committed_value == attribute_value
+                ):
+                    # this committed version needs one entry of the object under the value:
+                    committed += 1
+
+        # each committed version with the value needs one entry, so only an entry beyond these can belong to the
+        # discarded version; if there is none, indexing the discarded version raised or was interrupted, and removing
+        # an entry would take the one of a committed version, so that reads through the index would miss the object.
+        # Example: "1" has the committed version a=2 and the discarded version a=2; the index lists "1" twice under 2
+        # if the discarded version was indexed (remove one), and once if not (remove none):
+        if listed > committed:
             index.delete(attribute_value, object_id)
 
     @staticmethod
@@ -159,6 +207,7 @@ class IndexedTransactionalKeyValueStore(TransactionalKeyValueStore, IndexedACIDS
         lookups return a superset of matches that still has to be post-filtered. If filling the index fails, no index
         is created.
         """
+        # index names are unique:
         if index_name in self.indexes_by_name:
             raise KeyError(f"index {index_name} already exists")
 
@@ -189,7 +238,8 @@ class IndexedTransactionalKeyValueStore(TransactionalKeyValueStore, IndexedACIDS
         kv_entry: VersionedKeyValueStore.KVStoreEntry
         for object_id, kv_entry in self.key_value_store.items():
 
-            # index every version that carries an object (delete markers carry none):
+            # index every version that carries an object (delete markers carry none); iterating the entry of an object
+            # yields its committed versions and its work-in-progress version, if a running transaction has one:
             version_entry: VersionedKeyValueStore.VersionEntry
             for version_entry in kv_entry:
                 version_object: object | None = (
@@ -215,9 +265,11 @@ class IndexedTransactionalKeyValueStore(TransactionalKeyValueStore, IndexedACIDS
         Removes the index from both catalogues (by name and by properties). Raises if no index with the given
         name exists.
         """
+        # only an existing index can be dropped:
         if index_name not in self.indexes_by_name:
             raise KeyError(f"index {index_name} does not exist")
 
+        # remove the index from both catalogues; its entries go with it, the store itself is unchanged:
         entry: IndexedTransactionalKeyValueStore.IndexCatalogueEntry = (
             self.indexes_by_name[index_name]
         )
@@ -271,6 +323,7 @@ class IndexedTransactionalKeyValueStore(TransactionalKeyValueStore, IndexedACIDS
                 and index_properties.operator == operator
             )
 
+        # the properties of every index that matches (at most one, see create_index):
         return filter(is_suitable, self.indexes_by_properties.keys())
 
     def _index_for(self, where: Clause | None) -> KeyValueStore[object, str] | None:
@@ -303,6 +356,7 @@ class IndexedTransactionalKeyValueStore(TransactionalKeyValueStore, IndexedACIDS
         of the object ids (as strings) instead of the order of the store. It never looks at objects that are no
         candidates, so it does not raise where the scan raises for such an object (e.g. one without the attribute).
         """
+        # without a suitable index, scan all objects as the base class does:
         index: KeyValueStore[object, str] | None = self._index_for(where)
         if index is None:
             yield from super()._read_objects_iterable(
@@ -322,9 +376,12 @@ class IndexedTransactionalKeyValueStore(TransactionalKeyValueStore, IndexedACIDS
         # the snapshot decides: keep a candidate only if its version visible at <timestamp> exists and matches:
         object_id: str
         for object_id in candidate_ids:
+            # the version this snapshot sees (None if the object is deleted or not inserted yet in it):
             _object: object | None = self._get_visible_object_version(
                 object_id, timestamp, ignore_wip=ignore_wip
             )
+
+            # check the where clause again on that version, as the index also lists values of other versions:
             if _object is not None and where.evaluate(_object):
                 yield object_id, _object
 
@@ -338,28 +395,32 @@ class IndexedTransactionalKeyValueStore(TransactionalKeyValueStore, IndexedACIDS
 
         @param object_id: the object id of the object to maintain/reindex
         @param object_to_index: the new object version to be indexed in all existing indexes
-        @param object_to_deindex: an old version of the object to be deindexed from all existing indexes. This can only
-        happen when...
-        1. pruning a committed version from the committed list (pruning not implemented yet)
-        2. superseding a wip-entry from the same TA, i.e. the TA is updating and/or deleting the object multiple times
-        3. aborting a transaction
+        @param object_to_deindex: a discarded work-in-progress version of the object to be de-indexed from all existing
+        indexes, i.e. when...
+        1. superseding a wip-entry from the same TA, i.e. the TA is updating and/or deleting the object multiple times
+        2. aborting a transaction
         """
 
-        # in every index, add the new version and remove the old one, if given (the other versions stay indexed):
+        # in every index, remove the old version, if given, and add the new one (the other versions stay indexed); the
+        # old one goes first, as _deindex_wip_version counts the entries of the object and must not take the entry of
+        # the new version for that of the old one:
         for index in self.indexes_by_name.values():
+            # remove the entry of the discarded version, if the index has it:
+            if object_to_deindex is not None:
+                self._deindex_wip_version(
+                    index.index,
+                    index.index_properties.attribute,
+                    object_id,
+                    object_to_deindex,
+                )
+
+            # add an entry for the new version under its attribute value:
             if object_to_index is not None:
                 IndexedTransactionalKeyValueStore._index_object(
                     index.index,
                     index.index_properties.attribute,
                     object_id,
                     object_to_index,
-                )
-            if object_to_deindex is not None:
-                IndexedTransactionalKeyValueStore._deindex_object(
-                    index.index,
-                    index.index_properties.attribute,
-                    object_id,
-                    object_to_deindex,
                 )
 
     def _load(self, object_id: str, _object: object) -> None:
@@ -382,7 +443,9 @@ class IndexedTransactionalKeyValueStore(TransactionalKeyValueStore, IndexedACIDS
         """See :meth:`TransactionalKeyValueStore.update_object`.
 
         After delegating to the base implementation, maintains all indexes for the change: the new object version
-        is indexed and any superseded work-in-progress version of the same transaction is de-indexed.
+        is indexed and any superseded work-in-progress version of the same transaction is de-indexed. If indexing
+        raises (e.g. an attribute value that cannot be hashed), the new version stays stored; abort the transaction
+        then.
         """
 
         # 1. get the existing wip entry if there is one (an insert of a new object_id has none yet):

@@ -1340,6 +1340,372 @@ class IndexingTest(AbstractUnitTest):
         self.assertEqual(list(index.get(2)), ["1"])
         self.assertEqual(list(index.get(3)), ["1"])
 
+    # a BaseException like KeyboardInterrupt, but one that does not stop the whole test run if a test lets it escape:
+    class _Interrupt(BaseException):
+        """Stands in for Ctrl-C."""
+
+    @dataclass
+    class _Row:
+        """An object whose attributes may hold values that the index cannot hash, e.g. a list."""
+
+        a: object
+        b: object
+
+    def test_abort_after_an_update_with_an_unhashable_value_ends_the_transaction(
+        self,
+    ):
+        """A transaction whose update fails because the index cannot hash the new value of a can be aborted: the
+        abort ends the transaction and leaves the index unchanged, so a later transaction can write the object.
+
+        t1                          t2
+        begin
+        update "1" to ([1], 2) -> TypeError
+        abort
+                                    begin
+                                    update "1" to (3, 2)
+                                    commit
+
+        Before t1 begins, the store holds "1"=(1, 1) with an equality index on a. The update stores the new version
+        of "1" before it indexes it, so t1 aborts with a version that is not in the index.
+        """
+        store = IndexedTransactionalKeyValueStore()
+        store.put("1", IndexingTest._Row(1, 1))
+        store.create_index("a_idx", "a", "=")
+        index: KeyValueStore[object, str] = store.indexes_by_name["a_idx"].index
+
+        # t1 updates "1" to a value of a that the index cannot hash:
+        TA_ID_1: int = store.begin_transaction()
+        with self.assertRaises(TypeError):
+            store.update_object("1", IndexingTest._Row([1], 2), TA_ID_1)
+
+        # the abort ends t1 and leaves the index as before t1:
+        store.abort_transaction(TA_ID_1)
+        self.assertNotIn(TA_ID_1, store.TD)
+        self.assertEqual(index.size(), 1)
+        self.assertEqual(list(index.get(1)), ["1"])
+
+        # t2 writes "1" and commits; the index lists "1" once under the value of each committed version:
+        TA_ID_2: int = store.begin_transaction()
+        store.update_object("1", IndexingTest._Row(3, 2), TA_ID_2)
+        store.commit_transaction(TA_ID_2)
+        self.assertEqual(index.size(), 2)
+        self.assertEqual(list(index.get(1)), ["1"])
+        self.assertEqual(list(index.get(3)), ["1"])
+
+    def test_abort_after_a_failed_second_index_removes_the_entry_of_the_first(self):
+        """A transaction whose update fails because the second index cannot hash the new value of b can be aborted:
+        the abort ends the transaction and removes the entry that the first index got for the new version; the
+        second index stays unchanged.
+
+        t1
+        begin
+        update "1" to (3, [2]) -> TypeError
+        abort
+
+        Before t1 begins, the store holds "1"=(1, 1) with equality indexes on a and b. The update indexes the new
+        version in one index after the other, so a_idx lists it under 3 when b_idx raises.
+        """
+        store = IndexedTransactionalKeyValueStore()
+        store.put("1", IndexingTest._Row(1, 1))
+
+        # create a_idx before b_idx: the update visits the indexes in the order of the catalogue (a dict, which keeps
+        # the order of creation), so a_idx gets its entry before b_idx raises:
+        store.create_index("a_idx", "a", "=")
+        store.create_index("b_idx", "b", "=")
+        a_index: KeyValueStore[object, str] = store.indexes_by_name["a_idx"].index
+        b_index: KeyValueStore[object, str] = store.indexes_by_name["b_idx"].index
+
+        # t1 updates "1" to a value of b that b_idx cannot hash, after a_idx listed the new version under 3:
+        TA_ID_1: int = store.begin_transaction()
+        with self.assertRaises(TypeError):
+            store.update_object("1", IndexingTest._Row(3, [2]), TA_ID_1)
+        self.assertEqual(list(a_index.get(3)), ["1"])
+
+        # the abort ends t1 and removes that entry, so both indexes are as before t1:
+        store.abort_transaction(TA_ID_1)
+        self.assertNotIn(TA_ID_1, store.TD)
+        with self.assertRaises(KeyError):
+            list(a_index.get(3))
+        self.assertEqual(list(a_index.get(1)), ["1"])
+        self.assertEqual(b_index.size(), 1)
+        self.assertEqual(list(b_index.get(1)), ["1"])
+
+    def test_autocommit_put_of_an_unhashable_value_leaves_no_transaction_open(self):
+        """With autocommit, a put whose value of a the index cannot hash raises TypeError and leaves no transaction
+        open, so a later put of the same object id succeeds and the index lists the object once.
+
+        autocommit
+        put "1" as ([1], 2) -> TypeError, abort
+        put "1" as (1, 2), commit
+
+        The store is empty and has an equality index on a. Each put runs as a transaction of its own, which the put
+        aborts if the insert raises.
+        """
+        store = IndexedTransactionalKeyValueStore(autocommit=True)
+        store.create_index("a_idx", "a", "=")
+        index: KeyValueStore[object, str] = store.indexes_by_name["a_idx"].index
+
+        # the put of a value of a that the index cannot hash raises:
+        with self.assertRaises(TypeError):
+            store.put("1", IndexingTest._Row([1], 2))
+
+        # no transaction is left open:
+        open_TA_ids: list[int] = [
+            TA_id
+            for TA_id, entry in store.TD.items()
+            if entry.committed_timestamp is None
+        ]
+        self.assertEqual(open_TA_ids, [])
+
+        # a second put of "1" succeeds, and the index lists "1" once:
+        store.put("1", IndexingTest._Row(1, 2))
+        self.assertEqual(index.size(), 1)
+        self.assertEqual(list(index.get(1)), ["1"])
+
+    def test_abort_after_interrupted_indexing_keeps_the_entry_of_the_committed_version(
+        self,
+    ):
+        """If an update that keeps the value of a is interrupted before it indexes the new version, the abort keeps
+        the index entry of the committed version, so a later read through the index still finds the object.
+
+        t1                          t2
+        begin
+        update "1" to (2, 4) -> interrupted
+        abort
+                                    begin
+                                    read a==2 -> sees (2, 3)
+
+        Before t1 begins, the store holds "1"=(2, 3) with an equality index on a, which lists "1" once under 2. The
+        update stores the new version and is interrupted (e.g. by Ctrl-C) before it indexes it, so the only entry
+        under 2 belongs to the committed version.
+        """
+        store = IndexedTransactionalKeyValueStore()
+        store.put("1", IndexingTest.Stuff(2, 3))
+        store.create_index("a_idx", "a", "=")
+        index: KeyValueStore[object, str] = store.indexes_by_name["a_idx"].index
+
+        # t1's update is interrupted when it adds the new version to the index:
+        TA_ID_1: int = store.begin_transaction()
+        with self.assertRaises(IndexingTest._Interrupt):
+            with mock.patch.object(index, "put", side_effect=IndexingTest._Interrupt):
+                store.update_object("1", IndexingTest.Stuff(2, 4), TA_ID_1)
+
+        # the new version is stored, but the index lists only the committed one:
+        self.assertEqual(
+            store._get_visible_object_version("1", TA_ID_1), IndexingTest.Stuff(2, 4)
+        )
+        self.assertEqual(list(index.get(2)), ["1"])
+
+        # the abort ends t1 and keeps the entry of the committed version:
+        store.abort_transaction(TA_ID_1)
+        self.assertNotIn(TA_ID_1, store.TD)
+        self.assertEqual(list(index.get(2)), ["1"])
+
+        # t2 reads a==2 through the index and sees the committed version:
+        where_a_2: WHERE_Clause = WHERE_Clause("a", "==", 2)
+        TA_ID_2: int = store.begin_transaction()
+        self.assertIsNotNone(store._index_for(where_a_2))
+        self.assertEqual(
+            store.read_objects(TA_ID_2, where_a_2), [("1", IndexingTest.Stuff(2, 3))]
+        )
+
+    def test_abort_after_interrupted_indexing_of_an_insert_ends_the_transaction(self):
+        """If an insert is interrupted before it indexes the new object, the abort ends the transaction, so a later
+        transaction can write the object and commit.
+
+        t1                          t2
+        begin
+        insert "9" as (7, 1) -> interrupted
+        abort
+                                    begin
+                                    insert "9" as (7, 2)
+                                    commit
+
+        Before t1 begins, the store holds "1"=(2, 3) with an equality index on a. No version has a == 7, so the
+        index has no entry for 7 when t1 aborts.
+        """
+        store = IndexedTransactionalKeyValueStore()
+        store.put("1", IndexingTest.Stuff(2, 3))
+        store.create_index("a_idx", "a", "=")
+        index: KeyValueStore[object, str] = store.indexes_by_name["a_idx"].index
+
+        # t1's insert is interrupted when it adds the new object to the index:
+        TA_ID_1: int = store.begin_transaction()
+        with self.assertRaises(IndexingTest._Interrupt):
+            with mock.patch.object(index, "put", side_effect=IndexingTest._Interrupt):
+                store.update_object("9", IndexingTest.Stuff(7, 1), TA_ID_1)
+
+        # the abort ends t1:
+        store.abort_transaction(TA_ID_1)
+        self.assertNotIn(TA_ID_1, store.TD)
+
+        # t2 inserts "9" and commits; the index lists "9" once under 7:
+        TA_ID_2: int = store.begin_transaction()
+        store.update_object("9", IndexingTest.Stuff(7, 2), TA_ID_2)
+        store.commit_transaction(TA_ID_2)
+        self.assertIsNotNone(store.TD[TA_ID_2].committed_timestamp)
+        self.assertEqual(list(index.get(7)), ["9"])
+
+    def test_second_write_after_interrupted_indexing_is_found_through_the_index(self):
+        """If the insert of an object is interrupted before it indexes the object and the transaction then writes
+        the object again with the same value of a, the index lists the object once under that value, and reads
+        through the index find the new version, in the transaction and after its commit.
+
+        t1                          t2
+        begin
+        insert "1" as (2, 4) -> interrupted
+        update "1" to (2, 5)
+        read a==2 -> sees (2, 5)
+        commit
+                                    begin
+                                    read a==2 -> sees (2, 5)
+
+        Before t1 begins, the store is empty and has an equality index on a. The second write replaces a version
+        that is not in the index, so the entry under 2 belongs to the new version.
+        """
+        store = IndexedTransactionalKeyValueStore()
+        store.create_index("a_idx", "a", "=")
+        index: KeyValueStore[object, str] = store.indexes_by_name["a_idx"].index
+        where_a_2: WHERE_Clause = WHERE_Clause("a", "==", 2)
+
+        # t1's insert is interrupted when it adds the new object to the index, which stays empty:
+        TA_ID_1: int = store.begin_transaction()
+        with self.assertRaises(IndexingTest._Interrupt):
+            with mock.patch.object(index, "put", side_effect=IndexingTest._Interrupt):
+                store.update_object("1", IndexingTest.Stuff(2, 4), TA_ID_1)
+        self.assertEqual(index.size(), 0)
+
+        # t1 writes "1" again and reads its new version through the index:
+        store.update_object("1", IndexingTest.Stuff(2, 5), TA_ID_1)
+        self.assertIsNotNone(store._index_for(where_a_2))
+        self.assertEqual(
+            store.read_objects(TA_ID_1, where_a_2), [("1", IndexingTest.Stuff(2, 5))]
+        )
+
+        # after the commit of t1, t2 reads the new version through the index, which lists "1" once under 2:
+        store.commit_transaction(TA_ID_1)
+        TA_ID_2: int = store.begin_transaction()
+        self.assertEqual(
+            store.read_objects(TA_ID_2, where_a_2), [("1", IndexingTest.Stuff(2, 5))]
+        )
+        self.assertEqual(list(index.get(2)), ["1"])
+
+    def test_second_write_after_an_unhashable_value_succeeds(self):
+        """A transaction whose update failed because the index cannot hash the new value of a can write the object
+        again and commit: a second update is indexed, a second write that deletes the object deletes it.
+
+        t1                          t2
+        begin
+        update "1" to ([1], 2) -> TypeError
+        update "1" to (3, 2)
+        commit
+                                    begin
+                                    read a==3 -> sees (3, 2)
+
+        The same with delete "1" as the second write of t1, after which t2 reads all and sees nothing. Before t1
+        begins, the store holds "1"=(1, 1) with an equality index on a (a new store for each second write). The
+        failed update stored its version of "1" without indexing it; the second write replaces that version.
+        """
+
+        def store_after_a_failed_update() -> (
+            tuple[IndexedTransactionalKeyValueStore, int]
+        ):
+            """Returns a new store with "1"=(1, 1) and an equality index on a, and the id of a running transaction
+            whose update of "1" to ([1], 2) raised TypeError.
+            """
+            new_store: IndexedTransactionalKeyValueStore = (
+                IndexedTransactionalKeyValueStore()
+            )
+            new_store.put("1", IndexingTest._Row(1, 1))
+            new_store.create_index("a_idx", "a", "=")
+            TA_id: int = new_store.begin_transaction()
+            with self.assertRaises(TypeError):
+                new_store.update_object("1", IndexingTest._Row([1], 2), TA_id)
+            return new_store, TA_id
+
+        store: IndexedTransactionalKeyValueStore
+        TA_ID_1: int
+        TA_ID_2: int
+
+        with self.subTest(second_write="update"):
+            # t1 updates "1" again; the index lists "1" once under 3, next to the committed version under 1:
+            store, TA_ID_1 = store_after_a_failed_update()
+            index: KeyValueStore[object, str] = store.indexes_by_name["a_idx"].index
+            store.update_object("1", IndexingTest._Row(3, 2), TA_ID_1)
+            self.assertEqual(list(index.get(3)), ["1"])
+            self.assertEqual(list(index.get(1)), ["1"])
+
+            # after the commit of t1, t2 reads a==3 through the index and sees the new version:
+            store.commit_transaction(TA_ID_1)
+            where_a_3: WHERE_Clause = WHERE_Clause("a", "==", 3)
+            TA_ID_2 = store.begin_transaction()
+            self.assertIsNotNone(store._index_for(where_a_3))
+            self.assertEqual(
+                store.read_objects(TA_ID_2, where_a_3),
+                [("1", IndexingTest._Row(3, 2))],
+            )
+
+        with self.subTest(second_write="delete"):
+            # t1 deletes "1" and commits; t2 no longer sees "1":
+            store, TA_ID_1 = store_after_a_failed_update()
+            store.delete_object("1", TA_ID_1)
+            store.commit_transaction(TA_ID_1)
+            TA_ID_2 = store.begin_transaction()
+            self.assertEqual(store.read_objects(TA_ID_2, TrueClause()), [])
+
+    def test_abort_after_writes_without_the_indexed_attribute_ends_the_transaction(
+        self,
+    ):
+        """A transaction that writes an object twice as a version without the indexed attribute a can be aborted:
+        the index never lists these versions, the abort ends the transaction and leaves the index unchanged, so a
+        later transaction can write the object.
+
+        t1                          t2
+        begin
+        update "1" to (b=2)
+        update "1" to (b=3)
+        abort
+                                    begin
+                                    update "1" to (3, 2)
+                                    commit
+
+        Before t1 begins, the store holds "1"=(1, 1) with an equality index on a. The second update of t1 replaces
+        a version without a, and the abort discards another one; neither has an entry in the index to remove.
+        """
+
+        @dataclass
+        class OnlyB:
+            """An object without the indexed attribute a."""
+
+            b: int
+
+        store: IndexedTransactionalKeyValueStore = IndexedTransactionalKeyValueStore()
+        store.put("1", IndexingTest._Row(1, 1))
+        store.create_index("a_idx", "a", "=")
+        index: KeyValueStore[object, str] = store.indexes_by_name["a_idx"].index
+
+        # t1 writes "1" twice as a version without a; the index lists only the committed version:
+        TA_ID_1: int = store.begin_transaction()
+        store.update_object("1", OnlyB(2), TA_ID_1)
+        store.update_object("1", OnlyB(3), TA_ID_1)
+        self.assertEqual(store._get_visible_object_version("1", TA_ID_1), OnlyB(3))
+        self.assertEqual(index.size(), 1)
+        self.assertEqual(list(index.get(1)), ["1"])
+
+        # the abort ends t1 and leaves the index as before t1:
+        store.abort_transaction(TA_ID_1)
+        self.assertNotIn(TA_ID_1, store.TD)
+        self.assertEqual(index.size(), 1)
+        self.assertEqual(list(index.get(1)), ["1"])
+
+        # t2 writes "1" and commits; the index lists "1" once under the value of each committed version:
+        TA_ID_2: int = store.begin_transaction()
+        store.update_object("1", IndexingTest._Row(3, 2), TA_ID_2)
+        store.commit_transaction(TA_ID_2)
+        self.assertEqual(index.size(), 2)
+        self.assertEqual(list(index.get(1)), ["1"])
+        self.assertEqual(list(index.get(3)), ["1"])
+
 
 num_runs = 10
 max_num_keys = 400
