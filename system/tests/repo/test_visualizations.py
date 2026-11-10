@@ -27,13 +27,16 @@ anything but local files, also through a WebSocket (a page must work offline). T
 CONTRIBUTING.md, section Visualizations).
 
 Playwright is only in the dependency group ``browser-tests``, which ``uv sync`` does not install; without it, the
-tests are skipped. The CI job ``visualization_test`` installs the group and Chromium and runs this module.
+tests that open a browser are skipped. The CI job ``visualization_test`` installs the group and Chromium and runs
+this module in CI_JOBS jobs, each on its share of the pages (see pages_of_job); a run without the variable
+VISUALIZATION_JOB tests every page.
 """
 
 from __future__ import annotations
 
 import importlib.util
 import math
+import os
 import re
 import tempfile
 import unittest
@@ -43,8 +46,9 @@ from dataclasses import dataclass, field
 from itertools import groupby
 from pathlib import Path
 from typing import TYPE_CHECKING, TypedDict
+from unittest import mock
 
-# the tests run only where Playwright is installed (see the module docstring):
+# the tests that open a browser run only where Playwright is installed (see the module docstring):
 PLAYWRIGHT_AVAILABLE: bool = importlib.util.find_spec("playwright") is not None
 
 # without the dependency group browser-tests, pylint cannot find playwright:
@@ -52,7 +56,7 @@ PLAYWRIGHT_AVAILABLE: bool = importlib.util.find_spec("playwright") is not None
 if PLAYWRIGHT_AVAILABLE:
     from playwright.sync_api import Error, expect, sync_playwright
 else:
-    # the tests are skipped, so these are never used:
+    # the tests that open a browser are skipped, so these are never used:
     Error = expect = sync_playwright = None  # pylint: disable=invalid-name
 if TYPE_CHECKING:
     from playwright.sync_api import (
@@ -100,6 +104,67 @@ MAX_NEXT_CLICKS: int = 300
 # the film by only 0.1 s:
 FILM_TIMEOUT: int = 15_000
 
+# the variable in which a CI job names its share of the pages, as "i/n": job i of n (see pages_of_job):
+JOB_VARIABLE: str = "VISUALIZATION_JOB"
+# the `parallel` of the CI job visualization_test in .gitlab-ci.yml, which system/tests/repo/test_ci_config.py checks
+# against it:
+CI_JOBS: int = 3
+
+
+def job_of_this_run() -> tuple[int, int]:
+    """Returns which of how many jobs this run is, from the variable VISUALIZATION_JOB; without it, the only one.
+
+    @return: (i, n) for job i of n, with 1 <= i <= n; (1, 1) if the variable is not set
+    @raise ValueError: if the variable is set, but not to "i/n" with 1 <= i <= n
+    """
+    value: str | None = os.environ.get(JOB_VARIABLE)
+    if value is None:
+        return 1, 1
+    match: re.Match[str] | None = re.fullmatch(r"([1-9][0-9]*)/([1-9][0-9]*)", value)
+    if match is None or int(match[1]) > int(match[2]):
+        raise ValueError(f"{JOB_VARIABLE} must be i/n with 1 <= i <= n, not {value!r}")
+    return int(match[1]), int(match[2])
+
+
+def find_pages() -> list[Path]:
+    """Returns the HTML files in visualizations/ and its subfolders, sorted."""
+    return sorted(PAGES_DIR.rglob("*.html"))
+
+
+def has_sound(path: Path) -> bool:
+    """Returns whether the page at path has a sound button, which is written in its HTML, not made by its script."""
+    return 'data-testid="sound"' in path.read_text(encoding="utf-8")
+
+
+def pages_of_job(
+    pages: list[Path],
+    index: int,
+    total: int,
+    sound: Callable[[Path], bool] = has_sound,
+) -> list[Path]:
+    """Returns the pages that job index of total tests; each page is tested in exactly one job.
+
+    The pages with a sound button, whose tests take longest, come first, then the others, each group sorted by path;
+    page number k of this order (from 0) goes to job k mod total + 1. So the pages with sound are spread over the jobs
+    before the others.
+
+    @param pages: all pages
+    @param index: the job, from 1 to total
+    @param total: the number of jobs
+    @param sound: whether a page has a sound button
+    @return: the pages of the job, in the order above
+    @raise ValueError: if the job is not one of 1 to total, or if there are more jobs than pages, so that a job would
+        test no page
+    """
+    if not 1 <= index <= total:
+        raise ValueError(f"job {index} of {total}: a job is one of 1 to {total}")
+    if total > len(pages):
+        raise ValueError(
+            f"{total} jobs for {len(pages)} pages: a job would test no page"
+        )
+    order: list[Path] = sorted(pages, key=lambda path: (not sound(path), path))
+    return order[index - 1 :: total]
+
 
 @dataclass
 class OpenedPage:
@@ -137,10 +202,30 @@ class _PageTestCase(unittest.TestCase):
 
     playwright: Playwright
     browser: Browser
+    # the page that all tests of the class open, if they open only one; the class runs only in that page's job:
+    PAGE: Path | None = None
 
     @classmethod
     def setUpClass(cls) -> None:
-        """Starts Playwright and Chromium; both are stopped after the last test of the class, also if one fails."""
+        """Starts Playwright and Chromium; both are stopped after the last test of the class, also if one fails.
+
+        A class with a PAGE that another job tests is skipped, before Chromium starts. A PAGE that is not among the
+        pages (renamed, misspelled) is an error, not a skip, so that no page drops out of the tests unnoticed.
+        """
+        if cls.PAGE is not None:
+            pages: list[Path] = find_pages()
+            if cls.PAGE not in pages:
+                raise AssertionError(f"{cls.PAGE} is not among the pages")
+            index, total = job_of_this_run()
+            if cls.PAGE not in pages_of_job(pages, index, total):
+                job: int = next(
+                    other
+                    for other in range(1, total + 1)
+                    if cls.PAGE in pages_of_job(pages, other, total)
+                )
+                raise unittest.SkipTest(
+                    f"{cls.PAGE.name} is tested in job {job} of {total}"
+                )
         cls.playwright = sync_playwright().start()
         cls.addClassCleanup(cls.playwright.stop)
         cls.browser = cls.playwright.chromium.launch()
@@ -149,13 +234,19 @@ class _PageTestCase(unittest.TestCase):
     def open_page(self, path: Path, reduced_motion: bool = True) -> OpenedPage:
         """Opens the page at path in a new browser context, which is closed after the test.
 
-        Errors and outside requests are recorded from before the page loads.
+        Errors and outside requests are recorded from before the page loads. A class with a PAGE opens only that page,
+        as it runs only in that page's job.
 
         @param path: the HTML file of the page
         @param reduced_motion: whether the browser asks for reduced motion; the pages then do not start playing on
             their own, so that every test starts from a paused page at time 0
         @return: the opened page with the lists of errors and outside requests
+        @raise AssertionError: if the class has a PAGE and path is another page; raised before the browser is used
         """
+        if self.PAGE is not None and path != self.PAGE:
+            raise AssertionError(
+                f"{type(self).__name__} opens {path}, but its PAGE is {self.PAGE}"
+            )
         context = self.browser.new_context(
             reduced_motion="reduce" if reduced_motion else "no-preference"
         )
@@ -223,11 +314,15 @@ class _PageTestCase(unittest.TestCase):
         self.assertEqual(1000, position)
         return stop_types
 
-    def pages(self) -> list[Path]:
+    def all_pages(self) -> list[Path]:
         """Returns the HTML files in visualizations/ and its subfolders, and asserts that the two known ones are there."""
-        pages: list[Path] = sorted(PAGES_DIR.rglob("*.html"))
+        pages: list[Path] = find_pages()
         self.assertLessEqual({ELASTICITY_PAGE, VALIDATION_PAGE}, set(pages))
         return pages
+
+    def pages(self) -> list[Path]:
+        """Returns the pages that this run tests: all of them, or in a CI job its share (see pages_of_job)."""
+        return pages_of_job(self.all_pages(), *job_of_this_run())
 
 
 @unittest.skipUnless(PLAYWRIGHT_AVAILABLE, SKIP_REASON)
@@ -298,21 +393,26 @@ class _SoundPageTestCase(_PageTestCase):
     """Opens the pages with a sound button and reads the state of their voice; holds no tests of its own."""
 
     def check_each_page_with_sound(self, check: Callable[[Page], None]) -> None:
-        """Runs a check on each page with a sound button, and asserts that the pages of PAGES_WITH_SOUND are among them.
+        """Runs a check on each page with a sound button that this run tests (see pages).
 
-        The pages with a sound button are found in their HTML, so that the others are not opened in the browser. Each
-        page is opened at its start, paused and with sound off; after the check, the page must have had no errors.
+        First it asserts that the pages of PAGES_WITH_SOUND are among all pages with a sound button. The pages with a
+        sound button are found in their HTML, so that the others are not opened in the browser. Each page is opened at
+        its start, paused and with sound off; after the check, the page must have had no errors. A job without a page
+        with sound skips the test.
 
         @param check: the steps of a test on one page
         """
-        # a page without a sound button has no voice; the button is written in the page's HTML, not made by its script:
-        pages_with_sound: list[Path] = [
-            path
-            for path in self.pages()
-            if 'data-testid="sound"' in path.read_text(encoding="utf-8")
-        ]
         # the pages that speak have a sound button, so that a test cannot pass without them:
-        self.assertLessEqual(PAGES_WITH_SOUND, set(pages_with_sound))
+        self.assertLessEqual(
+            PAGES_WITH_SOUND, {path for path in self.all_pages() if has_sound(path)}
+        )
+        # a page without a sound button has no voice:
+        pages_with_sound: list[Path] = [
+            path for path in self.pages() if has_sound(path)
+        ]
+        if not pages_with_sound:
+            index, total = job_of_this_run()
+            self.skipTest(f"job {index} of {total} tests no page with sound")
 
         for path in pages_with_sound:
             with self.subTest(page=path.name):
@@ -1546,6 +1646,8 @@ class EveryPageWithSoundTest(_SoundPageTestCase):
 class ClockScanPageTest(_SoundPageTestCase):
     """Checks what is particular to the voice of the clock-scan page."""
 
+    PAGE: Path | None = CLOCK_SCAN_PAGE
+
     def test_a_clip_longer_than_its_caption_plays_faster(self) -> None:
         """The clip of the first caption plays at its normal speed, and that of the fifth, which is longer, faster.
 
@@ -1607,6 +1709,8 @@ class RowOrColumnPageTest(_SoundPageTestCase):
     Each segment has a clip of its own, which starts at the segment's time (decision 035). The times below are those
     of the page's CAPTIONS.
     """
+
+    PAGE: Path | None = ROW_OR_COLUMN_PAGE
 
     # the film's length (s); the slider has 1000 steps over it:
     LENGTH: float = 52
@@ -1815,6 +1919,8 @@ class RowOrColumnPageTest(_SoundPageTestCase):
 @unittest.skipUnless(PLAYWRIGHT_AVAILABLE, SKIP_REASON)
 class HouseDbmsPageTest(_SoundPageTestCase):
     """Checks what is particular to the voice of the House DBMS page (decision 036)."""
+
+    PAGE: Path | None = HOUSE_DBMS_PAGE
 
     # the caption that stays on until 0.3 s after the optimizer has handed over the plan, so that the voice has the
     # time to say it:
@@ -2461,6 +2567,8 @@ class YannakakisPageTest(_SoundPageTestCase):
 class ElasticityPageTest(_PageTestCase):
     """Checks the controls of the elasticity page: the stops, the models, the sizes and the results of the day."""
 
+    PAGE: Path | None = ELASTICITY_PAGE
+
     MODELS: list[str] = ["onprem", "hosting", "iaas", "paas", "planned", "saas"]
     # the models whose servers have a fixed size, chosen with the size buttons:
     MODELS_WITH_SIZE: set[str] = {"onprem", "hosting"}
@@ -2582,6 +2690,8 @@ class ElasticityPageTest(_PageTestCase):
 class ValidationPageTest(_PageTestCase):
     """Checks the controls of the page on MVCC validation: Next and Back, and the kinds of steps it narrates."""
 
+    PAGE: Path | None = VALIDATION_PAGE
+
     def setUp(self) -> None:
         """Opens the page, paused at its start."""
         self.opened: OpenedPage = self.open_page(VALIDATION_PAGE)
@@ -2612,6 +2722,273 @@ class ValidationPageTest(_PageTestCase):
             {"begin", "validate", "morph", "abort", "end"}, set(stop_types)
         )
         self.assert_no_errors(self.opened)
+
+
+class JobShareTest(unittest.TestCase):
+    """Checks without a browser how a run reads its job from VISUALIZATION_JOB and which pages each job tests.
+
+    The tests that read the variable set it themselves, as they also run inside a CI job, where it is set.
+    """
+
+    # made-up pages, which need not exist, in no particular order; three of the five have a sound button:
+    PAGES: list[Path] = [Path(f"v/{name}.html") for name in "eabdc"]
+    WITH_SOUND: frozenset[Path] = frozenset(Path(f"v/{name}.html") for name in "bde")
+
+    def shares(self, total: int) -> list[list[Path]]:
+        """Returns the made-up pages of each of total jobs, from job 1 on."""
+        return [
+            pages_of_job(
+                self.PAGES, index, total, sound=lambda path: path in self.WITH_SOUND
+            )
+            for index in range(1, total + 1)
+        ]
+
+    @staticmethod
+    def job_of(page: Path, total: int) -> int:
+        """Returns which of total jobs tests the page, among the pages of visualizations/."""
+        pages: list[Path] = find_pages()
+        return next(
+            index
+            for index in range(1, total + 1)
+            if page in pages_of_job(pages, index, total)
+        )
+
+    @staticmethod
+    def page_class(page: Path | None) -> type[_PageTestCase]:
+        """Returns a subclass of _PageTestCase, without tests of its own, whose PAGE is page."""
+        return type("OnePageTestCase", (_PageTestCase,), {"PAGE": page})
+
+    def test_the_job_is_read_from_the_variable(self) -> None:
+        """Without the variable, the run is the only job, also where GitLab sets its own CI_NODE_INDEX and
+        CI_NODE_TOTAL; with "i/n", it is job i of n.
+        """
+        # each environment and the job it names:
+        cases: list[tuple[dict[str, str], tuple[int, int]]] = [
+            ({}, (1, 1)),
+            ({"CI_NODE_INDEX": "2", "CI_NODE_TOTAL": "3"}, (1, 1)),
+            ({JOB_VARIABLE: "1/1"}, (1, 1)),
+            ({JOB_VARIABLE: "2/3"}, (2, 3)),
+            ({JOB_VARIABLE: "10/12"}, (10, 12)),
+        ]
+        for environment, job in cases:
+            with self.subTest(environment=environment):
+                with mock.patch.dict(os.environ, environment, clear=True):
+                    self.assertEqual(job, job_of_this_run())
+
+    def test_a_value_that_is_no_job_is_an_error(self) -> None:
+        """A value that is not "i/n" with 1 <= i <= n is an error that names the value, so that no page drops out.
+
+        "/1" is what the CI job sets if ``parallel`` is removed but its script kept, as GitLab then sets no
+        CI_NODE_INDEX.
+        """
+        for value in ["", "/1", "0/3", "4/3", "x", "2/3/4", " 2/3"]:
+            with self.subTest(value=value):
+                with mock.patch.dict(os.environ, {JOB_VARIABLE: value}, clear=True):
+                    with self.assertRaises(ValueError) as raised:
+                        job_of_this_run()
+                self.assertIn(repr(value), str(raised.exception))
+
+    def test_one_job_tests_the_pages_with_sound_first(self) -> None:
+        """A single job tests all pages: those with sound first, then the others, each sorted by path."""
+        b, d, e, a, c = (Path(f"v/{name}.html") for name in "bdeac")
+        self.assertEqual([[b, d, e, a, c]], self.shares(1))
+
+    def test_each_page_is_tested_in_exactly_one_job(self) -> None:
+        """For any number of jobs up to the number of pages, each page is in exactly one job, and no job is empty."""
+        for total in range(1, len(self.PAGES) + 1):
+            with self.subTest(total=total):
+                shares: list[list[Path]] = self.shares(total)
+                self.assertEqual(
+                    sorted(self.PAGES),
+                    sorted(page for share in shares for page in share),
+                )
+                self.assertNotIn([], shares)
+
+    def test_three_jobs_get_one_page_with_sound_each(self) -> None:
+        """With three jobs and three pages with sound among five, each job gets one page with sound.
+
+        In the order b, d, e (with sound), a, c, page k goes to job k mod 3 + 1; sorted by path alone, job 2 would get
+        b and e, and job 3 no page with sound.
+        """
+        b, d, e, a, c = (Path(f"v/{name}.html") for name in "bdeac")
+        shares: list[list[Path]] = self.shares(3)
+        self.assertEqual([[b, a], [d, c], [e]], shares)
+        self.assertEqual(
+            [1, 1, 1], [len(self.WITH_SOUND.intersection(share)) for share in shares]
+        )
+
+    def test_more_jobs_than_pages_is_an_error(self) -> None:
+        """More jobs than pages, also one job for no page, is an error that names both, as a job would test no page."""
+        cases: list[tuple[list[Path], int]] = [(self.PAGES, 6), ([], 1)]
+        for pages, total in cases:
+            with self.subTest(pages=len(pages), total=total):
+                with self.assertRaises(ValueError) as raised:
+                    pages_of_job(pages, 1, total, sound=lambda _path: False)
+                self.assertIn(
+                    f"{total} jobs for {len(pages)} pages", str(raised.exception)
+                )
+
+    def test_a_job_outside_1_to_total_is_an_error(self) -> None:
+        """A job below 1 or above total, and any job of 0 jobs, is an error that names the job.
+
+        The error is checked by its message, as a slice with a step of 0 would raise a ValueError, too.
+        """
+        for index, total in [(0, 3), (4, 3), (-1, 3), (1, 0)]:
+            with self.subTest(index=index, total=total):
+                with self.assertRaises(ValueError) as raised:
+                    pages_of_job(self.PAGES, index, total, sound=lambda _path: False)
+                self.assertIn(f"job {index} of {total}", str(raised.exception))
+
+    def test_each_page_of_visualizations_is_in_exactly_one_ci_job(self) -> None:
+        """In the CI jobs, each page of visualizations/ is tested exactly once."""
+        pages: list[Path] = find_pages()
+        shares: list[list[Path]] = [
+            pages_of_job(pages, index, CI_JOBS) for index in range(1, CI_JOBS + 1)
+        ]
+        self.assertEqual(pages, sorted(page for share in shares for page in share))
+
+    def test_the_pages_with_sound_are_spread_evenly_over_the_ci_jobs(self) -> None:
+        """Each CI job tests at least one page of visualizations/ with sound, and no job two more than another.
+
+        At least one, so that no job skips the sound tests; spread evenly, so that no job takes much longer than the
+        others, as the tests of a page with sound take longest. A new page with sound needs no change to the CI
+        configuration: it goes to the job whose turn it is.
+        """
+        pages: list[Path] = find_pages()
+        # the number of pages with sound of each job:
+        with_sound: list[int] = [
+            sum(has_sound(path) for path in pages_of_job(pages, index, CI_JOBS))
+            for index in range(1, CI_JOBS + 1)
+        ]
+        # evenly spread first: only then does a job without a page with sound mean that there are too many jobs
+        self.assertLessEqual(
+            max(with_sound) - min(with_sound),
+            1,
+            f"a job takes much longer than another (pages with sound per job: {with_sound}): pages_of_job must "
+            "spread the pages with sound over the jobs before the other pages",
+        )
+        self.assertGreaterEqual(
+            min(with_sound),
+            1,
+            f"a job skips the sound tests (pages with sound per job: {with_sound}): there are fewer pages with sound "
+            "than jobs, so lower `parallel` of visualization_test in .gitlab-ci.yml and CI_JOBS",
+        )
+
+    def test_a_page_class_of_another_job_is_skipped_before_playwright_starts(
+        self,
+    ) -> None:
+        """A class whose PAGE another job tests is skipped in setUpClass, names the page and its job, and starts no
+        browser.
+        """
+        # one job per page (at least the two known ones, so there is another job): the job that tests the clock-scan
+        # page, and the next one:
+        total: int = len(find_pages())
+        own_job: int = self.job_of(CLOCK_SCAN_PAGE, total)
+        environment: dict[str, str] = {JOB_VARIABLE: f"{own_job % total + 1}/{total}"}
+
+        # setUpClass skips the class and does not start Playwright:
+        with (
+            mock.patch.dict(os.environ, environment, clear=True),
+            mock.patch(f"{__name__}.sync_playwright") as start,
+        ):
+            with self.assertRaises(unittest.SkipTest) as skipped:
+                self.page_class(CLOCK_SCAN_PAGE).setUpClass()
+        self.assertEqual(
+            f"{CLOCK_SCAN_PAGE.name} is tested in job {own_job} of {total}",
+            str(skipped.exception),
+        )
+        start.assert_not_called()
+
+    def test_a_page_class_of_this_job_and_one_without_page_start_playwright(
+        self,
+    ) -> None:
+        """A class whose PAGE this job tests, and a class without PAGE, start Playwright in setUpClass."""
+        # the job that tests the clock-scan page, and any job for a class without PAGE:
+        own_job: int = self.job_of(CLOCK_SCAN_PAGE, CI_JOBS)
+        cases: list[tuple[Path | None, str]] = [
+            (CLOCK_SCAN_PAGE, f"{own_job}/{CI_JOBS}"),
+            (None, f"{CI_JOBS}/{CI_JOBS}"),
+        ]
+        for page, job in cases:
+            with self.subTest(page=page, job=job):
+                page_class: type[_PageTestCase] = self.page_class(page)
+
+                # setUpClass starts Playwright (here a mock); a SkipTest would only mark this test as skipped, so the
+                # except turns it into a failure; the cleanups stop Playwright again:
+                with (
+                    mock.patch.dict(os.environ, {JOB_VARIABLE: job}, clear=True),
+                    mock.patch(f"{__name__}.sync_playwright") as start,
+                ):
+                    try:
+                        page_class.setUpClass()
+                    except unittest.SkipTest as skipped:
+                        self.fail(f"the class was skipped: {skipped}")
+                    page_class.doClassCleanups()
+                start.assert_called_once_with()
+
+    def test_a_page_class_whose_page_is_missing_is_an_error(self) -> None:
+        """A class whose PAGE is not among the pages of visualizations/ fails in setUpClass instead of being skipped,
+        before Playwright starts.
+        """
+        page_class: type[_PageTestCase] = self.page_class(
+            PAGES_DIR / "no-such-page.html"
+        )
+
+        # setUpClass raises an AssertionError that names the page; a SkipTest is caught as well, as it would only mark
+        # this test as skipped:
+        with (
+            mock.patch.dict(os.environ, {}, clear=True),
+            mock.patch(f"{__name__}.sync_playwright") as start,
+        ):
+            with self.assertRaises(Exception) as raised:
+                page_class.setUpClass()
+        self.assertIs(AssertionError, type(raised.exception))
+        self.assertIn("no-such-page.html", str(raised.exception))
+        start.assert_not_called()
+
+    def test_a_page_class_opens_only_its_page(self) -> None:
+        """A class with a PAGE fails on another page before it uses the browser, as it runs only in its page's job;
+        it opens its own page, and a class without PAGE opens any page.
+        """
+        # a class of the clock-scan page, in a mock browser, fails on the elasticity page:
+        page_test: _PageTestCase = self.page_class(CLOCK_SCAN_PAGE)()
+        page_test.browser = mock.Mock()
+        with self.assertRaises(AssertionError) as raised:
+            page_test.open_page(ELASTICITY_PAGE)
+        self.assertEqual(
+            f"OnePageTestCase opens {ELASTICITY_PAGE}, but its PAGE is {CLOCK_SCAN_PAGE}",
+            str(raised.exception),
+        )
+        page_test.browser.new_context.assert_not_called()
+
+        # the clock-scan page itself, and the elasticity page in a class without PAGE, are opened:
+        for page, path in [(CLOCK_SCAN_PAGE, CLOCK_SCAN_PAGE), (None, ELASTICITY_PAGE)]:
+            with self.subTest(page=page):
+                page_test = self.page_class(page)()
+                page_test.browser = mock.Mock()
+                page_test.open_page(path)
+                page_test.browser.new_context.assert_called_once()
+                page_test.doCleanups()
+
+    def test_a_job_without_a_page_with_sound_skips_the_sound_checks(self) -> None:
+        """In a job whose pages have no sound button, a check on each page with sound is skipped with a message that
+        names the job, and runs on no page.
+        """
+        # one job per page, and this run is the job of the elasticity page, which has no sound button:
+        self.assertFalse(has_sound(ELASTICITY_PAGE))
+        total: int = len(find_pages())
+        job: int = self.job_of(ELASTICITY_PAGE, total)
+        environment: dict[str, str] = {JOB_VARIABLE: f"{job}/{total}"}
+
+        # the check is skipped before a page is opened:
+        check: mock.Mock = mock.Mock()
+        with mock.patch.dict(os.environ, environment, clear=True):
+            with self.assertRaises(unittest.SkipTest) as skipped:
+                _SoundPageTestCase().check_each_page_with_sound(check)
+        self.assertEqual(
+            f"job {job} of {total} tests no page with sound", str(skipped.exception)
+        )
+        check.assert_not_called()
 
 
 @unittest.skipUnless(PLAYWRIGHT_AVAILABLE, SKIP_REASON)

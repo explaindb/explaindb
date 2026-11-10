@@ -775,12 +775,19 @@ ipynb_test:
 # Without a cache (GitLab shares caches between branches, so a browser planted
 # by one merge request could run in another): every run downloads Playwright
 # from PyPI, Chromium from Playwright's servers and the system libraries
-# Chromium needs from the Debian mirrors (about half a minute; the tests take
-# about 6 minutes, as WebGL is drawn without a GPU).
+# Chromium needs from the Debian mirrors (about half a minute).
+# The tests take about 6 minutes in one job, as WebGL is drawn without a GPU,
+# so three jobs share the pages (see docs/changes/038-split-visualization-test):
+# each runs the whole module on its share, which it names in VISUALIZATION_JOB
+# ("i/n"; pages_of_job in the test spreads the pages with sound, whose tests
+# take longest, evenly over the jobs first). A new page needs no change here.
+# Three jobs, as the runner runs only four jobs at a time. Keep `parallel`
+# equal to CI_JOBS in the test (system/tests/repo/test_ci_config.py checks it).
 visualization_test:
   stage: test
   tags:
     - test
+  parallel: 3
   rules:
     # Not in the nightly scheduled pipeline (see .not_in_scheduled_pipelines),
     # which system/tests/repo/test_ci_config.py requires:
@@ -796,7 +803,8 @@ visualization_test:
   timeout: 10m
   script:
     - !reference [.playwright_setup, script]
-    - uv run --no-sync python -m unittest -v system.tests.repo.test_visualizations
+    # GitLab numbers the jobs of `parallel` from 1 (CI_NODE_INDEX):
+    - VISUALIZATION_JOB="$CI_NODE_INDEX/$CI_NODE_TOTAL" uv run --no-sync python -m unittest -v system.tests.repo.test_visualizations
   interruptible: true
 
 # Tests of tools/render_video.py, which turns a page of visualizations/ into a

@@ -266,7 +266,13 @@ each page in a headless Chromium, driven by [Playwright](https://playwright.dev/
 its controls the way a reader does. The tests fail if a page's script throws an error or logs one
 to the console, if a control does not work, or if the page requests anything but a local file.
 The CI job `visualization_test` runs them in every merge request that changes a page, the test,
-`.gitlab-ci.yml`, `pyproject.toml` or `uv.lock`.
+`.gitlab-ci.yml`, `pyproject.toml` or `uv.lock`. It runs in three jobs,
+each on its share of the pages (the pages with sound, whose tests take longest, are spread evenly
+over the jobs first; see
+[`docs/changes/038-split-visualization-test`](docs/changes/038-split-visualization-test/DECISION.md)).
+A new page, with or without sound, is assigned to a job without a change to the CI configuration.
+A local run tests every page. A test class for one page names it in `PAGE`,
+so that it runs only in that page's job (`open_page` refuses another page).
 
 The tests find elements only by their `data-testid` and read the state of a page mainly from `data-*`
 attributes that its script sets. Some tests run on every page in the folder and its subfolders, so a
@@ -301,7 +307,7 @@ moment that shows what the page is about, then shrunk to 960×540 and saved with
 45 to 110 KB). A new page needs a preview as well, and a page whose look changes needs a new one.
 
 Playwright is in the dependency group `browser-tests`, which `uv sync` does not install; without
-it, the tests are skipped. The tests of `tools/render_video.py` also need ffmpeg with ffprobe on the
+it, the tests that open a browser are skipped. The tests of `tools/render_video.py` also need ffmpeg with ffprobe on the
 PATH. To run them locally:
 
 ```sh

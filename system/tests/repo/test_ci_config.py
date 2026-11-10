@@ -20,7 +20,7 @@
 
 # This module exceeds pylint's 1000 lines, as it holds one test class per security property of the audit jobs.
 # pylint: disable=too-many-lines
-"""Tests which jobs of ``.gitlab-ci.yml`` run in scheduled pipelines, and security properties of its audit jobs."""
+"""Tests of ``.gitlab-ci.yml``: which jobs run in scheduled pipelines, the audit jobs, and visualization_test."""
 
 import copy
 import functools
@@ -34,6 +34,10 @@ from typing import Any
 
 # pyyaml is not a declared dependency of the project: it comes with jupyter (via jupyter-events).
 import yaml
+
+# the browser tests of visualizations/, whose number of CI jobs and job variable visualization_test must match; the
+# module, not its test classes, is imported, so that unittest does not run those tests here again:
+from system.tests.repo import test_visualizations
 
 # the repository root and its CI configuration, found relative to this file so that the test does not depend on the
 # working directory:
@@ -118,6 +122,17 @@ AUDIT_OPTIONS_WITH_VALUE: dict[str, re.Pattern[str]] = {
     "-D": re.compile(r"warnings|unmaintained|unsound|yanked"),
     "--deny": re.compile(r"warnings|unmaintained|unsound|yanked"),
 }
+
+# the job that runs the browser tests of visualizations/ in parallel jobs, the test module it runs, and the assignment
+# before the command by which each job names its share of the pages (without the quotes, which shlex removes):
+VISUALIZATION_CI_JOB: str = "visualization_test"
+VISUALIZATION_TESTS: str = "system.tests.repo.test_visualizations"
+JOB_ASSIGNMENT: str = (
+    f"{test_visualizations.JOB_VARIABLE}=$CI_NODE_INDEX/$CI_NODE_TOTAL"
+)
+# no word between that assignment and the test module may contain one of these characters, as a word with one may end
+# the command (";", "&&", "|", also glued as in "true;") or redirect it ("2>&1"):
+SEPARATOR_CHARACTERS: frozenset[str] = frozenset(";|&")
 
 
 class _CILoader(yaml.SafeLoader):  # pylint: disable=too-many-ancestors
@@ -517,6 +532,37 @@ def audit_file_problems(root: Path) -> list[str]:
         if (root / path).exists() or (root / path).is_symlink():
             problems.append(f"{path} exists")
     return problems
+
+
+def visualization_job_problems(job: dict[str, Any]) -> list[str]:
+    """Returns what is wrong with how a job runs the browser tests of visualizations/ in parallel, or an empty list.
+
+    Wrong are a ``parallel`` of the job other than CI_JOBS of the test module, and a script without a line whose
+    first word is JOB_ASSIGNMENT, which has VISUALIZATION_TESTS as a word, and in which no word between the two
+    contains a character of SEPARATOR_CHARACTERS; such a line sets the variable for the command that runs the tests.
+    The rule is textual on the words of :func:`shlex.split`, which removes quotes and comments: it also refuses what
+    the shell would accept, such as a redirection ``2>&1`` or a quoted ``;`` before the test module, and it ignores
+    the words after the test module, such as ``2>&1 | tee log``. A line that shlex cannot split (such as one with
+    an unclosed quote) is skipped.
+    """
+    problems: list[str] = []
+    parallel: Any = job.get("parallel")
+    if parallel != test_visualizations.CI_JOBS:
+        problems.append(f"parallel is {parallel!r}, not {test_visualizations.CI_JOBS}")
+    for line in script_lines(job.get("script", [])):
+        try:
+            words: list[str] = shlex.split(line, comments=True)
+        except ValueError:
+            continue
+        if words[:1] != [JOB_ASSIGNMENT] or VISUALIZATION_TESTS not in words:
+            continue
+        between: list[str] = words[1 : words.index(VISUALIZATION_TESTS)]
+        if not any(SEPARATOR_CHARACTERS.intersection(word) for word in between):
+            return problems
+    return [
+        *problems,
+        f"no command starts with {JOB_ASSIGNMENT} and runs {VISUALIZATION_TESTS}",
+    ]
 
 
 class ScheduledPipelineTest(unittest.TestCase):
@@ -1236,6 +1282,92 @@ class AuditFilesTest(unittest.TestCase):
                 [".cargo/audit.toml exists", "generated/rust/.cargo/audit.toml exists"],
                 audit_file_problems(root),
             )
+
+
+class VisualizationJobTest(unittest.TestCase):
+    """Checks that visualization_test runs the browser tests in CI_JOBS parallel jobs, each on its share of the pages.
+
+    The test module spreads the pages over CI_JOBS jobs so that the pages with sound are spread evenly (see its
+    JobShareTest). Each job names its share in the variable VISUALIZATION_JOB; without it, every job would test
+    every page.
+    """
+
+    def test_visualization_job_runs_its_share_of_the_pages(self) -> None:
+        """VISUALIZATION_CI_JOB in .gitlab-ci.yml has CI_JOBS of the test module as ``parallel`` and runs the test
+        module with VISUALIZATION_JOB="$CI_NODE_INDEX/$CI_NODE_TOTAL", see :func:`visualization_job_problems`.
+        """
+        config: dict[str, Any] = load_ci_config()
+        self.assertIn(VISUALIZATION_CI_JOB, config)
+        self.assertEqual([], visualization_job_problems(config[VISUALIZATION_CI_JOB]))
+
+    def test_wrong_parallel_and_missing_share_are_found(self) -> None:
+        """A ``parallel`` other than CI_JOBS, also none, and a script whose variable does not reach the test module are
+        found.
+
+        Would fail if any of these were accepted: a line that runs the test module without the variable, with a fixed
+        job, with the variable after it, or with a word between the two that holds ``;``, ``|`` or ``&`` (a command
+        of its own, also glued as in ``true;``, ``;(`` or ``&&>``, a pipe, or a redirection such as ``2>&1``); a line
+        that runs only one class of the test module or another module; a line whose test module stands in a comment,
+        or that is commented out. Would also fail if a pipe after the test module were refused, or if a line shlex
+        cannot split (here before the right line) stopped the search.
+        """
+        jobs_total: int = test_visualizations.CI_JOBS
+        assignment: str = (
+            f'{test_visualizations.JOB_VARIABLE}="$CI_NODE_INDEX/$CI_NODE_TOTAL"'
+        )
+        command: str = f"uv run python -m unittest -v {VISUALIZATION_TESTS}"
+        other_command: str = command.replace(
+            VISUALIZATION_TESTS, "system.tests.repo.test_render_video"
+        )
+
+        # scripts that run the test module on the job's share, and scripts that do not:
+        accepted: dict[str, list[Any]] = {
+            "right": [["setup"], 'echo "unclosed', f"{assignment} {command}"],
+            "pipe_after_module": [f"{assignment} {command} 2>&1 | tee log"],
+        }
+        refused: dict[str, list[Any]] = {
+            "without_variable": [command],
+            "fixed_value": [f'{test_visualizations.JOB_VARIABLE}="1/3" {command}'],
+            "other_module": [f"{assignment} {other_command}"],
+            "one_class_of_module": [f"{assignment} {command}.JobShareTest"],
+            "commented_out": [f"# {assignment} {command}"],
+            "comment_before_module": [f"{assignment} true # {command}"],
+            "variable_after_module": [f"{command} {assignment}"],
+            "variable_then_and": [f"{assignment} true && {command}"],
+            "variable_then_glued_semicolon": [f"{assignment} true; {command}"],
+            "variable_then_semicolon_subshell": [f"{assignment} true;({command} )"],
+            "variable_then_and_subshell": [f"{assignment} true &&({command} )"],
+            "variable_then_and_redirect": [f"{assignment} true &&>/dev/null {command}"],
+            "variable_then_pipe": [f"{assignment} true | {command}"],
+            "redirection_before_module": [
+                f"{assignment} uv run 2>&1 python -m unittest -v {VISUALIZATION_TESTS}"
+            ],
+        }
+
+        # each script in a job with the right parallel, and the right script in two jobs with the wrong parallel:
+        jobs: dict[str, dict[str, Any]] = {
+            name: {"parallel": jobs_total, "script": script}
+            for name, script in {**accepted, **refused}.items()
+        }
+        jobs["without_parallel"] = {"script": [f"{assignment} {command}"]}
+        jobs["other_parallel"] = {
+            "parallel": jobs_total + 1,
+            "script": [f"{assignment} {command}"],
+        }
+
+        # each job has the problems expected of it:
+        no_share: str = (
+            f"no command starts with {JOB_ASSIGNMENT} and runs {VISUALIZATION_TESTS}"
+        )
+        self.assertEqual(
+            {name: [] for name in accepted}
+            | {name: [no_share] for name in refused}
+            | {
+                "without_parallel": [f"parallel is None, not {jobs_total}"],
+                "other_parallel": [f"parallel is {jobs_total + 1}, not {jobs_total}"],
+            },
+            {name: visualization_job_problems(job) for name, job in jobs.items()},
+        )
 
 
 if __name__ == "__main__":
