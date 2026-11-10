@@ -236,6 +236,109 @@ fn test_journaling() {
     );
 }
 
+/// Checks that `delete_object` of the store `S` for an object id the store has no entry for returns `KeyNotFound`,
+/// whose message is "object <id> not found in the store", and changes nothing: no entry in the store, no `Delete` in
+/// the journal, an empty write set, and the transaction stays open and can commit.
+///
+/// ```text
+/// T1
+/// begin
+/// delete "missing" -> KeyNotFound
+/// commit (timestamp 2)
+/// ```
+fn check_delete_object_of_an_unknown_object_id_raises_key_error_naming_it<S>()
+where
+    S: TransactionalStore<Value = Stuff> + Default,
+{
+    // load one object, so the store is not empty, then begin T1:
+    let mut store: S = S::default();
+    store.put("1", Stuff { a: 1, b: 1 }).unwrap();
+    let t_1: u64 = store.begin_transaction();
+
+    // deleting the unknown "missing" returns KeyNotFound, whose message names it:
+    let result: Result<(), StoreError> = store.delete_object("missing", t_1);
+    assert_eq!(result, Err(StoreError::KeyNotFound("missing".to_string())));
+    assert_eq!(
+        result.unwrap_err().to_string(),
+        "object missing not found in the store"
+    );
+
+    // nothing changed: no entry for "missing", only the Begin of T1 in its journal, an empty write set:
+    assert!(!store.key_value_store().contains_key("missing"));
+    assert_eq!(
+        store.state().journal.get(&t_1).unwrap(),
+        [JournalEntry::Begin { ta_id: t_1 }]
+    );
+    assert!(store.state().td[&t_1].write_set.is_empty());
+
+    // T1 is still open and commits with the next counter value:
+    assert_eq!(store.state().td[&t_1].committed_timestamp, None);
+    store.commit_transaction(t_1).unwrap();
+    assert_eq!(
+        store.state().journal.get(&t_1).unwrap(),
+        [
+            JournalEntry::Begin { ta_id: t_1 },
+            JournalEntry::Commit {
+                ta_id: t_1,
+                commit_timestamp: 2
+            },
+        ]
+    );
+}
+
+/// `delete_object` of a [`TransactionalKeyValueStore`] for an unknown object id returns `KeyNotFound` and changes
+/// nothing, see [`check_delete_object_of_an_unknown_object_id_raises_key_error_naming_it`]; the indexed store
+/// follows in step 2 of the port.
+#[test]
+fn test_delete_object_of_an_unknown_object_id_raises_key_error_naming_it() {
+    check_delete_object_of_an_unknown_object_id_raises_key_error_naming_it::<
+        TransactionalKeyValueStore<Stuff>,
+    >();
+}
+
+/// Checks that `delete_object` of the store `S` in a committed transaction returns `AlreadyCommitted` (Python:
+/// RuntimeError "committed already") also for an object id the store has no entry for: the check of the transaction
+/// comes before the lookup of the object.
+///
+/// ```text
+/// T1
+/// begin
+/// commit
+/// delete "missing" -> AlreadyCommitted
+/// ```
+fn check_delete_object_in_a_committed_transaction_raises_runtime_error_also_for_an_unknown_object_id<
+    S,
+>()
+where
+    S: TransactionalStore<Value = Stuff> + Default,
+{
+    // load one object, then begin and commit T1:
+    let mut store: S = S::default();
+    store.put("1", Stuff { a: 1, b: 1 }).unwrap();
+    let t_1: u64 = store.begin_transaction();
+    store.commit_transaction(t_1).unwrap();
+
+    // deleting the unknown "missing" in the committed T1 returns AlreadyCommitted:
+    let result: Result<(), StoreError> = store.delete_object("missing", t_1);
+    assert_eq!(result, Err(StoreError::AlreadyCommitted(t_1)));
+    assert_eq!(
+        result.unwrap_err().to_string(),
+        format!("transaction {t_1} committed already")
+    );
+}
+
+/// `delete_object` of a [`TransactionalKeyValueStore`] in a committed transaction returns `AlreadyCommitted` also
+/// for an unknown object id, see
+/// [`check_delete_object_in_a_committed_transaction_raises_runtime_error_also_for_an_unknown_object_id`]; the indexed
+/// store follows in step 2 of the port.
+#[test]
+fn test_delete_object_in_a_committed_transaction_raises_runtime_error_also_for_an_unknown_object_id()
+ {
+    check_delete_object_in_a_committed_transaction_raises_runtime_error_also_for_an_unknown_object_id::<
+        TransactionalKeyValueStore<Stuff>,
+    >();
+}
+
 /// Checks that `put` of a key that is already in the store `S` fails with `KeyExists` and leaves the stored value
 /// and its versions unchanged.
 fn check_put_of_existing_key_fails<S>()

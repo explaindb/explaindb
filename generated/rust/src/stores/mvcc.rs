@@ -908,6 +908,8 @@ pub fn delete_object_default<S: TransactionalStore + ?Sized>(
     if td_entry.committed_timestamp.is_some() {
         return Err(StoreError::AlreadyCommitted(ta_id));
     }
+
+    // an object id the store has no entry for cannot be deleted:
     if !state.key_value_store.contains_key(object_id) {
         return Err(StoreError::KeyNotFound(object_id.to_string()));
     }

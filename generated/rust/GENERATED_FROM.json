@@ -11,7 +11,7 @@
       "path": "Cargo.toml"
     },
     {
-      "sha256": "sha256:689e18f5dad979e0",
+      "sha256": "sha256:20bb162e6e78a0b8",
       "sources": [],
       "path": "README.md"
     },
@@ -42,7 +42,7 @@
           "path": "system/stores/VersionedKeyValueStore.py"
         },
         {
-          "sha256": "sha256:20a5490e2c823967",
+          "sha256": "sha256:11f30da6cc120052",
           "path": "system/stores/MVCC.py"
         },
         {
@@ -97,10 +97,10 @@
       "path": "src/stores.rs"
     },
     {
-      "sha256": "sha256:25af97fcfa55d299",
+      "sha256": "sha256:036c7498f9b53690",
       "sources": [
         {
-          "sha256": "sha256:20a5490e2c823967",
+          "sha256": "sha256:11f30da6cc120052",
           "path": "system/stores/MVCC.py"
         },
         {
@@ -185,7 +185,7 @@
       "sha256": "sha256:60c88681d9077afa",
       "sources": [
         {
-          "sha256": "sha256:20a5490e2c823967",
+          "sha256": "sha256:11f30da6cc120052",
           "path": "system/stores/MVCC.py"
         },
         {
@@ -206,10 +206,10 @@
       "path": "tests/stores/test_store_anomalies.rs"
     },
     {
-      "sha256": "sha256:a083669477cae1be",
+      "sha256": "sha256:a49c403f637aebfe",
       "sources": [
         {
-          "sha256": "sha256:7b55aacb72336e0e",
+          "sha256": "sha256:b1acaa8384407189",
           "path": "system/tests/stores/test_stores_basics.py"
         }
       ],
