@@ -69,6 +69,7 @@ class IndexedTransactionalKeyValueStore(TransactionalKeyValueStore, IndexedACIDS
         self,
         use_brute_force_validation: bool = False,
         isolation_level: IsolationLevel = "serializable",
+        autocommit: bool = False,
     ):
         """Initialize the store and its (initially empty) index catalogues.
 
@@ -76,11 +77,14 @@ class IndexedTransactionalKeyValueStore(TransactionalKeyValueStore, IndexedACIDS
             algorithm in the validation phase (see :class:`~system.stores.MVCC.TransactionalKeyValueStore`).
         :param isolation_level: the isolation level of the underlying store, "serializable" or "snapshot isolation"
             (see :class:`~system.stores.MVCC.TransactionalKeyValueStore`).
+        :param autocommit: if True, put, bulkload, get and delete without a transaction id each run as a transaction
+            of their own (see :class:`~system.stores.MVCC.TransactionalKeyValueStore`).
         """
         # set up the transactional store:
         super().__init__(
             use_brute_force_validation=use_brute_force_validation,
             isolation_level=isolation_level,
+            autocommit=autocommit,
         )
 
         # a dictionary mapping from the index name to (IndexProperties, Index):
@@ -358,13 +362,13 @@ class IndexedTransactionalKeyValueStore(TransactionalKeyValueStore, IndexedACIDS
                     object_to_deindex,
                 )
 
-    def put(self, object_id: str, _object: object) -> None:
-        """See :meth:`VersionedKeyValueStore.put`.
+    def _load(self, object_id: str, _object: object) -> None:
+        """See :meth:`TransactionalKeyValueStore._load`.
 
         After delegating to the base implementation, indexes the new committed version in all indexes.
         """
         # store the object as a committed version (raises if the object_id exists already, before any index work):
-        super().put(object_id, _object)
+        super()._load(object_id, _object)
 
         # index the stored copy like every other version:
         self._maintain_indexes(

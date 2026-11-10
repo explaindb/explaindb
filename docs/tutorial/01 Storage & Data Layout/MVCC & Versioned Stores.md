@@ -86,6 +86,57 @@ update x -> serializable: passes, snapshot isolation: t_i is aborted
 commit   -> succeeds (serializable only)
 ```
 
+## Operations without a transaction id
+
+`put`, `bulkload`, `get` and `delete` take no transaction id. What they do depends on the switch `autocommit`, set
+when the store is created with `TransactionalKeyValueStore(autocommit=...)`, and mirrors autocommit in SQL:
+
+- **autocommit off** (default): before the first transaction begins (also one that is aborted later), `put`,
+  `bulkload` and `get` load and inspect the initial state. Its versions get the timestamp 0, so every transaction
+  sees them, and no transaction id is used up. Once a transaction has begun, these calls raise an error, and `delete`
+  always does: changes then need a transaction.
+- **autocommit on**: each call runs as a transaction of its own (begin, operation, commit), like an SQL statement
+  outside an explicit transaction; `bulkload` loads all its objects in one transaction. Explicit transactions can
+  still be used, like `BEGIN` in SQL.
+
+## Indexes over versions
+
+In the indexed store, an index that you create on an attribute (`create_index`) maps a value to the ids of the
+objects that have it. With versions, which objects have a value depends on the snapshot: one transaction may see an
+older version of an object than another. The index stores no snapshots. Every version that carries the object goes
+into the index under its value, committed versions as well as those a running transaction is writing; a delete is
+stored as a version without an object (a delete marker) and is not indexed. A newer committed version does not
+remove the entries of the older ones; an entry leaves the index only when the transaction that wrote it aborts or
+writes the object again:
+
+```text
+object X:  a=1 @t1 ──── a=2 @t5 ──── a=3 @t9
+
+index a:   1 -> [X]
+           2 -> [X]
+           3 -> [X]
+```
+
+So the index is a *filter*: for a value, it names every object that had that value in some version, a superset of
+the right answer. A read `a == 2` that uses the index filters these candidates afterwards, in two steps:
+
+1. **visibility:** it reads the version of the candidate that its snapshot sees; if the object is deleted or not
+   inserted yet in that snapshot, the candidate is dropped;
+2. **condition:** it checks `a == 2` again on that version; if the version has another value, the candidate is
+   dropped.
+
+A transaction with the snapshot t7 sees `a=2` and finds X; one with the snapshot t10 sees `a=3` and does not find X,
+as X has the value 3 in its snapshot. The read through the index returns the same objects as a scan of all objects:
+none is missing, as every version a snapshot can see is in the index, and none is wrong, as the snapshot decides.
+
+The index could also store when each version is valid, e.g. under the key (value, from, to), and answer for a
+snapshot directly. But then every commit would have to change the entry of the version it replaces (its "to"), and a
+version that is still being written has no commit timestamp yet, so its "from" is not known. Real systems filter too:
+PostgreSQL's index entries point to row versions without saying which snapshots see them, so it checks each row
+version it reads, and InnoDB's secondary indexes do not store which versions are visible either. Unlike this store,
+they remove the entries of versions that no snapshot can see any more (PostgreSQL with `VACUUM`, InnoDB with its
+purge); here no committed version is ever removed, so the lists of candidates keep growing.
+
 ## Try it
 
 Open the MVCC playground notebook: load a scenario (lost update, write skew, blind write, ...) or build a schedule

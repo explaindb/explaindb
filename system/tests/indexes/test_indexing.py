@@ -488,9 +488,8 @@ class IndexingTest(AbstractUnitTest):
         self.assertEqual(list(store.indexes_by_name["a_idx"].index.get(4)), ["2"])
 
     def test_put_after_create_index_indexes_the_object(self):
-        """A non-transactional put after create_index adds the object to every index; a put of an existing
-        object_id fails and leaves the indexes unchanged, and a non-transactional delete keeps the old version
-        indexed.
+        """Before the first transaction, a put after create_index adds the object to every index; a put of an
+        existing object_id fails and leaves the indexes unchanged.
         """
         store = IndexedTransactionalKeyValueStore()
         store.create_index("a_idx", "a", "=")
@@ -515,10 +514,42 @@ class IndexingTest(AbstractUnitTest):
         with self.assertRaises(KeyError):
             list(store.indexes_by_name["a_idx"].index.get(5))
 
-        # a non-transactional delete only appends a delete marker, the old version stays indexed:
+    def test_autocommit_put_after_create_index_indexes_the_object_once(self):
+        """With autocommit, a put after create_index lists the object once in the index, an equality read through
+        the index finds it, and after a delete with autocommit the read returns nothing.
+
+        t1                          t2                          autocommit
+                                                                put "1" as (2, 3), commit
+        begin
+        read a==2 -> sees (2, 3)
+        commit
+                                                                delete "1", commit
+                                    begin
+                                    read a==2 -> sees nothing
+        """
+        store = IndexedTransactionalKeyValueStore(autocommit=True)
+        store.create_index("a_idx", "a", "=")
+        index: KeyValueStore[object, str] = store.indexes_by_name["a_idx"].index
+        where_a_2: WHERE_Clause = WHERE_Clause("a", "==", 2)
+
+        # the put runs as a transaction of its own and lists "1" once in the index:
+        store.put("1", IndexingTest.Stuff(2, 3))
+        self.assertEqual(index.size(), 1)
+        self.assertEqual(list(index.get(2)), ["1"])
+
+        # t1 reads "1" through the index:
+        TA_ID_1: int = store.begin_transaction()
+        self.assertIs(store._index_for(where_a_2), index)
+        self.assertEqual(
+            store.read_objects(TA_ID_1, where_a_2), [("1", IndexingTest.Stuff(2, 3))]
+        )
+        store.commit_transaction(TA_ID_1)
+
+        # after the delete with autocommit, the read of t2 returns nothing, although the old version stays indexed:
         store.delete("1")
-        self.assertEqual(store.indexes_by_name["a_idx"].index.size(), 1)
-        self.assertEqual(list(store.indexes_by_name["a_idx"].index.get(2)), ["1"])
+        TA_ID_2: int = store.begin_transaction()
+        self.assertEqual(store.read_objects(TA_ID_2, where_a_2), [])
+        self.assertEqual(list(index.get(2)), ["1"])
 
     def test_bulkload_after_create_index_indexes_every_object(self):
         """A bulkload after create_index adds every loaded object to every index."""

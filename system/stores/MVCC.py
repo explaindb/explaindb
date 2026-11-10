@@ -27,7 +27,7 @@ import hashlib
 import pprint
 from abc import ABC
 from dataclasses import dataclass
-from typing import Dict, ItemsView, Literal, cast
+from typing import Callable, Dict, ItemsView, Iterator, Literal, cast
 
 from pydantic import BaseModel
 
@@ -108,6 +108,15 @@ class TransactionalKeyValueStore(VersionedKeyValueStore, ACIDStore):
     Note: a blind write (one that does not read the object first) to an object that another transaction changed and
     committed since the writer began is aborted under snapshot isolation, but can commit under serializable. The
     tutorial page "MVCC & Versioned Stores" explains write skew and shows both schedules.
+
+    The operations without a transaction id (put, bulkload, get, delete) depend on the switch ``autocommit``, chosen
+    in ``__init__``, as in SQL:
+
+    - autocommit off (default): before the first transaction begins (also one that is aborted later), put, bulkload
+      and get load and inspect the initial state; its versions get the start timestamp 0, so every transaction sees
+      them, and no transaction id is used up. Afterwards these operations raise RuntimeError; delete always does.
+    - autocommit on: each of these operations runs as a transaction of its own (begin, operation, commit), like a
+      statement outside an explicit transaction in SQL. Explicit transactions can still be used.
     """
 
     @dataclass
@@ -133,6 +142,7 @@ class TransactionalKeyValueStore(VersionedKeyValueStore, ACIDStore):
         use_brute_force_validation: bool = False,
         persistence_layer: KeyValueStore = None,
         isolation_level: IsolationLevel = "serializable",
+        autocommit: bool = False,
     ):
         """Initializes the store.
 
@@ -145,6 +155,9 @@ class TransactionalKeyValueStore(VersionedKeyValueStore, ACIDStore):
         "snapshot isolation" does not validate reads; instead, it aborts a transaction as soon as it writes an object
         that another transaction changed and committed after the writer began.
         @param persistence_layer: the persistence layer to use for the store
+        @param autocommit: if set to True, put, bulkload, get and delete without a transaction id each run as a
+        transaction of their own; if False (the default), only put, bulkload and get are allowed without a
+        transaction id, and only before the first transaction begins (see the class docstring)
         """
 
         # reject an unknown isolation level and the combination of snapshot isolation with brute force validation:
@@ -167,6 +180,7 @@ class TransactionalKeyValueStore(VersionedKeyValueStore, ACIDStore):
         ]()
         self.use_brute_force_validation: bool = use_brute_force_validation
         self.isolation_level: IsolationLevel = isolation_level
+        self.autocommit: bool = autocommit
 
         # counter for transaction ids and commit timestamps (both are taken from it, see _get_next_TA_id):
         self.TA_id: int = 1
@@ -919,3 +933,162 @@ class TransactionalKeyValueStore(VersionedKeyValueStore, ACIDStore):
 
         # remove the transaction from the transaction dictionary (TD):
         del self.TD[TA_id]
+
+    # operations without a transaction id (see the class docstring):
+
+    def _check_load_phase(self, operation: str) -> bool:
+        """Decides how operation <operation>, called without a transaction id, runs, and refuses it if it may not run.
+
+        @param operation: the name of the operation, used in the error message
+        @return: True if it loads the initial state (autocommit is off and no transaction has begun yet), False if it
+        runs as a transaction of its own (autocommit is on)
+        @raise RuntimeError: if autocommit is off and a transaction has begun already
+        """
+        if self.autocommit:
+            return False
+
+        # the counter starts at 1 and only begin_transaction and commit_transaction advance it, so it is still 1
+        # as long as no transaction has begun:
+        if self.TA_id != 1:
+            raise RuntimeError(
+                f"{operation} without a transaction id needs autocommit=True once a transaction has begun"
+            )
+        return True
+
+    def _run_as_own_transaction[T](self, operation: Callable[[int], T]) -> T:
+        """Runs <operation> as a transaction of its own: begins a transaction, passes its id to <operation> and
+        commits it.
+
+        If <operation> raises, the transaction is aborted (unless the store aborted it already) and the exception is
+        passed on; an interrupt during the commit is not handled. The commit cannot fail validation: the store runs
+        one call at a time, so no transaction commits between the begin and the commit of this one.
+
+        @param operation: the operation to run, called with the id of the new transaction
+        @return: the result of <operation>
+        """
+        TA_id: int = self.begin_transaction()
+        try:
+            result: T = operation(TA_id)
+        except BaseException:
+            # also on an interrupt (e.g. Ctrl-C between two objects of a long bulkload), as the caller does not know
+            # the id of the transaction and could not end it; update_object and delete_object abort the transaction
+            # themselves on a conflict:
+            if TA_id in self.TD:
+                self.abort_transaction(TA_id)
+            raise
+        self.commit_transaction(TA_id)
+        return result
+
+    def _visible_version(self, object_id: str, TA_id: int) -> object:
+        """Returns the version of object <object_id> visible to TA <TA_id>; raises KeyError if there is none.
+
+        @param object_id: the object id of the object to be read
+        @param TA_id: the transaction id of the reading transaction
+        @return: the visible version of the object
+        @raise KeyError: if the object does not exist or is deleted in the snapshot of TA <TA_id>
+        """
+        _object: object | None = (
+            self._get_visible_object_version(object_id, TA_id)
+            if object_id in self.key_value_store
+            else None
+        )
+        if _object is None:
+            raise KeyError(f"object {object_id} not found in the store")
+        return _object
+
+    def _insert(self, object_id: str, _object: object, TA_id: int) -> None:
+        """Inserts object <object_id> in TA <TA_id>; raises KeyError if TA <TA_id> sees the object already.
+
+        The object is visible to TA <TA_id> if it exists in its snapshot or if TA <TA_id> wrote it itself, e.g. an
+        object_id that occurs twice in one bulkload.
+
+        @param object_id: the object id of the new object
+        @param _object: the new object
+        @param TA_id: the transaction id of the inserting transaction
+        @raise KeyError: if the object is visible to TA <TA_id>
+        """
+        if (
+            object_id in self.key_value_store
+            and self._get_visible_object_version(object_id, TA_id) is not None
+        ):
+            raise KeyError(f"object {object_id} already exists in the store")
+        self.update_object(object_id, _object, TA_id)
+
+    def _load(self, object_id: str, _object: object) -> None:
+        """Stores object <object_id> as part of the initial state, i.e. as a committed version with start timestamp 0
+        (see :meth:`VersionedKeyValueStore.put`).
+
+        @param object_id: the object id of the new object
+        @param _object: the new object
+        """
+        super().put(object_id, _object)
+
+    def put(self, object_id: str, _object: object) -> None:
+        """See :meth:`VersionedKeyValueStore.put`.
+
+        Without autocommit, only allowed before the first transaction begins (it then loads the initial state as in
+        the base class); raises RuntimeError afterwards. With autocommit, inserts the object in a transaction of its
+        own; raises KeyError if the object exists (a deleted object can be inserted again), and
+        :class:`TransactionAbortedException` if an open transaction is writing it.
+        """
+        if self._check_load_phase("put"):
+            self._load(object_id, _object)
+            return
+        self._run_as_own_transaction(
+            lambda TA_id: self._insert(object_id, _object, TA_id)
+        )
+
+    def bulkload(self, input_data: Iterator[tuple[str, object]]) -> None:
+        """See :meth:`Index.bulkload`.
+
+        Without autocommit, only allowed before the first transaction begins (one put per object, as in the base
+        class); raises RuntimeError afterwards. With autocommit, inserts all objects in one transaction, all or none:
+        raises KeyError if an object exists or occurs twice in <input_data>, and :class:`TransactionAbortedException`
+        if an open transaction is writing one of them; an empty <input_data> still runs an (empty) transaction.
+        """
+        if self._check_load_phase("bulkload"):
+            super().bulkload(input_data)
+            return
+
+        def insert_all(TA_id: int) -> None:
+            """Inserts every object of <input_data> in TA <TA_id>."""
+            for object_id, _object in input_data:
+                self._insert(object_id, _object, TA_id)
+
+        self._run_as_own_transaction(insert_all)
+
+    def get(self, object_id: str) -> Iterator[object]:
+        """See :meth:`VersionedKeyValueStore.get`.
+
+        Reads at the call, not when the returned iterator is advanced, and raises at the call. Without autocommit,
+        only allowed before the first transaction begins (it then reads as the base class does, KeyError if the object
+        does not exist); raises RuntimeError afterwards. With autocommit, reads the newest committed version in a
+        transaction of its own; raises KeyError if the object does not exist or is deleted.
+        """
+        if self._check_load_phase("get"):
+            # read now, so that the iterator returns the initial state even if it is advanced after transactions ran:
+            return iter(list(super().get(object_id)))
+        _object: object = self._run_as_own_transaction(
+            lambda TA_id: self._visible_version(object_id, TA_id)
+        )
+        return iter([_object])
+
+    def delete(self, object_id: str, _object: object = None) -> None:
+        """See :meth:`VersionedKeyValueStore.delete`.
+
+        Without autocommit, always raises RuntimeError: the initial state needs no delete. With autocommit, deletes
+        the object in a transaction of its own; raises KeyError if the object does not exist or is deleted already,
+        and :class:`TransactionAbortedException` if an open transaction is writing it.
+        """
+        assert _object is None
+
+        if not self.autocommit:
+            raise RuntimeError("delete without a transaction id needs autocommit=True")
+
+        def delete_visible(TA_id: int) -> None:
+            """Deletes the object in TA <TA_id>; raises KeyError if TA <TA_id> does not see it."""
+            # raises KeyError if TA <TA_id> does not see the object:
+            self._visible_version(object_id, TA_id)
+            self.delete_object(object_id, TA_id)
+
+        self._run_as_own_transaction(delete_visible)

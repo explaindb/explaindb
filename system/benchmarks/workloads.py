@@ -163,7 +163,7 @@ def get(
     number_of_objects: int, use_brute_force_validation: bool, _operations: int
 ) -> Pass:
     """Times one non-transactional `get` of every object of a filled store; one operation per get. Python's `get`
-    returns a generator, so its cost is part of the measurement."""
+    returns an iterator, so its cost is part of the measurement."""
     store: TransactionalKeyValueStore = filled_store(
         number_of_objects, use_brute_force_validation
     )
