@@ -150,7 +150,10 @@ class BPlusTree[Key, Value](AbstractBTree[Key, Value]):
         """
 
         # class variable, node counter used to assign unique ids to nodes:
-        _ids: int = count(0)
+        _ids: count[int] = count(0)
+
+        # the keys of the node, set by Inner and Leaf (a CountingLeaf has none):
+        keys: list[Key]
 
         def __init__(self, capacity: int):
             """Initializes a node with a given capacity.
@@ -317,12 +320,12 @@ class BPlusTree[Key, Value](AbstractBTree[Key, Value]):
 
             # perform binary search to find the position to insert the key:
             pos: int = bisect.bisect(self.keys, key)
-            sr: PutInfo[Key] = self.children[pos].put(key, value)
+            put_info: PutInfo | None = self.children[pos].put(key, value)
 
             if (
-                type(sr) == SplitHappens
+                type(put_info) == SplitHappens
             ):  # a split happened in the layer immediately below this node
-                sr: SplitHappens[Key] = cast(SplitHappens[Key], sr)
+                sr: SplitHappens[Key] = cast(SplitHappens[Key], put_info)
                 # check if this node is full:
                 if self.is_full():
                     pivot_pos = bisect.bisect_left(self.keys, sr.pivot)
@@ -511,11 +514,11 @@ class BPlusTree[Key, Value](AbstractBTree[Key, Value]):
                     len(keys) <= capacity
                 ), "number of leaf entries exceeds max capacity"
 
-            self.keys: Optional[list[Key]] = (
+            self.keys: list[Key] = (
                 keys if keys is not None else []
             )  # use `None` as default to avoid shared mutable default arguments
 
-            self.values: Optional[list[Value]] = (
+            self.values: list[Value] = (
                 values if values is not None else []
             )  # use `None` as default to avoid shared mutable default arguments
 
@@ -583,23 +586,27 @@ class BPlusTree[Key, Value](AbstractBTree[Key, Value]):
             # call split to create two new leaf nodes:
             sr: SplitHappens[Key] = self.split()
 
+            # the split of a leaf returns two leaves:
+            left_leaf: BPlusTree.Leaf = cast(BPlusTree.Leaf, sr.left_node)
+            right_leaf: BPlusTree.Leaf = cast(BPlusTree.Leaf, sr.right_node)
+
             # (3.) redirect leaf pointers for sequential scanning
             # is there a leaf to the left of self?: update its next pointer
             if self.previous:
-                self.previous.next = sr.left_node
+                self.previous.next = left_leaf
 
             # new left node points to the previous leaf:
-            sr.left_node.previous = self.previous
+            left_leaf.previous = self.previous
             # new left node points to the right node (just created by the split):
-            sr.left_node.next = sr.right_node
+            left_leaf.next = right_leaf
 
             # new right node points to the new left node (just created by the split):
-            sr.right_node.previous = sr.left_node
+            right_leaf.previous = left_leaf
             # new right node points to the next leaf:
-            sr.right_node.next = self.next
+            right_leaf.next = self.next
 
             if self.next:
-                self.next.previous = sr.right_node
+                self.next.previous = right_leaf
 
             # return the split information up the call stack:
             return sr
@@ -832,11 +839,11 @@ class BPlusTree[Key, Value](AbstractBTree[Key, Value]):
         """
 
         # copy to avoid outside modifications:
-        sr: PutInfo[Key] = self.root.put(key, copy.copy(value))
+        put_info: PutInfo | None = self.root.put(key, copy.copy(value))
 
         # B+tree only consists of a single leaf node that gets split
-        if type(sr) == SplitHappens:
-            sr: SplitHappens[Key] = cast(SplitHappens[Key], sr)
+        if type(put_info) == SplitHappens:
+            sr: SplitHappens[Key] = cast(SplitHappens[Key], put_info)
             self.root = BPlusTree.Inner(
                 self.inner_capacity, [sr.pivot], [sr.left_node, sr.right_node]
             )
