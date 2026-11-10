@@ -544,11 +544,12 @@ class TransactionalKeyValueStore(VersionedKeyValueStore, ACIDStore):
         """See :meth:`ACIDStore.delete_object`.
 
         Must be executed atomically in a concurrent environment. Raises RuntimeError if the transaction has committed
-        already. Aborts the transaction and raises :class:`TransactionAbortedException` if another transaction
-        currently holds a work-in-progress version of the object; under the isolation level snapshot isolation, also
-        if another transaction changed the object and committed after the transaction began. Otherwise writes a
-        :class:`Delete` journal entry, adds a delete-marker work-in-progress version, and records the object_id in the
-        transaction's write set.
+        already, and KeyError if the store has no entry for object_id (an object deleted already has one, so it gets
+        another delete marker). Aborts the transaction and raises :class:`TransactionAbortedException` if another
+        transaction currently holds a work-in-progress version of the object; under the isolation level snapshot
+        isolation, also if another transaction changed the object and committed after the transaction began.
+        Otherwise writes a :class:`Delete` journal entry, adds a delete-marker work-in-progress version, and records
+        the object_id in the transaction's write set.
 
         The transaction id None deletes in a transaction of its own and needs autocommit (see the class docstring);
         this method then calls ``self.delete_object`` with the id of that transaction, which runs an override if
@@ -568,6 +569,10 @@ class TransactionalKeyValueStore(VersionedKeyValueStore, ACIDStore):
 
         if self.TD[TA_id].committed_timestamp is not None:
             raise RuntimeError(f"transaction {TA_id} committed already")
+
+        # an object id the store has no entry for cannot be deleted:
+        if object_id not in self.key_value_store:
+            raise KeyError(f"object {object_id} not found in the store")
 
         # check that there is no other ongoing version of this object in the system
         # by another transaction, i.e. no other writer on this object is allowed:

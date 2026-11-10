@@ -1366,10 +1366,14 @@ class ErrorTest(unittest.TestCase):
                 # is not run; the verdict is the error:
                 result: RunState = run_to(schedule, INITIAL_X, mode, len(schedule))
                 self.assertEqual(7, len(result.log))
-                self.assertEqual("delete y: raised KeyError: 'y'", result.log[-1].text)
+                self.assertEqual(
+                    "delete y: raised KeyError: 'object y not found in the store'",
+                    result.log[-1].text,
+                )
                 self.assertEqual(
                     Verdict(
-                        "error", "The run stopped: delete y: raised KeyError: 'y'."
+                        "error",
+                        "The run stopped: delete y: raised KeyError: 'object y not found in the store'.",
                     ),
                     result.verdict,
                 )

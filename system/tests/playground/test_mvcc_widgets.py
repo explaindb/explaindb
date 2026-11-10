@@ -1148,7 +1148,7 @@ class MvccPlaygroundTest(unittest.TestCase):
         ```text
         T1
         begin
-        delete z -> error (KeyError: 'z')
+        delete z -> error (KeyError: 'object z not found in the store')
         commit -> not run
         ```
 
@@ -1165,6 +1165,6 @@ class MvccPlaygroundTest(unittest.TestCase):
         self.assertTrue(playground.forward_button.disabled)
         self.assertIn(
             f"background:{VERDICT_COLOURS['error']}; padding:6px\">The run stopped: delete z: raised "
-            "KeyError: &#x27;z&#x27;.</div>",
+            "KeyError: &#x27;object z not found in the store&#x27;.</div>",
             playground.state.value,
         )

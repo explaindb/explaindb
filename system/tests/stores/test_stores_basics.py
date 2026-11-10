@@ -235,6 +235,79 @@ class StoreTestBasics(AbstractUnitTest):
         self.assertEqual(list(tkvs.journal.get(TA_ID_2))[4], Abort(TA_id=TA_ID_2))
         self.assertEqual(len(list(tkvs.journal.get(TA_ID_2))), 5)
 
+    def test_delete_object_of_an_unknown_object_id_raises_key_error_naming_it(
+        self,
+    ) -> None:
+        """`delete_object` of an object id the store has no entry for raises KeyError with the message "object <id>
+        not found in the store" and changes nothing: no entry in the store, no `Delete` in the journal, an empty write
+        set, and the transaction stays open and can commit.
+
+        T1
+        begin
+        delete "missing" -> KeyError
+        commit (timestamp 2)
+        """
+        store_class: type[TransactionalKeyValueStore]
+        for store_class in [
+            TransactionalKeyValueStore,
+            IndexedTransactionalKeyValueStore,
+        ]:
+            with self.subTest(store_class=store_class.__name__):
+                # load one object, so the store is not empty, then begin T1:
+                store: TransactionalKeyValueStore = store_class()
+                store.put("1", StoreTestBasics.Stuff(1, 1))
+                T1: int = store.begin_transaction()
+
+                # deleting the unknown "missing" raises KeyError with the message of the store, which names it:
+                with self.assertRaises(KeyError) as context:
+                    store.delete_object("missing", T1)
+                self.assertEqual(
+                    context.exception.args[0], "object missing not found in the store"
+                )
+
+                # nothing changed: no entry for "missing", only the Begin of T1 in its journal, an empty write set:
+                self.assertNotIn("missing", store.key_value_store)
+                self.assertEqual(list(store.journal.get(T1)), [Begin(TA_id=T1)])
+                self.assertEqual(store.TD[T1].write_set, set())
+
+                # T1 is still open and commits with the next counter value:
+                self.assertIsNone(store.TD[T1].committed_timestamp)
+                store.commit_transaction(T1)
+                self.assertEqual(
+                    list(store.journal.get(T1)),
+                    [Begin(TA_id=T1), Commit(TA_id=T1, commit_timestamp=2)],
+                )
+
+    def test_delete_object_in_a_committed_transaction_raises_runtime_error_also_for_an_unknown_object_id(
+        self,
+    ) -> None:
+        """`delete_object` in a committed transaction raises the RuntimeError "committed already" also for an object
+        id the store has no entry for: the check of the transaction comes before the lookup of the object.
+
+        T1
+        begin
+        commit
+        delete "missing" -> RuntimeError
+        """
+        store_class: type[TransactionalKeyValueStore]
+        for store_class in [
+            TransactionalKeyValueStore,
+            IndexedTransactionalKeyValueStore,
+        ]:
+            with self.subTest(store_class=store_class.__name__):
+                # load one object, then begin and commit T1:
+                store: TransactionalKeyValueStore = store_class()
+                store.put("1", StoreTestBasics.Stuff(1, 1))
+                T1: int = store.begin_transaction()
+                store.commit_transaction(T1)
+
+                # deleting the unknown "missing" in the committed T1 raises the RuntimeError:
+                with self.assertRaises(RuntimeError) as context:
+                    store.delete_object("missing", T1)
+                self.assertEqual(
+                    context.exception.args[0], f"transaction {T1} committed already"
+                )
+
     def test_IndexedTransactionalKeyValueStore_basics(self):
         """A new indexed store has no indexes; `create_index` adds an index to both catalogues, `drop_index` removes
         it from both.
@@ -1015,12 +1088,15 @@ class OperationsWithoutTransactionTest(AbstractUnitTest):
                 starts: list[int] = [version.start_validity for version in versions]
                 self.assertEqual(starts, sorted(set(starts)))
 
-                # delete_object of an object id that was never stored raises KeyError (which names only the object
-                # id), adds no entry and leaves no transaction open:
+                # delete_object of an object id that was never stored raises KeyError, adds no entry and leaves no
+                # transaction open:
                 counter = store.TA_id
                 trace = list(store.committed_transactions_trace)
-                with self.assertRaisesRegex(KeyError, "missing"):
+                with self.assertRaises(KeyError) as context:
                     store.delete_object("missing", None)
+                self.assertEqual(
+                    context.exception.args[0], "object missing not found in the store"
+                )
                 self.assertNotIn("missing", store.key_value_store)
                 self.assertEqual(self._open_transactions(store), set())
 

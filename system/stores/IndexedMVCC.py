@@ -501,10 +501,13 @@ class IndexedTransactionalKeyValueStore(TransactionalKeyValueStore, IndexedACIDS
             super().delete_object(object_id, None)
             return
 
-        # 1. get the existing wip entry if it exists:
-        wip_entry: VersionedKeyValueStore.VersionEntry | None = self.key_value_store[
-            object_id
-        ].wip
+        # 1. get the existing wip entry if it exists; an object id the store has no entry for reaches the base class,
+        # which raises KeyError after its check of the transaction:
+        wip_entry: VersionedKeyValueStore.VersionEntry | None = (
+            self.key_value_store[object_id].wip
+            if object_id in self.key_value_store
+            else None
+        )
         # the object of that wip entry (None for no wip entry or a delete marker):
         existing_wip_entry_object: object | None = (
             IndexedTransactionalKeyValueStore._object_of(wip_entry)

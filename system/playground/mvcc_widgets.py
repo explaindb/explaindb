@@ -188,7 +188,8 @@ def cell_colour(  # pylint: disable=too-many-return-statements
     """Returns the background of an operation's button in the schedule grid.
 
     The outcome is read from the line run_schedule writes into the schedule table's log, e.g. ``(read all:
-    skipped)``, ``delete z: raised KeyError: 'z'``, ``update x ← (a=1, b=2): aborted`` or ``commit (ts 3)``.
+    skipped)``, ``delete z: raised KeyError: 'object z not found in the store'``, ``update x ← (a=1, b=2): aborted``
+    or ``commit (ts 3)``.
 
     @param text: what the operation did (from the schedule table's log) or, if it has not run, the operation
     @param position: the operation's position in the schedule, from 0
