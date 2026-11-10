@@ -23,7 +23,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Dict, Iterator
+from typing import Dict, Iterator, cast
 
 from system.indexes.indexes import PythonDictionaryIndex
 from system.interfaces.indexing.Index import IndexProperties, Index, KeyValueStore
@@ -365,12 +365,15 @@ class IndexedTransactionalKeyValueStore(TransactionalKeyValueStore, IndexedACIDS
             )
             return
 
+        # _index_for found an index, so the where clause is an equality WHERE_Clause:
+        where_clause: WHERE_Clause = cast(WHERE_Clause, where)
+
         # the index names the candidates: every object with an indexed version that has the constant, each id once
         # and sorted, as a fixed order keeps the checksum of the brute force validation independent of the order in
         # which the versions entered the index (get is a generator that raises KeyError for a value that no version
         # has, so only this line is guarded):
         try:
-            candidate_ids: list[str] = sorted(set(index.get(where.constant)))
+            candidate_ids: list[str] = sorted(set(index.get(where_clause.constant)))
         except KeyError:
             return
 

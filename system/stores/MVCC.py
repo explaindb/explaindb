@@ -27,7 +27,7 @@ import hashlib
 import pprint
 from abc import ABC
 from dataclasses import dataclass
-from typing import Callable, Dict, ItemsView, Iterator, Literal, cast
+from typing import Callable, Dict, Iterator, Literal, cast
 
 from pydantic import BaseModel
 
@@ -133,7 +133,7 @@ class TransactionalKeyValueStore(VersionedKeyValueStore, ACIDStore):
         # the recorded reads of the transaction (see collect_read_clause in read_objects; equal reads are kept once),
         # each as {"where_clause": <where clause>, "checksum": <checksum>} (the checksum is None unless the store uses
         # brute force validation):
-        read_clauses: set[HashableDict[str, Clause | str | None]]
+        read_clauses: set[HashableDict]
 
         # a set of object_ids of objects that were modified by the transaction:
         write_set: set[str]
@@ -303,7 +303,7 @@ class TransactionalKeyValueStore(VersionedKeyValueStore, ACIDStore):
 
     def _read_objects_iterable(
         self, timestamp: int, where: Clause = None, ignore_wip=False
-    ) -> ItemsView[str, list[object]]:
+    ) -> Iterator[tuple[str, object]]:
         """Yields the (object_id, object) pairs of all objects visible at <timestamp> that match the where clause
         <where>.
 
