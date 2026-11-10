@@ -87,6 +87,27 @@ def example_tree(leaves: list[BPlusTree.Leaf] | None = None) -> BPlusTree[int, i
     return tree_with_root(BPlusTree.Inner(3, [32], [left, right]))
 
 
+def inner_node(tree: BPlusTree[int, int], *path: int) -> BPlusTree.Inner:
+    """Returns the inner node of the given tree reached from the root through the children at the given positions,
+    e.g. ``inner_node(tree, 1)`` for the second child of the root; fails if a node on the way is a leaf.
+
+    @param tree: the tree to walk
+    @param path: the positions of the children to follow, from the root down
+    @return: the inner node at the end of the path
+    """
+    node: BPlusTree.AbstractNode = tree.root
+    # follow the path; only an inner node has children:
+    for position in path:
+        assert isinstance(
+            node, BPlusTree.Inner
+        ), f"expected an inner node, got {type(node).__name__}"
+        node = node.children[position]
+    assert isinstance(
+        node, BPlusTree.Inner
+    ), f"expected an inner node, got {type(node).__name__}"
+    return node
+
+
 class ValidTreeTest(unittest.TestCase):
     """Valid B+-trees pass the consistency check."""
 
@@ -144,7 +165,7 @@ class ValidTreeTest(unittest.TestCase):
     def test_a_subtree_is_valid_on_its_own(self) -> None:
         """The right subtree of the example tree is a valid B+-tree on its own, although its first leaf has a left
         neighbour."""
-        subtree: BPlusTree.AbstractNode = example_tree().root.children[1]
+        subtree: BPlusTree.AbstractNode = inner_node(example_tree(), 1)
         subtree.consistency_check()
 
 
@@ -273,7 +294,7 @@ class BrokenInvariantTest(unittest.TestCase):
         # interval (Inv1), but the order of the keys is checked first:
         with self.subTest(case="inner node out of order"):
             tree = example_tree()
-            tree.root.children[0].keys = [21, 13]
+            inner_node(tree, 0).keys = [21, 13]
             with self.assertRaisesRegex(
                 AssertionError,
                 r"^Inv4: the keys of the inner node \[21, 13\] are not sorted",
@@ -413,7 +434,7 @@ class BrokenStructureTest(unittest.TestCase):
         # the first pointer of the left inner node leads back up to the root:
         with self.subTest(case="pointer back up"):
             tree: BPlusTree[int, int] = example_tree()
-            tree.root.children[0].children[0] = tree.root
+            inner_node(tree, 0).children[0] = tree.root
             with self.assertRaisesRegex(
                 AssertionError, "^the pointers reach a node twice"
             ):
@@ -422,7 +443,7 @@ class BrokenStructureTest(unittest.TestCase):
         # the third leaf is also the first child of the right inner node:
         with self.subTest(case="leaf with two parents"):
             tree = example_tree()
-            tree.root.children[1].children[0] = tree.root.children[0].children[2]
+            inner_node(tree, 1).children[0] = inner_node(tree, 0).children[2]
             with self.assertRaisesRegex(
                 AssertionError, "^the pointers reach a node twice"
             ):
