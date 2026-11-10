@@ -99,6 +99,16 @@ when the store is created with `TransactionalKeyValueStore(autocommit=...)`, and
   outside an explicit transaction; `bulkload` loads all its objects in one transaction. Explicit transactions can
   still be used, like `BEGIN` in SQL.
 
+The transactional calls `read_objects`, `update_object` and `delete_object` take the transaction id `None`, passed
+explicitly, e.g. `store.read_objects(None, where)` or `store.update_object("1", x, None)`. Without autocommit, they
+then raise an error, also before the first transaction. With autocommit, each runs as a transaction of its own and
+otherwise does the same as with an explicit id. So the two kinds of writes and deletes follow different rules:
+
+- `put` only inserts and raises an error if the object exists; `update_object` inserts or overwrites.
+- `delete` raises a not-found error if the object does not exist or is deleted already; `delete_object` raises one
+  only for an object id the store has never had an entry for (an aborted insert leaves an empty entry), and on an
+  object that is deleted already it writes another delete marker.
+
 ## Indexes over versions
 
 In the indexed store, an index that you create on an attribute (`create_index`) maps a value to the ids of the

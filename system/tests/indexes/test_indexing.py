@@ -551,6 +551,71 @@ class IndexingTest(AbstractUnitTest):
         self.assertEqual(store.read_objects(TA_ID_2, where_a_2), [])
         self.assertEqual(list(index.get(2)), ["1"])
 
+    def test_autocommit_update_object_and_delete_object_maintain_the_index(self):
+        """With autocommit, update_object with the transaction id None lists the new object once in the index, and
+        read_objects with the transaction id None finds it through the index; after delete_object with the
+        transaction id None, that read returns nothing, although the old version stays indexed. A read_objects with
+        the transaction id None that raises leaves no transaction open.
+
+        autocommit
+        update_object "1" to (2, 3), commit
+        update_object "2" to (b=5), commit
+        read a!=2 -> AttributeError, abort
+        read a==2 -> sees (2, 3), commit
+        delete_object "1", commit
+        read a==2 -> sees nothing, commit
+
+        Each call runs as a transaction of its own, in which the indexed store maintains its indexes once, and which
+        is aborted if the call raises. Object "2" has no attribute a, so a scan of all objects raises AttributeError,
+        as the read of a!=2, which no index answers, shows; both reads of a==2 succeed only because they go through
+        the index, which does not list "2".
+        """
+
+        @dataclass
+        class OnlyB:
+            """An object without the indexed attribute a."""
+
+            b: int
+
+        store = IndexedTransactionalKeyValueStore(autocommit=True)
+        store.create_index("a_idx", "a", "=")
+        index: KeyValueStore[object, str] = store.indexes_by_name["a_idx"].index
+        where_a_2: WHERE_Clause = WHERE_Clause("a", "==", 2)
+
+        # update_object inserts "1" and lists it once in the index:
+        store.update_object("1", IndexingTest.Stuff(2, 3), None)
+        self.assertEqual(index.size(), 1)
+        self.assertEqual(list(index.get(2)), ["1"])
+
+        # update_object inserts "2" without a, which the index does not list, but which a scan cannot evaluate:
+        store.update_object("2", OnlyB(5), None)
+        self.assertEqual(index.size(), 1)
+
+        # a read with !=, which no index answers, scans all objects and raises for "2":
+        with self.assertRaisesRegex(
+            AttributeError, "'OnlyB' object has no attribute 'a'"
+        ):
+            store.read_objects(None, WHERE_Clause("a", "!=", 2))
+
+        # the read aborted its transaction, so no transaction is left open:
+        open_TA_ids: list[int] = [
+            TA_id
+            for TA_id, entry in store.TD.items()
+            if entry.committed_timestamp is None
+        ]
+        self.assertEqual(open_TA_ids, [])
+
+        # read_objects reads a==2 through the index and finds "1":
+        self.assertIs(store._index_for(where_a_2), index)
+        self.assertEqual(
+            store.read_objects(None, where_a_2), [("1", IndexingTest.Stuff(2, 3))]
+        )
+
+        # after delete_object, the read returns nothing, although the old version stays indexed:
+        store.delete_object("1", None)
+        self.assertEqual(store.read_objects(None, where_a_2), [])
+        self.assertEqual(list(index.get(2)), ["1"])
+
     def test_bulkload_after_create_index_indexes_every_object(self):
         """A bulkload after create_index adds every loaded object to every index."""
         store = IndexedTransactionalKeyValueStore()
@@ -1446,7 +1511,7 @@ class IndexingTest(AbstractUnitTest):
         index: KeyValueStore[object, str] = store.indexes_by_name["a_idx"].index
 
         # the put of a value of a that the index cannot hash raises:
-        with self.assertRaises(TypeError):
+        with self.assertRaisesRegex(TypeError, "unhashable"):
             store.put("1", IndexingTest._Row([1], 2))
 
         # no transaction is left open:
@@ -1459,6 +1524,46 @@ class IndexingTest(AbstractUnitTest):
 
         # a second put of "1" succeeds, and the index lists "1" once:
         store.put("1", IndexingTest._Row(1, 2))
+        self.assertEqual(index.size(), 1)
+        self.assertEqual(list(index.get(1)), ["1"])
+
+    def test_autocommit_update_object_of_an_unhashable_value_leaves_no_transaction_open(
+        self,
+    ):
+        """With autocommit, an update_object with the transaction id None whose new value of a the index cannot hash
+        raises TypeError and leaves no transaction open: the new version is not visible, and the index lists only
+        the committed version.
+
+        autocommit
+        update_object "1" to ([1], 2) -> TypeError, abort
+        read all -> sees (1, 1), commit
+
+        Before the update, the store holds "1"=(1, 1) with an equality index on a. The update runs as a transaction of
+        its own, which is aborted when the indexing raises.
+        """
+        store = IndexedTransactionalKeyValueStore(autocommit=True)
+        store.put("1", IndexingTest._Row(1, 1))
+        store.create_index("a_idx", "a", "=")
+        index: KeyValueStore[object, str] = store.indexes_by_name["a_idx"].index
+
+        # the update of a to a value that the index cannot hash raises:
+        counter: int = store.TA_id
+        with self.assertRaisesRegex(TypeError, "unhashable"):
+            store.update_object("1", IndexingTest._Row([1], 2), None)
+
+        # its transaction used up one counter value (its begin) and was aborted: no transaction is open, and "1" has
+        # no work-in-progress version:
+        self.assertEqual(store.TA_id, counter + 1)
+        open_TA_ids: list[int] = [
+            TA_id
+            for TA_id, entry in store.TD.items()
+            if entry.committed_timestamp is None
+        ]
+        self.assertEqual(open_TA_ids, [])
+        self.assertIsNone(store.key_value_store["1"].wip)
+
+        # a read sees the committed version, and the index lists only that one:
+        self.assertEqual(store.read_objects(None), [("1", IndexingTest._Row(1, 1))])
         self.assertEqual(index.size(), 1)
         self.assertEqual(list(index.get(1)), ["1"])
 

@@ -78,8 +78,9 @@ class IndexedTransactionalKeyValueStore(TransactionalKeyValueStore, IndexedACIDS
             algorithm in the validation phase (see :class:`~system.stores.MVCC.TransactionalKeyValueStore`).
         :param isolation_level: the isolation level of the underlying store, "serializable" or "snapshot isolation"
             (see :class:`~system.stores.MVCC.TransactionalKeyValueStore`).
-        :param autocommit: if True, put, bulkload, get and delete without a transaction id each run as a transaction
-            of their own (see :class:`~system.stores.MVCC.TransactionalKeyValueStore`).
+        :param autocommit: if True, put, bulkload, get and delete without a transaction id, and read_objects,
+            update_object and delete_object with the transaction id None, each run as a transaction of their own (see
+            :class:`~system.stores.MVCC.TransactionalKeyValueStore`).
         """
         # set up the transactional store:
         super().__init__(
@@ -439,14 +440,22 @@ class IndexedTransactionalKeyValueStore(TransactionalKeyValueStore, IndexedACIDS
             ),
         )
 
-    def update_object(self, object_id: str, updated_object: object, TA_id: int) -> None:
+    def update_object(
+        self, object_id: str, updated_object: object, TA_id: int | None
+    ) -> None:
         """See :meth:`TransactionalKeyValueStore.update_object`.
 
         After delegating to the base implementation, maintains all indexes for the change: the new object version
         is indexed and any superseded work-in-progress version of the same transaction is de-indexed. If indexing
         raises (e.g. an attribute value that cannot be hashed), the new version stays stored; abort the transaction
-        then.
+        then. With the transaction id None, the store aborts its own transaction itself, which removes the version.
         """
+
+        # without a transaction id, the base class writes in a transaction of its own and calls this method again with
+        # the id of that transaction, which maintains the indexes:
+        if TA_id is None:
+            super().update_object(object_id, updated_object, None)
+            return
 
         # 1. get the existing wip entry if there is one (an insert of a new object_id has none yet):
         wip_entry: VersionedKeyValueStore.VersionEntry | None = (
@@ -478,12 +487,19 @@ class IndexedTransactionalKeyValueStore(TransactionalKeyValueStore, IndexedACIDS
             object_to_deindex=existing_wip_entry_object,
         )
 
-    def delete_object(self, object_id: str, TA_id: int) -> None:
+    def delete_object(self, object_id: str, TA_id: int | None) -> None:
         """See :meth:`TransactionalKeyValueStore.delete_object`.
 
         After delegating to the base implementation, de-indexes a superseded work-in-progress version of the same
         transaction (if any) from all indexes.
         """
+
+        # without a transaction id, the base class deletes in a transaction of its own and calls this method again
+        # with the id of that transaction; this comes before any lookup here: without autocommit the RuntimeError comes
+        # first, and with autocommit a never-stored object id raises KeyError inside that transaction:
+        if TA_id is None:
+            super().delete_object(object_id, None)
+            return
 
         # 1. get the existing wip entry if it exists:
         wip_entry: VersionedKeyValueStore.VersionEntry | None = self.key_value_store[

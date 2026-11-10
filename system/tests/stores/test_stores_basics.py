@@ -27,7 +27,7 @@ import contextlib
 import io
 import re
 import unittest
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 
 from system.interfaces.indexing.Index import IndexProperties, KeyValueStore
 from system.query_processing.predicates import WHERE_Clause
@@ -258,9 +258,10 @@ class StoreTestBasics(AbstractUnitTest):
 
 
 class OperationsWithoutTransactionTest(AbstractUnitTest):
-    """put, bulkload, get and delete without a transaction id in the transactional stores: without autocommit they
-    load the initial state before the first transaction and are refused afterwards; with autocommit each one runs
-    as a transaction of its own.
+    """put, bulkload, get and delete without a transaction id, and read_objects, update_object and delete_object with
+    the transaction id None, in the transactional stores: without autocommit, put, bulkload and get load the initial
+    state before the first transaction and are refused afterwards, while delete and the three calls with None are
+    always refused; with autocommit each one runs as a transaction of its own.
     """
 
     # the store classes the tests run on (the indexed store must behave like its base class here):
@@ -397,9 +398,10 @@ class OperationsWithoutTransactionTest(AbstractUnitTest):
     def test_without_autocommit_operations_are_refused_once_a_transaction_has_begun(
         self,
     ):
-        """Without autocommit, put, bulkload, get and delete raise RuntimeError at the call once a transaction has
-        begun, whether it is still open, committed or aborted; the refused calls begin no transaction and change
-        nothing, and an open transaction still commits.
+        """Without autocommit, put, bulkload, get and delete, and read_objects, update_object and delete_object with
+        the transaction id None, raise RuntimeError at the call once a transaction has begun, whether it is still
+        open, committed or aborted; the refused calls begin no transaction and change nothing, and an open
+        transaction still commits.
 
         T1                          without transaction id
                                     put "1" as (1, 1)
@@ -410,6 +412,9 @@ class OperationsWithoutTransactionTest(AbstractUnitTest):
                                     bulkload "4" -> RuntimeError
                                     get "1" -> RuntimeError
                                     delete "1" -> RuntimeError
+                                    read_objects all -> RuntimeError
+                                    update_object "1" to (9, 9) -> RuntimeError
+                                    delete_object "1" -> RuntimeError
         commit (if still open)
         """
         store_class: type[TransactionalKeyValueStore]
@@ -429,15 +434,45 @@ class OperationsWithoutTransactionTest(AbstractUnitTest):
                         store.abort_transaction(T1)
                     counter: int = store.TA_id
 
-                    # each operation without a transaction id is refused at the call:
-                    with self.assertRaisesRegex(RuntimeError, "autocommit"):
+                    # each operation without a transaction id is refused at the call; put, bulkload and get name
+                    # the begun transaction as the reason:
+                    with self.assertRaisesRegex(
+                        RuntimeError,
+                        "^put without a transaction id needs autocommit=True once a transaction has begun$",
+                    ):
                         store.put("3", self.Stuff(3, 3))
-                    with self.assertRaisesRegex(RuntimeError, "autocommit"):
+                    with self.assertRaisesRegex(
+                        RuntimeError,
+                        "^bulkload without a transaction id needs autocommit=True once a transaction has begun$",
+                    ):
                         store.bulkload(iter([("4", self.Stuff(4, 4))]))
-                    with self.assertRaisesRegex(RuntimeError, "autocommit"):
+                    with self.assertRaisesRegex(
+                        RuntimeError,
+                        "^get without a transaction id needs autocommit=True once a transaction has begun$",
+                    ):
                         store.get("1")
-                    with self.assertRaisesRegex(RuntimeError, "autocommit"):
+                    with self.assertRaisesRegex(
+                        RuntimeError,
+                        "^delete without a transaction id needs autocommit=True$",
+                    ):
                         store.delete("1")
+
+                    # so is each transactional call with the transaction id None:
+                    with self.assertRaisesRegex(
+                        RuntimeError,
+                        "^read_objects without a transaction id needs autocommit=True$",
+                    ):
+                        store.read_objects(None)
+                    with self.assertRaisesRegex(
+                        RuntimeError,
+                        "^update_object without a transaction id needs autocommit=True$",
+                    ):
+                        store.update_object("1", self.Stuff(9, 9), None)
+                    with self.assertRaisesRegex(
+                        RuntimeError,
+                        "^delete_object without a transaction id needs autocommit=True$",
+                    ):
+                        store.delete_object("1", None)
 
                     # the refused calls began no transaction and left "1" with its single version:
                     self.assertEqual(store.TA_id, counter)
@@ -455,30 +490,88 @@ class OperationsWithoutTransactionTest(AbstractUnitTest):
                         expected["2"] = self.Stuff(2, 2)
                     self.assertEqual(self._read_all_in_new_transaction(store), expected)
 
-    def test_without_autocommit_delete_is_refused_in_the_load_phase(self):
-        """Without autocommit, delete raises RuntimeError also before the first transaction begins; the object keeps
-        its single version, and no transaction has begun.
+    def test_without_autocommit_delete_and_calls_with_id_none_are_refused_in_the_load_phase(
+        self,
+    ):
+        """Without autocommit, delete, and read_objects, update_object and delete_object with the transaction id
+        None, raise RuntimeError also before the first transaction begins; the object keeps its single version and
+        gets no work-in-progress version, and no transaction has begun.
         """
+        # each refused call, by the name of its operation:
+        refused_calls: dict[str, Callable[[TransactionalKeyValueStore], object]] = {
+            "delete": lambda store: store.delete("1"),
+            "read_objects": lambda store: store.read_objects(None),
+            "update_object": lambda store: store.update_object(
+                "1", self.Stuff(9, 9), None
+            ),
+            "delete_object": lambda store: store.delete_object("1", None),
+        }
         store_class: type[TransactionalKeyValueStore]
+        operation: str
+        refused_call: Callable[[TransactionalKeyValueStore], object]
         for store_class in OperationsWithoutTransactionTest.STORE_CLASSES:
-            with self.subTest(store_class=store_class.__name__):
-                store: TransactionalKeyValueStore = store_class()
-                store.put("1", self.Stuff(1, 1))
+            for operation, refused_call in refused_calls.items():
+                with self.subTest(
+                    store_class=store_class.__name__, operation=operation
+                ):
+                    store: TransactionalKeyValueStore = store_class()
+                    store.put("1", self.Stuff(1, 1))
 
-                # the delete is refused:
-                with self.assertRaisesRegex(RuntimeError, "autocommit"):
-                    store.delete("1")
+                    # the call is refused with a message that names the operation:
+                    with self.assertRaisesRegex(
+                        RuntimeError,
+                        f"^{operation} without a transaction id needs autocommit=True$",
+                    ):
+                        refused_call(store)
 
-                # "1" keeps its single version with start timestamp 0, no transaction has begun, and get still
-                # returns the object:
-                versions: list[VersionedKeyValueStore.VersionEntry] = (
-                    store.key_value_store["1"].committed
-                )
-                self.assertEqual(len(versions), 1)
-                self.assertIsInstance(versions[0], VersionedKeyValueStore.UpdateEntry)
-                self.assertEqual(versions[0].start_validity, 0)
-                self.assertEqual(store.TA_id, 1)
-                self.assertEqual(list(store.get("1")), [self.Stuff(1, 1)])
+                    # "1" keeps its single version with start timestamp 0 and has no work-in-progress version, no
+                    # transaction has begun, and get still returns the object:
+                    versions: list[VersionedKeyValueStore.VersionEntry] = (
+                        store.key_value_store["1"].committed
+                    )
+                    self.assertEqual(len(versions), 1)
+                    self.assertIsInstance(
+                        versions[0], VersionedKeyValueStore.UpdateEntry
+                    )
+                    self.assertEqual(versions[0].start_validity, 0)
+                    self.assertIsNone(store.key_value_store["1"].wip)
+                    self.assertEqual(store.TA_id, 1)
+                    self.assertEqual(list(store.get("1")), [self.Stuff(1, 1)])
+
+    def test_transactional_calls_have_no_default_transaction_id(self):
+        """read_objects, update_object and delete_object have no default for the transaction id: also with
+        autocommit, a call that leaves it out raises TypeError and begins no transaction, so a forgotten id never
+        runs as a transaction of its own.
+        """
+        # each call that leaves out the transaction id, by the name of its operation:
+        calls_without_id: dict[str, Callable[[TransactionalKeyValueStore], object]] = {
+            "read_objects": lambda store: store.read_objects(),
+            "update_object": lambda store: store.update_object("1", self.Stuff(9, 9)),
+            "delete_object": lambda store: store.delete_object("1"),
+        }
+        store_class: type[TransactionalKeyValueStore]
+        operation: str
+        call_without_id: Callable[[TransactionalKeyValueStore], object]
+        for store_class in OperationsWithoutTransactionTest.STORE_CLASSES:
+            for operation, call_without_id in calls_without_id.items():
+                with self.subTest(
+                    store_class=store_class.__name__, operation=operation
+                ):
+                    store: TransactionalKeyValueStore = store_class(autocommit=True)
+                    store.put("1", self.Stuff(1, 1))
+                    counter: int = store.TA_id
+
+                    # the call lacks the transaction id as a required argument:
+                    with self.assertRaisesRegex(
+                        TypeError,
+                        f"{operation}\\(\\) missing 1 required positional argument: 'TA_id'$",
+                    ):
+                        call_without_id(store)
+
+                    # no transaction has begun, and "1" keeps its single version:
+                    self.assertEqual(store.TA_id, counter)
+                    self.assertEqual(self._open_transactions(store), set())
+                    self.assertEqual(len(store.key_value_store["1"].committed), 1)
 
     def test_autocommit_put_inserts_in_a_transaction_of_its_own(self):
         """With autocommit, put inserts the object in a transaction of its own, also before any other transaction, so
@@ -749,9 +842,196 @@ class OperationsWithoutTransactionTest(AbstractUnitTest):
                         with self.assertRaises(KeyError):
                             list(index.get(1))
 
+    def test_autocommit_read_objects_returns_the_committed_objects_in_a_transaction_of_its_own(
+        self,
+    ):
+        """With autocommit, read_objects with the transaction id None reads in a transaction of its own, also before
+        any other transaction: it returns the list of committed objects that match the where clause, without the
+        work-in-progress versions of an open transaction; its transaction commits and uses up two values of the
+        counter.
+
+        T1                          autocommit
+                                    read all -> nothing, commit
+                                    bulkload "1" as (1, 1), "5" as (5, 5), commit
+        begin
+        update "1" to (5, 1)
+        insert "3" as (5, 3)
+                                    read all -> "1" as (1, 1), "5", commit
+                                    read a == 5 -> "5", commit
+        commit
+                                    read a == 5 -> "1" as (5, 1), "5", "3", commit
+        """
+        store_class: type[TransactionalKeyValueStore]
+        for store_class in OperationsWithoutTransactionTest.STORE_CLASSES:
+            with self.subTest(store_class=store_class.__name__):
+                store: TransactionalKeyValueStore = store_class(autocommit=True)
+                where_a_5: WHERE_Clause = WHERE_Clause("a", "==", 5)
+
+                # on the empty store, the read runs as transaction 1, which commits at timestamp 2:
+                self.assertEqual(store.read_objects(None), [])
+                self.assertEqual(store.TA_id, 3)
+                self.assertEqual(store.committed_transactions_trace, [1])
+
+                # T1 writes work-in-progress versions of the committed "1" and the new "3", both with a == 5:
+                store.bulkload(iter([("1", self.Stuff(1, 1)), ("5", self.Stuff(5, 5))]))
+                T1: int = store.begin_transaction()
+                store.update_object("1", self.Stuff(5, 1), T1)
+                store.update_object("3", self.Stuff(5, 3), T1)
+
+                # a read of all objects returns the committed versions only; its transaction commits with the next
+                # two counter values, and only T1 stays open:
+                counter: int = store.TA_id
+                trace: list[int] = list(store.committed_transactions_trace)
+                self.assertEqual(
+                    store.read_objects(None),
+                    [("1", self.Stuff(1, 1)), ("5", self.Stuff(5, 5))],
+                )
+                self.assertEqual(store.TA_id, counter + 2)
+                self.assertEqual(store.committed_transactions_trace, trace + [counter])
+                self.assertEqual(self._open_transactions(store), {T1})
+
+                # a read with a where clause returns only the committed object that matches it:
+                self.assertEqual(
+                    store.read_objects(None, where_a_5), [("5", self.Stuff(5, 5))]
+                )
+
+                # after the commit of T1, the read returns its versions too:
+                store.commit_transaction(T1)
+                self.assertEqual(
+                    store.read_objects(None, where_a_5),
+                    [
+                        ("1", self.Stuff(5, 1)),
+                        ("5", self.Stuff(5, 5)),
+                        ("3", self.Stuff(5, 3)),
+                    ],
+                )
+                self.assertEqual(self._open_transactions(store), set())
+
+    def test_autocommit_update_object_inserts_or_writes_a_new_version_in_a_transaction_of_its_own(
+        self,
+    ):
+        """With autocommit, update_object with the transaction id None inserts a missing object and writes a new
+        version of an existing or a deleted one, each time in a transaction of its own that commits: every call uses
+        up two values of the counter and adds a committed version with its commit timestamp, so the versions stay in
+        order.
+        """
+
+        def update_in_own_transaction(
+            store: TransactionalKeyValueStore, _object: object
+        ) -> None:
+            """Writes "1" as <_object> with update_object and the transaction id None, and checks that its
+            transaction committed the new version with the next two counter values.
+
+            @param store: the store to write to
+            @param _object: the new version of "1"
+            """
+            # the write runs as transaction <counter>, which commits at timestamp <counter + 1>:
+            counter: int = store.TA_id
+            trace: list[int] = list(store.committed_transactions_trace)
+            store.update_object("1", _object, None)
+            self.assertEqual(store.TA_id, counter + 2)
+            self.assertEqual(store.committed_transactions_trace, trace + [counter])
+            self.assertEqual(
+                store.key_value_store["1"].committed[-1].start_validity, counter + 1
+            )
+
+            # no transaction is open, and a new transaction sees the new version:
+            self.assertEqual(self._open_transactions(store), set())
+            self.assertEqual(self._read_all_in_new_transaction(store), {"1": _object})
+
+        store_class: type[TransactionalKeyValueStore]
+        for store_class in OperationsWithoutTransactionTest.STORE_CLASSES:
+            with self.subTest(store_class=store_class.__name__):
+                store: TransactionalKeyValueStore = store_class(autocommit=True)
+
+                # update_object inserts the missing "1", then writes a new version of it:
+                update_in_own_transaction(store, self.Stuff(1, 1))
+                update_in_own_transaction(store, self.Stuff(2, 2))
+
+                # after a delete, update_object writes a new version of the deleted "1":
+                store.delete("1")
+                update_in_own_transaction(store, self.Stuff(3, 3))
+
+                # "1" has four committed versions (two updates, the delete, an update) with strictly increasing start
+                # timestamps:
+                versions: list[VersionedKeyValueStore.VersionEntry] = (
+                    store.key_value_store["1"].committed
+                )
+                self.assertEqual(
+                    [type(version) for version in versions],
+                    [
+                        VersionedKeyValueStore.UpdateEntry,
+                        VersionedKeyValueStore.UpdateEntry,
+                        VersionedKeyValueStore.DeleteEntry,
+                        VersionedKeyValueStore.UpdateEntry,
+                    ],
+                )
+                starts: list[int] = [version.start_validity for version in versions]
+                self.assertEqual(starts, sorted(set(starts)))
+
+    def test_autocommit_delete_object_deletes_in_a_transaction_of_its_own(self):
+        """With autocommit, delete_object with the transaction id None deletes an object in a transaction of its own
+        that commits; on an object deleted already it commits another delete marker, where delete raises KeyError; for
+        an object id that was never stored it raises KeyError and aborts its transaction, which uses up one value of
+        the counter (its begin).
+        """
+        store_class: type[TransactionalKeyValueStore]
+        for store_class in OperationsWithoutTransactionTest.STORE_CLASSES:
+            with self.subTest(store_class=store_class.__name__):
+                store: TransactionalKeyValueStore = store_class(autocommit=True)
+                store.put("1", self.Stuff(1, 1))
+
+                # delete_object deletes "1" in a transaction that commits with the next two counter values:
+                counter: int = store.TA_id
+                trace: list[int] = list(store.committed_transactions_trace)
+                store.delete_object("1", None)
+                self.assertEqual(store.TA_id, counter + 2)
+                self.assertEqual(store.committed_transactions_trace, trace + [counter])
+                self.assertEqual(self._read_all_in_new_transaction(store), {})
+
+                # a second delete_object of the deleted "1" commits too, and "1" stays deleted:
+                counter = store.TA_id
+                trace = list(store.committed_transactions_trace)
+                store.delete_object("1", None)
+                self.assertEqual(store.committed_transactions_trace, trace + [counter])
+                self.assertEqual(self._read_all_in_new_transaction(store), {})
+
+                # delete of the deleted "1" raises KeyError instead:
+                with self.assertRaisesRegex(KeyError, "not found"):
+                    store.delete("1")
+
+                # "1" has the version of the put and two delete markers, with strictly increasing start timestamps:
+                versions: list[VersionedKeyValueStore.VersionEntry] = (
+                    store.key_value_store["1"].committed
+                )
+                self.assertEqual(
+                    [type(version) for version in versions],
+                    [
+                        VersionedKeyValueStore.UpdateEntry,
+                        VersionedKeyValueStore.DeleteEntry,
+                        VersionedKeyValueStore.DeleteEntry,
+                    ],
+                )
+                starts: list[int] = [version.start_validity for version in versions]
+                self.assertEqual(starts, sorted(set(starts)))
+
+                # delete_object of an object id that was never stored raises KeyError (which names only the object
+                # id), adds no entry and leaves no transaction open:
+                counter = store.TA_id
+                trace = list(store.committed_transactions_trace)
+                with self.assertRaisesRegex(KeyError, "missing"):
+                    store.delete_object("missing", None)
+                self.assertNotIn("missing", store.key_value_store)
+                self.assertEqual(self._open_transactions(store), set())
+
+                # its transaction used up one counter value (its begin) and was aborted, not committed:
+                self.assertEqual(store.TA_id, counter + 1)
+                self.assertEqual(store.committed_transactions_trace, trace)
+
     def test_autocommit_write_to_an_object_an_open_transaction_writes_is_aborted(self):
-        """With autocommit, a put, delete or bulkload that writes an object an open transaction is writing raises
-        TransactionAbortedException and makes nothing visible; the open transaction is not affected and commits.
+        """With autocommit, a put, delete or bulkload, or an update_object or delete_object with the transaction id
+        None, that writes an object an open transaction is writing raises TransactionAbortedException and makes
+        nothing visible; the open transaction is not affected and commits.
 
         T1                          autocommit
                                     put "1" as (1, 1), commit
@@ -761,9 +1041,12 @@ class OperationsWithoutTransactionTest(AbstractUnitTest):
                                     put "2" as (8, 8) -> aborted
                                     delete "1" -> aborted
                                     bulkload "3", "2" -> aborted
+                                    update_object "2" to (7, 7) -> aborted
+                                    delete_object "1" -> aborted
         commit
 
-        On the indexed store, with an equality index on a, the aborted bulkload leaves "3" out of the index.
+        On the indexed store, with an equality index on a, the aborted bulkload leaves "3" out of the index, and the
+        aborted update_object leaves the value 7 out of it.
         """
         store_class: type[TransactionalKeyValueStore]
         for store_class in OperationsWithoutTransactionTest.STORE_CLASSES:
@@ -799,6 +1082,19 @@ class OperationsWithoutTransactionTest(AbstractUnitTest):
                     with self.assertRaises(KeyError):
                         list(index.get(3))
 
+                # update_object of "2" is aborted; T1 stays open, and the index has no entry for the value 7:
+                with self.assertRaises(TransactionAbortedException):
+                    store.update_object("2", self.Stuff(7, 7), None)
+                self.assertEqual(self._open_transactions(store), {T1})
+                if index is not None:
+                    with self.assertRaises(KeyError):
+                        list(index.get(7))
+
+                # delete_object of "1" is aborted; T1 stays open:
+                with self.assertRaises(TransactionAbortedException):
+                    store.delete_object("1", None)
+                self.assertEqual(self._open_transactions(store), {T1})
+
                 # T1 commits both of its writes; "3" is not visible:
                 store.commit_transaction(T1)
                 self.assertEqual(
@@ -810,15 +1106,18 @@ class OperationsWithoutTransactionTest(AbstractUnitTest):
         self,
     ):
         """Under serializable, an open transaction that read a == 5 and wrote an object fails validation at its
-        commit if a put with autocommit inserted an object with a == 5 (phantom) or a delete with autocommit removed
-        one; with validation method 1 and method 2.
+        commit if a put with autocommit inserted an object with a == 5 (phantom), an update_object with the
+        transaction id None changed the object it read, or a delete with autocommit, or a delete_object with the
+        transaction id None, removed that object; with validation method 1 and method 2.
 
         T1                          autocommit
                                     bulkload "1" as (1, 1), "5" as (5, 5), commit
         begin
         read a == 5 -> sees "5"
                                     put "7" as (5, 7), commit
+                                    (or: update_object "5" to (5, 6), commit)
                                     (or: delete "5", commit)
+                                    (or: delete_object "5", commit)
         write "9"
         commit -> aborted
         """
@@ -827,7 +1126,7 @@ class OperationsWithoutTransactionTest(AbstractUnitTest):
         write: str
         for store_class in OperationsWithoutTransactionTest.STORE_CLASSES:
             for use_brute_force_validation in [False, True]:
-                for write in ["put", "delete"]:
+                for write in ["put", "update_object", "delete", "delete_object"]:
                     with self.subTest(
                         store_class=store_class.__name__,
                         use_brute_force_validation=use_brute_force_validation,
@@ -848,7 +1147,7 @@ class OperationsWithoutTransactionTest(AbstractUnitTest):
                             [("5", self.Stuff(5, 5))],
                         )
 
-                        # a put or a delete with autocommit changes the result of that read and commits:
+                        # a write with autocommit changes the result of that read and commits:
                         expected: dict[str, object] = {
                             "1": self.Stuff(1, 1),
                             "5": self.Stuff(5, 5),
@@ -856,8 +1155,14 @@ class OperationsWithoutTransactionTest(AbstractUnitTest):
                         if write == "put":
                             store.put("7", self.Stuff(5, 7))
                             expected["7"] = self.Stuff(5, 7)
-                        else:
+                        elif write == "update_object":
+                            store.update_object("5", self.Stuff(5, 6), None)
+                            expected["5"] = self.Stuff(5, 6)
+                        elif write == "delete":
                             store.delete("5")
+                            del expected["5"]
+                        else:
+                            store.delete_object("5", None)
                             del expected["5"]
 
                         # T1 writes "9" and fails validation at its commit:
@@ -875,15 +1180,18 @@ class OperationsWithoutTransactionTest(AbstractUnitTest):
         self,
     ):
         """Under serializable, an open transaction that read a == 5 and wrote an object passes validation at its
-        commit if a put with autocommit inserted an object with a != 5 or a delete with autocommit removed one with
-        a != 5 in the meantime; with validation method 1 and method 2.
+        commit if a put with autocommit inserted an object with a != 5, an update_object with the transaction id None
+        changed one with a != 5 to another a != 5, or a delete with autocommit, or a delete_object with the
+        transaction id None, removed one with a != 5 in the meantime; with validation method 1 and method 2.
 
         T1                          autocommit
                                     bulkload "1" as (1, 1), "5" as (5, 5), commit
         begin
         read a == 5 -> sees "5"
                                     put "7" as (2, 7), commit
+                                    (or: update_object "1" to (2, 1), commit)
                                     (or: delete "1", commit)
+                                    (or: delete_object "1", commit)
         write "9"
         commit
         """
@@ -892,7 +1200,7 @@ class OperationsWithoutTransactionTest(AbstractUnitTest):
         write: str
         for store_class in OperationsWithoutTransactionTest.STORE_CLASSES:
             for use_brute_force_validation in [False, True]:
-                for write in ["put", "delete"]:
+                for write in ["put", "update_object", "delete", "delete_object"]:
                     with self.subTest(
                         store_class=store_class.__name__,
                         use_brute_force_validation=use_brute_force_validation,
@@ -913,7 +1221,7 @@ class OperationsWithoutTransactionTest(AbstractUnitTest):
                             [("5", self.Stuff(5, 5))],
                         )
 
-                        # a put or a delete with autocommit of an object outside that read commits:
+                        # a write with autocommit of an object outside that read commits:
                         expected: dict[str, object] = {
                             "1": self.Stuff(1, 1),
                             "5": self.Stuff(5, 5),
@@ -921,8 +1229,14 @@ class OperationsWithoutTransactionTest(AbstractUnitTest):
                         if write == "put":
                             store.put("7", self.Stuff(2, 7))
                             expected["7"] = self.Stuff(2, 7)
-                        else:
+                        elif write == "update_object":
+                            store.update_object("1", self.Stuff(2, 1), None)
+                            expected["1"] = self.Stuff(2, 1)
+                        elif write == "delete":
                             store.delete("1")
+                            del expected["1"]
+                        else:
+                            store.delete_object("1", None)
                             del expected["1"]
 
                         # T1 writes "9" and commits without an exception:
@@ -935,39 +1249,53 @@ class OperationsWithoutTransactionTest(AbstractUnitTest):
                             self._read_all_in_new_transaction(store), expected
                         )
 
-    def test_autocommit_delete_aborts_a_later_update_under_snapshot_isolation(
+    def test_autocommit_write_aborts_a_later_update_under_snapshot_isolation(
         self,
     ):
-        """Under snapshot isolation, an open transaction still reads an object that a delete with autocommit removed
-        after it began, but its update of the object is aborted (first updater wins).
+        """Under snapshot isolation, an open transaction still reads the version of an object it began with after a
+        delete with autocommit, or an update_object or delete_object with the transaction id None, wrote the object,
+        but its own update of the object is aborted (first updater wins).
 
         T1                          autocommit
                                     put "1" as (1, 1), commit
         begin
                                     delete "1", commit
-        read all -> sees "1"
+                                    (or: update_object "1" to (3, 3), commit)
+                                    (or: delete_object "1", commit)
+        read all -> sees (1, 1)
         update "1" to (2, 2) -> aborted
         """
         store_class: type[TransactionalKeyValueStore]
+        write: str
         for store_class in OperationsWithoutTransactionTest.STORE_CLASSES:
-            with self.subTest(store_class=store_class.__name__):
-                store: TransactionalKeyValueStore = store_class(
-                    isolation_level="snapshot isolation", autocommit=True
-                )
-                store.put("1", self.Stuff(1, 1))
+            for write in ["delete", "update_object", "delete_object"]:
+                with self.subTest(store_class=store_class.__name__, write=write):
+                    store: TransactionalKeyValueStore = store_class(
+                        isolation_level="snapshot isolation", autocommit=True
+                    )
+                    store.put("1", self.Stuff(1, 1))
 
-                # T1 begins, then "1" is deleted with autocommit; T1 still sees "1" in its snapshot:
-                T1: int = store.begin_transaction()
-                store.delete("1")
-                self.assertEqual(store.read_objects(T1), [("1", self.Stuff(1, 1))])
+                    # T1 begins, then "1" is written with autocommit; T1 still sees (1, 1) in its snapshot:
+                    T1: int = store.begin_transaction()
+                    expected: dict[str, object]
+                    if write == "delete":
+                        store.delete("1")
+                        expected = {}
+                    elif write == "update_object":
+                        store.update_object("1", self.Stuff(3, 3), None)
+                        expected = {"1": self.Stuff(3, 3)}
+                    else:
+                        store.delete_object("1", None)
+                        expected = {}
+                    self.assertEqual(store.read_objects(T1), [("1", self.Stuff(1, 1))])
 
-                # the update of "1" by T1 is aborted:
-                with self.assertRaises(TransactionAbortedException):
-                    store.update_object("1", self.Stuff(2, 2), T1)
-                self.assertEqual(self._open_transactions(store), set())
+                    # the update of "1" by T1 is aborted:
+                    with self.assertRaises(TransactionAbortedException):
+                        store.update_object("1", self.Stuff(2, 2), T1)
+                    self.assertEqual(self._open_transactions(store), set())
 
-                # "1" stays deleted:
-                self.assertEqual(self._read_all_in_new_transaction(store), {})
+                    # a new transaction sees the write with autocommit, not the update of T1:
+                    self.assertEqual(self._read_all_in_new_transaction(store), expected)
 
 
 if __name__ == "__main__":

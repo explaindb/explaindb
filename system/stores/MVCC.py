@@ -117,6 +117,13 @@ class TransactionalKeyValueStore(VersionedKeyValueStore, ACIDStore):
       them, and no transaction id is used up. Afterwards these operations raise RuntimeError; delete always does.
     - autocommit on: each of these operations runs as a transaction of its own (begin, operation, commit), like a
       statement outside an explicit transaction in SQL. Explicit transactions can still be used.
+
+    The transactional operations read_objects, update_object and delete_object accept the transaction id None, passed
+    explicitly: without autocommit, they then raise RuntimeError; with autocommit, they run as a transaction of their
+    own and otherwise do the same as with an explicit id. So the writes and deletes follow different rules: put only
+    inserts (KeyError if the object is visible), while update_object inserts or overwrites; delete raises KeyError if
+    the object is not visible, while delete_object raises KeyError only for an object id the store has no entry for
+    (an aborted insert leaves an empty entry) and writes another delete marker on an object deleted already.
     """
 
     @dataclass
@@ -155,9 +162,10 @@ class TransactionalKeyValueStore(VersionedKeyValueStore, ACIDStore):
         "snapshot isolation" does not validate reads; instead, it aborts a transaction as soon as it writes an object
         that another transaction changed and committed after the writer began.
         @param persistence_layer: the persistence layer to use for the store
-        @param autocommit: if set to True, put, bulkload, get and delete without a transaction id each run as a
-        transaction of their own; if False (the default), only put, bulkload and get are allowed without a
-        transaction id, and only before the first transaction begins (see the class docstring)
+        @param autocommit: if set to True, put, bulkload, get and delete without a transaction id, and read_objects,
+        update_object and delete_object with the transaction id None, each run as a transaction of their own; if False
+        (the default), only put, bulkload and get are allowed without a transaction id, and only before the first
+        transaction begins (see the class docstring)
         """
 
         # reject an unknown isolation level and the combination of snapshot isolation with brute force validation:
@@ -356,7 +364,7 @@ class TransactionalKeyValueStore(VersionedKeyValueStore, ACIDStore):
         return ret_list, checksum
 
     def read_objects(
-        self, TA_id: int, where: Clause = None, collect_read_clause: bool = True
+        self, TA_id: int | None, where: Clause = None, collect_read_clause: bool = True
     ) -> list[tuple[str, object]]:
         """Returns a list with all objects that match the WHERE_clause. If the store uses brute force validation, a
         checksum is also computed over the objects matching the WHERE_clause in the committed snapshot of TA <TA_id>,
@@ -364,13 +372,24 @@ class TransactionalKeyValueStore(VersionedKeyValueStore, ACIDStore):
 
         Unless collect_read_clause is False, the where clause (and checksum) are added to the read set of TA <TA_id>.
 
-        @param TA_id: the transaction id reading the data, required for the snapshot read
+        @param TA_id: the transaction id reading the data, required for the snapshot read; None reads in a
+        transaction of its own and needs autocommit (see the class docstring): this method then calls
+        ``self.read_objects`` with the id of that transaction, so an override must hand None straight to this method
         @param where: a where clause expression that is evaluated against the actual data (not the object ids)
         @param collect_read_clause: if set to True (the default), the where clause is added to the read set of
         TA <TA_id>; False reads without adding it
 
         @return: a list of (object id, object) pairs that match the given conditions
         """
+
+        # without a transaction id, read in a transaction of its own (only with autocommit):
+        if TA_id is None:
+            self._refuse_without_autocommit("read_objects")
+            return self._run_as_own_transaction(
+                lambda own_TA_id: self.read_objects(
+                    own_TA_id, where, collect_read_clause
+                )
+            )
 
         if TA_id not in self.TD:
             raise KeyError(f"transaction {TA_id} not found in the system")
@@ -432,7 +451,9 @@ class TransactionalKeyValueStore(VersionedKeyValueStore, ACIDStore):
                 f"{object_id} and committed after transaction {TA_id} began"
             )
 
-    def update_object(self, object_id: str, updated_object: object, TA_id: int) -> None:
+    def update_object(
+        self, object_id: str, updated_object: object, TA_id: int | None
+    ) -> None:
         """See :meth:`ACIDStore.update_object`.
 
         Also supports inserts: a missing object_id creates a new entry, and writing a deleted object stores a new
@@ -443,7 +464,22 @@ class TransactionalKeyValueStore(VersionedKeyValueStore, ACIDStore):
         began. Otherwise writes an :class:`Update` journal entry, stores a deep copy of the value as the
         work-in-progress version of the object (a second write by the same transaction replaces it; the committed
         versions stay untouched), and records the object_id in the transaction's write set.
+
+        The transaction id None writes in a transaction of its own and needs autocommit (see the class docstring);
+        this method then calls ``self.update_object`` with the id of that transaction, which runs an override if
+        there is one. So an override must hand None straight to this method, before any lookup of its own, and do
+        its own work in that second call.
         """
+
+        # without a transaction id, write in a transaction of its own (only with autocommit):
+        if TA_id is None:
+            self._refuse_without_autocommit("update_object")
+            self._run_as_own_transaction(
+                lambda own_TA_id: self.update_object(
+                    object_id, updated_object, own_TA_id
+                )
+            )
+            return
 
         if self.TD[TA_id].committed_timestamp is not None:
             raise RuntimeError(f"transaction {TA_id} committed already")
@@ -504,7 +540,7 @@ class TransactionalKeyValueStore(VersionedKeyValueStore, ACIDStore):
         # collect the object_id of the modified object for the validation phase in the write_set for TA <TA_id>:
         self.TD[TA_id].write_set.add(object_id)
 
-    def delete_object(self, object_id: str, TA_id: int) -> None:
+    def delete_object(self, object_id: str, TA_id: int | None) -> None:
         """See :meth:`ACIDStore.delete_object`.
 
         Must be executed atomically in a concurrent environment. Raises RuntimeError if the transaction has committed
@@ -513,7 +549,20 @@ class TransactionalKeyValueStore(VersionedKeyValueStore, ACIDStore):
         if another transaction changed the object and committed after the transaction began. Otherwise writes a
         :class:`Delete` journal entry, adds a delete-marker work-in-progress version, and records the object_id in the
         transaction's write set.
+
+        The transaction id None deletes in a transaction of its own and needs autocommit (see the class docstring);
+        this method then calls ``self.delete_object`` with the id of that transaction, which runs an override if
+        there is one. So an override must hand None straight to this method, before any lookup of its own, and do
+        its own work in that second call.
         """
+
+        # without a transaction id, delete in a transaction of its own (only with autocommit):
+        if TA_id is None:
+            self._refuse_without_autocommit("delete_object")
+            self._run_as_own_transaction(
+                lambda own_TA_id: self.delete_object(object_id, own_TA_id)
+            )
+            return
 
         assert TA_id in self.TD, f"transaction {TA_id} not found in the system"
 
@@ -936,6 +985,18 @@ class TransactionalKeyValueStore(VersionedKeyValueStore, ACIDStore):
 
     # operations without a transaction id (see the class docstring):
 
+    def _refuse_without_autocommit(self, operation: str) -> None:
+        """Raises RuntimeError if operation <operation>, called without a transaction id, needs autocommit and
+        autocommit is off.
+
+        @param operation: the name of the operation, used in the error message
+        @raise RuntimeError: if autocommit is off
+        """
+        if not self.autocommit:
+            raise RuntimeError(
+                f"{operation} without a transaction id needs autocommit=True"
+            )
+
     def _check_load_phase(self, operation: str) -> bool:
         """Decides how operation <operation>, called without a transaction id, runs, and refuses it if it may not run.
 
@@ -1082,8 +1143,8 @@ class TransactionalKeyValueStore(VersionedKeyValueStore, ACIDStore):
         """
         assert _object is None
 
-        if not self.autocommit:
-            raise RuntimeError("delete without a transaction id needs autocommit=True")
+        # without autocommit, there is no delete outside a transaction:
+        self._refuse_without_autocommit("delete")
 
         def delete_visible(TA_id: int) -> None:
             """Deletes the object in TA <TA_id>; raises KeyError if TA <TA_id> does not see it."""
