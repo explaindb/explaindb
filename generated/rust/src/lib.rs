@@ -36,11 +36,13 @@ pub use query_processing::predicates::{
 pub use stores::mvcc::{
     IsolationLevel, JournalEntry, MvccState, ReadClause, Snapshot, TdEntry,
     TransactionalKeyValueStore, TransactionalStore, Validation, abort_transaction_default,
-    begin_transaction_default, checksum, commit_transaction_default, delete_object_default,
-    read_objects_default, update_object_default, validate_transaction_default,
+    begin_transaction_default, bulkload_transactional, checksum, commit_transaction_default,
+    delete_object_default, delete_transactional, get_transactional, load_default,
+    put_transactional, read_objects_default, update_object_default, validate_transaction_default,
 };
 pub use stores::versioned_key_value_store::{
-    KvStoreEntry, Version, VersionEntry, VersionedKeyValueStore, VersionedStore,
+    KvStoreEntry, Version, VersionEntry, VersionedKeyValueStore, VersionedStore, bulkload_default,
+    get_default, put_default,
 };
 
 // Runs the code examples in README.md as tests (`cargo test`), so that they stay correct.

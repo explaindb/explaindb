@@ -179,7 +179,7 @@ fn bulkload(number_of_objects: u64, validation: Validation, _operations: u64) ->
 ///
 /// Never: every id was loaded.
 fn get(number_of_objects: u64, validation: Validation, _operations: u64) -> Pass {
-    let store: Store = filled_store(number_of_objects, validation);
+    let mut store: Store = filled_store(number_of_objects, validation);
     let ids: Vec<String> = (0..number_of_objects).map(|i| i.to_string()).collect();
     let start: Instant = Instant::now();
     for object_id in &ids {

@@ -34,7 +34,7 @@ use crate::error::StoreError;
 use crate::indexes::indexes::DictionaryIndex;
 use crate::query_processing::predicates::Clause;
 use crate::stores::versioned_key_value_store::{
-    KvStoreEntry, Version, VersionEntry, VersionedStore,
+    KvStoreEntry, Version, VersionEntry, VersionedStore, bulkload_default, get_default, put_default,
 };
 
 /// An entry of the journal; every entry names the transaction that created it (Python: `JournalEntry` and its
@@ -207,6 +207,9 @@ pub struct MvccState<V> {
     /// The isolation level. Changing it to snapshot isolation while transactions run stops validating their reads
     /// at once; if validation method 1 was set by hand, snapshot isolation only computes checksums nobody uses.
     pub isolation_level: IsolationLevel,
+    /// Whether the operations without a transaction id run as a transaction of their own (see
+    /// [`TransactionalStore`]); `false` by default.
+    pub autocommit: bool,
 }
 
 impl<V> MvccState<V> {
@@ -226,6 +229,7 @@ impl<V> MvccState<V> {
             committed_transactions_trace: Vec::new(),
             validation,
             isolation_level: IsolationLevel::Serializable,
+            autocommit: false,
         }
     }
 
@@ -254,6 +258,13 @@ impl<V> MvccState<V> {
             isolation_level,
             ..MvccState::with_validation(validation)
         })
+    }
+
+    /// Returns this state with autocommit switched on (`true`) or off (`false`), see [`TransactionalStore`]
+    /// (Python: the parameter `autocommit` of `TransactionalKeyValueStore.__init__`). A builder method, used after a
+    /// constructor, e.g. `MvccState::new().with_autocommit(true)`.
+    pub fn with_autocommit(self, autocommit: bool) -> MvccState<V> {
+        MvccState { autocommit, ..self }
     }
 
     /// Gets the version of object `object_id` visible at `timestamp`, i.e. in the snapshot of the transaction with
@@ -442,23 +453,48 @@ fn selected<V>(where_clause: Option<&dyn Clause<V>>, object: Option<&V>) -> bool
 /// tutorial page "MVCC & Versioned Stores" explains write skew and shows both schedules.
 ///
 /// Python's subclasses inherit the implementation; in Rust it lives in the default methods of this trait, and a
-/// store only gives access to its [`MvccState`], whose `key_value_store` must be the map that
-/// [`VersionedStore::key_value_store`] returns.
+/// store gives access to its [`MvccState`], whose `key_value_store` must be the map that
+/// [`VersionedStore::key_value_store`] returns, and forwards the operations without a transaction id (see the last
+/// paragraph).
 ///
-/// A store that changes `begin_transaction`, `read_objects`, `update_object`, `delete_object`,
-/// `validate_transaction`, `commit_transaction` or `abort_transaction` overrides it and can call the original
-/// through the free function `*_default` of the same name, e.g. [`abort_transaction_default`]. These functions
-/// call the other methods of this trait through the trait, as Python's `self.` does, so an override of one of them
-/// is used by the others; `read_objects` and validation also read through the trait methods `read_snapshot` and
-/// `get_visible_object_version`.
+/// A store that changes `begin_transaction`, `read_objects`, `update_object`, `delete_object`, `load`,
+/// `validate_transaction`, `commit_transaction` or `abort_transaction` overrides it and can call the original through
+/// the free function `*_default` of the same name, e.g. [`abort_transaction_default`] or [`load_default`]. These
+/// functions call the other methods of this trait through the trait, as Python's `self.` does, so an override of one of
+/// them is used by the others; `read_objects` and validation also read through the trait methods `read_snapshot` and
+/// `get_visible_object_version`. An override of `read_objects`, `update_object` or `delete_object` hands the
+/// transaction id `None` straight to the `*_default` function, before any lookup of its own: that function runs the
+/// operation in a transaction of its own and calls the override again with the id of that transaction. An override of
+/// `load` changes how `put` and `bulkload` store the initial state.
 ///
 /// The reads themselves (`read_snapshot` calling `get_visible_object_version`) go through [`MvccState`], so an
 /// override of only `get_visible_object_version` is not seen by `read_snapshot`; no store overrides them in
 /// Python.
 ///
-/// The non-transactional [`VersionedStore::delete`] appends a delete marker valid from timestamp 0, as in Python;
-/// on an object with a committed version, later transactional reads of that object's committed versions then fail
-/// with [`StoreError::VersionsNotOrdered`] (a read checks every object of the store).
+/// The operations without a transaction id ([`VersionedStore::put`], [`VersionedStore::bulkload`],
+/// [`VersionedStore::get`] and [`VersionedStore::delete`]) depend on the switch `autocommit` of [`MvccState`], set
+/// with [`MvccState::with_autocommit`], as in SQL:
+///
+/// - autocommit off (default): before the first transaction begins (also one that is aborted later), `put`,
+///   `bulkload` and `get` load and inspect the initial state; its versions get the start timestamp 0, so every
+///   transaction sees them, and no transaction id is used up. Afterwards these operations return
+///   [`StoreError::AutocommitRequired`]; `delete` always does.
+/// - autocommit on: each of these operations runs as a transaction of its own (begin, operation, commit), like a
+///   statement outside an explicit transaction in SQL. Explicit transactions can still be used.
+///
+/// The transactional operations `read_objects`, `update_object` and `delete_object` accept the transaction id
+/// `None`, passed explicitly: without autocommit, they then return [`StoreError::AutocommitRequired`]; with
+/// autocommit, they run as a transaction of their own and otherwise do the same as with an explicit id. So the writes
+/// and deletes follow different rules: `put` only inserts ([`StoreError::KeyExists`] if the object is visible), while
+/// `update_object` inserts or overwrites; `delete` returns [`StoreError::KeyNotFound`] if the object is not visible,
+/// while `delete_object` returns it only for an object id the store has no entry for (an aborted insert leaves an
+/// empty entry) and writes another delete marker on an object deleted already.
+///
+/// Python's store overrides `put`, `bulkload`, `get` and `delete` of the versioned store. In Rust, every store that
+/// implements this trait overrides these four methods in its implementation of [`VersionedStore`] and calls
+/// [`put_transactional`], [`bulkload_transactional`], [`get_transactional`] and [`delete_transactional`] there, as
+/// [`TransactionalKeyValueStore`] does; a store that does not keeps the non-transactional methods of the versioned
+/// store.
 pub trait TransactionalStore: VersionedStore<Value: Clone + PartialEq + fmt::Debug> {
     /// Returns the state of the store.
     fn state(&self) -> &MvccState<Self::Value>;
@@ -514,8 +550,8 @@ pub trait TransactionalStore: VersionedStore<Value: Clone + PartialEq + fmt::Deb
         begin_transaction_default(self)
     }
 
-    /// Returns all objects visible to transaction `ta_id` that match `where_clause`, see
-    /// [`read_objects_default`].
+    /// Returns all objects visible to transaction `ta_id` (or, for `None`, to a transaction of its own) that match
+    /// `where_clause`, see [`read_objects_default`].
     ///
     /// # Errors
     ///
@@ -526,14 +562,15 @@ pub trait TransactionalStore: VersionedStore<Value: Clone + PartialEq + fmt::Deb
     /// See [`read_objects_default`].
     fn read_objects(
         &mut self,
-        ta_id: u64,
+        ta_id: impl Into<Option<u64>>,
         where_clause: Option<Rc<dyn Clause<Self::Value>>>,
         collect_read_clause: bool,
     ) -> Result<Vec<(String, Self::Value)>, StoreError> {
         read_objects_default(self, ta_id, where_clause, collect_read_clause)
     }
 
-    /// Updates or inserts object `object_id` in transaction `ta_id`, see [`update_object_default`].
+    /// Updates or inserts object `object_id` in transaction `ta_id` (or, for `None`, in a transaction of its own), see
+    /// [`update_object_default`].
     ///
     /// # Errors
     ///
@@ -542,12 +579,13 @@ pub trait TransactionalStore: VersionedStore<Value: Clone + PartialEq + fmt::Deb
         &mut self,
         object_id: &str,
         updated_object: Self::Value,
-        ta_id: u64,
+        ta_id: impl Into<Option<u64>>,
     ) -> Result<(), StoreError> {
         update_object_default(self, object_id, updated_object, ta_id)
     }
 
-    /// Deletes object `object_id` in transaction `ta_id`, see [`delete_object_default`].
+    /// Deletes object `object_id` in transaction `ta_id` (or, for `None`, in a transaction of its own), see
+    /// [`delete_object_default`].
     ///
     /// # Errors
     ///
@@ -556,8 +594,23 @@ pub trait TransactionalStore: VersionedStore<Value: Clone + PartialEq + fmt::Deb
     /// # Panics
     ///
     /// See [`delete_object_default`].
-    fn delete_object(&mut self, object_id: &str, ta_id: u64) -> Result<(), StoreError> {
+    fn delete_object(
+        &mut self,
+        object_id: &str,
+        ta_id: impl Into<Option<u64>>,
+    ) -> Result<(), StoreError> {
         delete_object_default(self, object_id, ta_id)
+    }
+
+    /// Stores object `object_id` as part of the initial state, see [`load_default`]; `put` and `bulkload` call it
+    /// before the first transaction begins, without autocommit. It does not check that phase itself, so it is meant to
+    /// be called through `put` and `bulkload` (Python's `_load` is private).
+    ///
+    /// # Errors
+    ///
+    /// See [`load_default`].
+    fn load(&mut self, object_id: String, object: Self::Value) -> Result<(), StoreError> {
+        load_default(self, object_id, object)
     }
 
     /// Validates transaction `ta_id` against the transactions that committed after it began, see
@@ -638,23 +691,39 @@ pub fn begin_transaction_default<S: TransactionalStore + ?Sized>(store: &mut S) 
 /// (without its own changes) by a first read; so the where clause is evaluated once per visible object in each of
 /// the two reads, as in Python.
 ///
+/// The transaction id `None` runs the operation in a transaction of its own and needs autocommit (see
+/// [`TransactionalStore`]): this function then calls the trait method of the same name with the id of that
+/// transaction, which runs an override if there is one. So an override must hand `None` straight to this function,
+/// before any lookup of its own, and do its own work in that second call.
+///
 /// # Errors
 ///
 /// - [`StoreError::TransactionNotFound`] if the transaction is not in the transaction dictionary (Python:
 ///   `KeyError`);
 /// - [`StoreError::AlreadyCommitted`] if the transaction has committed (Python: `RuntimeError`);
+/// - with the transaction id `None`: [`StoreError::AutocommitRequired`] without autocommit, and the errors of
+///   [`TransactionalStore::commit_transaction`] for the transaction of its own (an error of the validation leaves it
+///   open, as in Python);
 /// - the errors of [`MvccState::get_visible_object_version`].
 ///
 /// # Panics
 ///
 /// If the where clause panics, e.g. a [`crate::WhereClause`] on an object without its attribute (Python:
-/// `AttributeError`).
+/// `AttributeError`). With the transaction id `None`, the transaction of its own then stays open; Python aborts it.
 pub fn read_objects_default<S: TransactionalStore + ?Sized>(
     store: &mut S,
-    ta_id: u64,
+    ta_id: impl Into<Option<u64>>,
     where_clause: Option<Rc<dyn Clause<S::Value>>>,
     collect_read_clause: bool,
 ) -> Result<Vec<(String, S::Value)>, StoreError> {
+    // without a transaction id, read in a transaction of its own (only with autocommit):
+    let Some(ta_id) = ta_id.into() else {
+        refuse_without_autocommit(store.state(), "read_objects")?;
+        return run_as_own_transaction(store, |store: &mut S, own_ta_id: u64| {
+            store.read_objects(own_ta_id, where_clause, collect_read_clause)
+        });
+    };
+
     let state: &MvccState<S::Value> = store.state();
     let td_entry: &TdEntry<S::Value> = state
         .td
@@ -700,11 +769,19 @@ pub fn read_objects_default<S: TransactionalStore + ?Sized>(
 /// as the work-in-progress version of the object (a second write by the same transaction replaces it; the committed
 /// versions stay untouched) and adds the object id to the transaction's write set.
 ///
+/// The transaction id `None` runs the operation in a transaction of its own and needs autocommit (see
+/// [`TransactionalStore`]): this function then calls the trait method of the same name with the id of that
+/// transaction, which runs an override if there is one. So an override must hand `None` straight to this function,
+/// before any lookup of its own, and do its own work in that second call.
+///
 /// # Errors
 ///
 /// - [`StoreError::TransactionNotFound`] if the transaction is not in the transaction dictionary (Python:
 ///   `KeyError`);
 /// - [`StoreError::AlreadyCommitted`] if the transaction has committed (Python: `RuntimeError`);
+/// - with the transaction id `None`: [`StoreError::AutocommitRequired`] without autocommit, and the errors of
+///   [`TransactionalStore::commit_transaction`] for the transaction of its own (an error of the validation leaves it
+///   open, as in Python);
 /// - [`StoreError::TransactionAborted`] if another transaction holds a work-in-progress version of the object, or,
 ///   under snapshot isolation, if another transaction committed the object after this transaction began; the
 ///   transaction is aborted first, through [`TransactionalStore::abort_transaction`].
@@ -712,8 +789,16 @@ pub fn update_object_default<S: TransactionalStore + ?Sized>(
     store: &mut S,
     object_id: &str,
     updated_object: S::Value,
-    ta_id: u64,
+    ta_id: impl Into<Option<u64>>,
 ) -> Result<(), StoreError> {
+    // without a transaction id, write in a transaction of its own (only with autocommit):
+    let Some(ta_id) = ta_id.into() else {
+        refuse_without_autocommit(store.state(), "update_object")?;
+        return run_as_own_transaction(store, |store: &mut S, own_ta_id: u64| {
+            store.update_object(object_id, updated_object, own_ta_id)
+        });
+    };
+
     let state: &MvccState<S::Value> = store.state();
     let td_entry: &TdEntry<S::Value> = state
         .td
@@ -782,11 +867,19 @@ pub fn update_object_default<S: TransactionalStore + ?Sized>(
 /// another transaction holds a work-in-progress version of the object; under the isolation level snapshot isolation,
 /// also if another transaction changed the object and committed after the transaction began. Otherwise writes a
 /// [`JournalEntry::Delete`], adds a delete marker as the work-in-progress version of the object and adds the object
-/// id to the transaction's write set.
+/// id to the transaction's write set. On an object deleted already, it writes another delete marker.
+///
+/// The transaction id `None` runs the operation in a transaction of its own and needs autocommit (see
+/// [`TransactionalStore`]): this function then calls the trait method of the same name with the id of that
+/// transaction, which runs an override if there is one. So an override must hand `None` straight to this function,
+/// before any lookup of its own, and do its own work in that second call.
 ///
 /// # Errors
 ///
 /// - [`StoreError::AlreadyCommitted`] if the transaction has committed (Python: `RuntimeError`);
+/// - with the transaction id `None`: [`StoreError::AutocommitRequired`] without autocommit, and the errors of
+///   [`TransactionalStore::commit_transaction`] for the transaction of its own (an error of the validation leaves it
+///   open, as in Python);
 /// - [`StoreError::KeyNotFound`] if the object id is not in the store (Python: `KeyError`);
 /// - [`StoreError::TransactionAborted`] if another transaction holds a work-in-progress version of the object, or,
 ///   under snapshot isolation, if another transaction committed the object after this transaction began; the
@@ -798,8 +891,16 @@ pub fn update_object_default<S: TransactionalStore + ?Sized>(
 pub fn delete_object_default<S: TransactionalStore + ?Sized>(
     store: &mut S,
     object_id: &str,
-    ta_id: u64,
+    ta_id: impl Into<Option<u64>>,
 ) -> Result<(), StoreError> {
+    // without a transaction id, delete in a transaction of its own (only with autocommit):
+    let Some(ta_id) = ta_id.into() else {
+        refuse_without_autocommit(store.state(), "delete_object")?;
+        return run_as_own_transaction(store, |store: &mut S, own_ta_id: u64| {
+            store.delete_object(object_id, own_ta_id)
+        });
+    };
+
     let state: &MvccState<S::Value> = store.state();
     let Some(td_entry) = state.td.get(&ta_id) else {
         missing_transaction(ta_id)
@@ -1164,13 +1265,260 @@ pub fn abort_transaction_default<S: TransactionalStore + ?Sized>(store: &mut S, 
     }
 }
 
+// operations without a transaction id (see the documentation of TransactionalStore):
+
+/// Returns [`StoreError::AutocommitRequired`] if operation `operation`, called without a transaction id, needs
+/// autocommit and autocommit is off (Python: `_refuse_without_autocommit`).
+fn refuse_without_autocommit<V>(state: &MvccState<V>, operation: &str) -> Result<(), StoreError> {
+    if !state.autocommit {
+        return Err(StoreError::AutocommitRequired {
+            operation: operation.to_string(),
+            transaction_begun: false,
+        });
+    }
+    Ok(())
+}
+
+/// Decides how operation `operation`, called without a transaction id, runs, and refuses it if it may not run
+/// (Python: `_check_load_phase`). Returns `true` if it loads the initial state (autocommit is off and no transaction
+/// has begun yet), `false` if it runs as a transaction of its own (autocommit is on); returns
+/// [`StoreError::AutocommitRequired`] if autocommit is off and a transaction has begun already.
+fn check_load_phase<V>(state: &MvccState<V>, operation: &str) -> Result<bool, StoreError> {
+    if state.autocommit {
+        return Ok(false);
+    }
+
+    // the counter starts at 1 and only begin_transaction and commit_transaction advance it, so it is still 1 as long
+    // as no transaction has begun:
+    if state.ta_id != 1 {
+        return Err(StoreError::AutocommitRequired {
+            operation: operation.to_string(),
+            transaction_begun: true,
+        });
+    }
+    Ok(true)
+}
+
+/// Runs `operation` as a transaction of its own: begins a transaction, passes the store and the transaction's id to
+/// `operation` and commits it; returns the result of `operation` (Python: `_run_as_own_transaction`).
+///
+/// If `operation` returns an error, the transaction is aborted through [`TransactionalStore::abort_transaction`]
+/// (unless the store aborted it already: `update_object` and `delete_object` abort it themselves on a conflict) and
+/// the error is passed on. A panic inside `operation` is not caught and leaves the transaction open; Python aborts
+/// it on every exception, an interrupt included. An error of the commit is passed on without an abort, as in Python.
+/// The commit cannot fail validation: the store runs one call at a time, so no transaction commits between the begin
+/// and the commit of this one.
+fn run_as_own_transaction<S, T>(
+    store: &mut S,
+    operation: impl FnOnce(&mut S, u64) -> Result<T, StoreError>,
+) -> Result<T, StoreError>
+where
+    S: TransactionalStore + ?Sized,
+{
+    let ta_id: u64 = store.begin_transaction();
+    let result: T = match operation(store, ta_id) {
+        Ok(result) => result,
+        Err(error) => {
+            // the caller does not know the id of the transaction and could not end it:
+            if store.state().td.contains_key(&ta_id) {
+                store.abort_transaction(ta_id);
+            }
+            return Err(error);
+        }
+    };
+    store.commit_transaction(ta_id)?;
+    Ok(result)
+}
+
+/// Returns the version of object `object_id` visible to transaction `ta_id` (its own writes included), through
+/// [`TransactionalStore::get_visible_object_version`] (Python: `_visible_version`).
+///
+/// # Errors
+///
+/// - [`StoreError::KeyNotFound`] if the object does not exist or is deleted in the snapshot of `ta_id`;
+/// - [`StoreError::VersionsNotOrdered`], see [`MvccState::get_visible_object_version`].
+fn visible_version<'a, S: TransactionalStore + ?Sized>(
+    store: &'a S,
+    object_id: &str,
+    ta_id: u64,
+) -> Result<&'a S::Value, StoreError> {
+    let visible: Option<&S::Value> = if store.state().key_value_store.contains_key(object_id) {
+        store.get_visible_object_version(object_id, ta_id, false)?
+    } else {
+        None
+    };
+    visible.ok_or_else(|| StoreError::KeyNotFound(object_id.to_string()))
+}
+
+/// Inserts object `object_id` in transaction `ta_id` through [`TransactionalStore::update_object`] (Python:
+/// `_insert`).
+///
+/// The object is visible to `ta_id` if it exists in its snapshot or if `ta_id` wrote it itself, e.g. an object id
+/// that occurs twice in one bulkload.
+///
+/// # Errors
+///
+/// - [`StoreError::KeyExists`] if the object is visible to `ta_id`;
+/// - the errors of [`TransactionalStore::update_object`].
+fn insert<S: TransactionalStore + ?Sized>(
+    store: &mut S,
+    object_id: &str,
+    object: S::Value,
+    ta_id: u64,
+) -> Result<(), StoreError> {
+    if store.state().key_value_store.contains_key(object_id)
+        && store
+            .get_visible_object_version(object_id, ta_id, false)?
+            .is_some()
+    {
+        return Err(StoreError::KeyExists(object_id.to_string()));
+    }
+    store.update_object(object_id, object, ta_id)
+}
+
+/// Stores object `object_id` as part of the initial state, i.e. as a committed version with start timestamp 0, see
+/// [`put_default`] (Python: `_load`). A store that changes how the initial state is stored (e.g. to index it)
+/// overrides [`TransactionalStore::load`] and calls this function for the original behaviour. It does not check the
+/// load phase: called directly once a transaction has begun, it writes a version that running transactions see at
+/// once; `put` and `bulkload` call it only in the load phase.
+///
+/// # Errors
+///
+/// [`StoreError::KeyExists`] if the object id is already in the store.
+pub fn load_default<S: TransactionalStore + ?Sized>(
+    store: &mut S,
+    object_id: String,
+    object: S::Value,
+) -> Result<(), StoreError> {
+    put_default(store, object_id, object)
+}
+
+/// The `put` of a transactional store, see [`VersionedStore::put`] (Python: `TransactionalKeyValueStore.put`).
+///
+/// Without autocommit, only allowed before the first transaction begins (it then loads the initial state through
+/// [`TransactionalStore::load`]). With autocommit, inserts the object in a transaction of its own, through
+/// [`TransactionalStore::update_object`].
+///
+/// # Errors
+///
+/// - [`StoreError::AutocommitRequired`] without autocommit once a transaction has begun;
+/// - [`StoreError::KeyExists`] if the object exists (with autocommit: is visible; a deleted object can be inserted
+///   again);
+/// - with autocommit, [`StoreError::TransactionAborted`] if an open transaction is writing the object, the errors of
+///   [`MvccState::get_visible_object_version`], and those of [`TransactionalStore::commit_transaction`].
+pub fn put_transactional<S: TransactionalStore + ?Sized>(
+    store: &mut S,
+    object_id: impl Into<String>,
+    object: S::Value,
+) -> Result<(), StoreError> {
+    let object_id: String = object_id.into();
+    if check_load_phase(store.state(), "put")? {
+        return store.load(object_id, object);
+    }
+    run_as_own_transaction(store, |store: &mut S, ta_id: u64| {
+        insert(store, &object_id, object, ta_id)
+    })
+}
+
+/// The `bulkload` of a transactional store, see [`VersionedStore::bulkload`] (Python:
+/// `TransactionalKeyValueStore.bulkload`).
+///
+/// Without autocommit, only allowed before the first transaction begins (one `put` per object, as
+/// [`bulkload_default`] does). With autocommit, inserts all objects in one transaction, all or none; an empty
+/// `input_data` still runs an (empty) transaction.
+///
+/// # Errors
+///
+/// - [`StoreError::AutocommitRequired`] without autocommit once a transaction has begun;
+/// - [`StoreError::KeyExists`] if an object exists (with autocommit: is visible) or occurs twice in `input_data`;
+///   without autocommit, the objects before it stay loaded;
+/// - with autocommit, [`StoreError::TransactionAborted`] if an open transaction is writing one of the objects, the
+///   errors of [`MvccState::get_visible_object_version`], and those of [`TransactionalStore::commit_transaction`].
+///
+/// # Panics
+///
+/// If `input_data` panics while it is read. With autocommit, the transaction of the bulkload then stays open with
+/// the objects inserted so far; Python aborts it (also on an interrupt such as Ctrl-C).
+pub fn bulkload_transactional<S, K, I>(store: &mut S, input_data: I) -> Result<(), StoreError>
+where
+    S: TransactionalStore + ?Sized,
+    K: Into<String>,
+    I: IntoIterator<Item = (K, S::Value)>,
+{
+    if check_load_phase(store.state(), "bulkload")? {
+        return bulkload_default(store, input_data);
+    }
+
+    // insert every object of input_data in the transaction of the bulkload:
+    run_as_own_transaction(store, |store: &mut S, ta_id: u64| {
+        for (object_id, object) in input_data {
+            let object_id: String = object_id.into();
+            insert(store, &object_id, object, ta_id)?;
+        }
+        Ok(())
+    })
+}
+
+/// The `get` of a transactional store, see [`VersionedStore::get`] (Python: `TransactionalKeyValueStore.get`).
+///
+/// Without autocommit, only allowed before the first transaction begins (it then reads as [`get_default`] does).
+/// With autocommit, reads the newest committed version in a transaction of its own and returns the version visible
+/// in that transaction's snapshot after its commit.
+///
+/// # Errors
+///
+/// - [`StoreError::AutocommitRequired`] without autocommit once a transaction has begun;
+/// - without autocommit, the errors of [`get_default`];
+/// - with autocommit, [`StoreError::KeyNotFound`] if the object does not exist or is deleted, the errors of
+///   [`MvccState::get_visible_object_version`], and those of [`TransactionalStore::commit_transaction`].
+pub fn get_transactional<'a, S: TransactionalStore + ?Sized>(
+    store: &'a mut S,
+    object_id: &str,
+) -> Result<&'a S::Value, StoreError> {
+    if check_load_phase(store.state(), "get")? {
+        return get_default(store, object_id);
+    }
+    let ta_id: u64 = run_as_own_transaction(store, |store: &mut S, ta_id: u64| {
+        visible_version(store, object_id, ta_id).map(|_| ta_id)
+    })?;
+
+    // the own transaction has committed and wrote nothing, so its snapshot still shows the version it read:
+    visible_version(store, object_id, ta_id)
+}
+
+/// The `delete` of a transactional store, see [`VersionedStore::delete`] (Python:
+/// `TransactionalKeyValueStore.delete`).
+///
+/// Without autocommit, always refused: the initial state needs no delete. With autocommit, deletes the object in a
+/// transaction of its own.
+///
+/// # Errors
+///
+/// - [`StoreError::AutocommitRequired`] without autocommit;
+/// - [`StoreError::KeyNotFound`] if the object does not exist or is deleted already;
+/// - [`StoreError::TransactionAborted`] if an open transaction is writing the object, the errors of
+///   [`MvccState::get_visible_object_version`], and those of [`TransactionalStore::commit_transaction`].
+pub fn delete_transactional<S: TransactionalStore + ?Sized>(
+    store: &mut S,
+    object_id: &str,
+) -> Result<(), StoreError> {
+    // without autocommit, there is no delete outside a transaction:
+    refuse_without_autocommit(store.state(), "delete")?;
+
+    run_as_own_transaction(store, |store: &mut S, ta_id: u64| {
+        // KeyNotFound if the own transaction does not see the object:
+        visible_version(store, object_id, ta_id)?;
+        store.delete_object(object_id, ta_id)
+    })
+}
+
 /// The store that uses the default methods of [`TransactionalStore`]; it holds only its [`MvccState`] (Python:
 /// `TransactionalKeyValueStore`).
 ///
 /// Python's constructor parameters `use_brute_force_validation` and `isolation_level` are the [`Validation`] and the
 /// [`IsolationLevel`] of [`TransactionalKeyValueStore::with_isolation_level`] (or the [`Validation`] of
-/// [`TransactionalKeyValueStore::with_validation`] for a serializable store); `persistence_layer` is not ported, as it
-/// is not used.
+/// [`TransactionalKeyValueStore::with_validation`] for a serializable store), and `autocommit` is set with
+/// [`TransactionalKeyValueStore::with_autocommit`]; `persistence_layer` is not ported, as it is not used.
 #[derive(Debug)]
 pub struct TransactionalKeyValueStore<V> {
     /// The state of the store.
@@ -1203,6 +1551,14 @@ impl<V> TransactionalKeyValueStore<V> {
             state: MvccState::with_isolation_level(validation, isolation_level)?,
         })
     }
+
+    /// Returns this store with autocommit switched on (`true`) or off (`false`), see [`MvccState::with_autocommit`].
+    /// A builder method, used after a constructor, e.g. `TransactionalKeyValueStore::new().with_autocommit(true)`.
+    pub fn with_autocommit(self, autocommit: bool) -> TransactionalKeyValueStore<V> {
+        TransactionalKeyValueStore {
+            state: self.state.with_autocommit(autocommit),
+        }
+    }
 }
 
 impl<V> Default for TransactionalKeyValueStore<V> {
@@ -1212,7 +1568,7 @@ impl<V> Default for TransactionalKeyValueStore<V> {
     }
 }
 
-impl<V> VersionedStore for TransactionalKeyValueStore<V> {
+impl<V: Clone + PartialEq + fmt::Debug> VersionedStore for TransactionalKeyValueStore<V> {
     type Value = V;
 
     /// See [`VersionedStore::key_value_store`].
@@ -1223,6 +1579,30 @@ impl<V> VersionedStore for TransactionalKeyValueStore<V> {
     /// See [`VersionedStore::key_value_store_mut`].
     fn key_value_store_mut(&mut self) -> &mut IndexMap<String, KvStoreEntry<V>> {
         &mut self.state.key_value_store
+    }
+
+    /// See [`VersionedStore::put`]; runs [`put_transactional`].
+    fn put(&mut self, object_id: impl Into<String>, object: V) -> Result<(), StoreError> {
+        put_transactional(self, object_id, object)
+    }
+
+    /// See [`VersionedStore::get`]; runs [`get_transactional`].
+    fn get(&mut self, object_id: &str) -> Result<&V, StoreError> {
+        get_transactional(self, object_id)
+    }
+
+    /// See [`VersionedStore::delete`]; runs [`delete_transactional`].
+    fn delete(&mut self, object_id: &str) -> Result<(), StoreError> {
+        delete_transactional(self, object_id)
+    }
+
+    /// See [`VersionedStore::bulkload`]; runs [`bulkload_transactional`].
+    fn bulkload<K, I>(&mut self, input_data: I) -> Result<(), StoreError>
+    where
+        K: Into<String>,
+        I: IntoIterator<Item = (K, V)>,
+    {
+        bulkload_transactional(self, input_data)
     }
 }
 

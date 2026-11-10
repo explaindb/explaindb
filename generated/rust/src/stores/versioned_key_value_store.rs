@@ -80,7 +80,9 @@ impl<'a, V> IntoIterator for &'a KvStoreEntry<V> {
 ///
 /// Python's `VersionedKeyValueStore` implements the interface `KeyValueStore` and its subclasses inherit the
 /// implementation. In Rust, the implementation lives in the default methods of this trait; a store only provides
-/// access to its map, see [`VersionedStore::key_value_store`].
+/// access to its map, see [`VersionedStore::key_value_store`]. A store that overrides `put`, `get` or `bulkload` can
+/// call the original through the free functions [`put_default`], [`get_default`] and [`bulkload_default`] (Python:
+/// `super()`).
 pub trait VersionedStore {
     /// The type of the values (objects) stored.
     type Value;
@@ -107,45 +109,22 @@ pub trait VersionedStore {
     ///
     /// [`StoreError::KeyExists`] if the object id is already in the store (Python: `KeyError`).
     fn put(&mut self, object_id: impl Into<String>, object: Self::Value) -> Result<(), StoreError> {
-        let object_id: String = object_id.into();
-        if self.key_value_store().contains_key(&object_id) {
-            return Err(StoreError::KeyExists(object_id));
-        }
-        self.key_value_store_mut().insert(
-            object_id,
-            KvStoreEntry {
-                committed: vec![VersionEntry {
-                    start_validity: 0,
-                    version: Version::Update(object),
-                }],
-                wip: None,
-            },
-        );
-        Ok(())
+        put_default(self, object_id, object)
     }
 
     /// Returns the value of the most recent committed version of the object `object_id`.
     ///
     /// Python's `get` returns an iterator and raises its errors only when the iterator is used; this method returns
-    /// the value directly.
+    /// the value directly. It takes the store as `&mut self`, as the `get` of the MVCC store with autocommit runs a
+    /// transaction of its own (see [`crate::TransactionalStore`]).
     ///
     /// # Errors
     ///
     /// - [`StoreError::KeyNotFound`] if the object id is not in the store (Python: `KeyError`);
     /// - [`StoreError::NotVisible`] if the most recent committed version is a delete marker or there is no committed
     ///   version (Python crashes in these cases).
-    fn get(&self, object_id: &str) -> Result<&Self::Value, StoreError> {
-        let entry: &KvStoreEntry<Self::Value> = self
-            .key_value_store()
-            .get(object_id)
-            .ok_or_else(|| StoreError::KeyNotFound(object_id.to_string()))?;
-        match entry.committed.last() {
-            Some(VersionEntry {
-                version: Version::Update(value),
-                ..
-            }) => Ok(value),
-            _ => Err(StoreError::NotVisible(object_id.to_string())),
-        }
+    fn get(&mut self, object_id: &str) -> Result<&Self::Value, StoreError> {
+        get_default(self, object_id)
     }
 
     /// Deletes the object `object_id` from the store.
@@ -189,10 +168,7 @@ pub trait VersionedStore {
         K: Into<String>,
         I: IntoIterator<Item = (K, Self::Value)>,
     {
-        for (object_id, object) in input_data {
-            self.put(object_id, object)?;
-        }
-        Ok(())
+        bulkload_default(self, input_data)
     }
 
     /// Shows the content of the store: pretty-prints the underlying map with `Debug`. Python's `pprint` stops at
@@ -203,6 +179,77 @@ pub trait VersionedStore {
     {
         println!("{:#?}", self.key_value_store());
     }
+}
+
+/// The implementation of [`VersionedStore::put`] (Python: `VersionedKeyValueStore.put`). A store that overrides
+/// `put` calls it for the original behaviour, as Python's `super().put` does.
+///
+/// # Errors
+///
+/// See [`VersionedStore::put`].
+pub fn put_default<S: VersionedStore + ?Sized>(
+    store: &mut S,
+    object_id: impl Into<String>,
+    object: S::Value,
+) -> Result<(), StoreError> {
+    let object_id: String = object_id.into();
+    if store.key_value_store().contains_key(&object_id) {
+        return Err(StoreError::KeyExists(object_id));
+    }
+    store.key_value_store_mut().insert(
+        object_id,
+        KvStoreEntry {
+            committed: vec![VersionEntry {
+                start_validity: 0,
+                version: Version::Update(object),
+            }],
+            wip: None,
+        },
+    );
+    Ok(())
+}
+
+/// The implementation of [`VersionedStore::get`] (Python: `VersionedKeyValueStore.get`); it only reads, so it needs
+/// the store as `&S`. A store that overrides `get` calls it for the original behaviour, as Python's `super().get`
+/// does.
+///
+/// # Errors
+///
+/// See [`VersionedStore::get`].
+pub fn get_default<'a, S: VersionedStore + ?Sized>(
+    store: &'a S,
+    object_id: &str,
+) -> Result<&'a S::Value, StoreError> {
+    let entry: &KvStoreEntry<S::Value> = store
+        .key_value_store()
+        .get(object_id)
+        .ok_or_else(|| StoreError::KeyNotFound(object_id.to_string()))?;
+    match entry.committed.last() {
+        Some(VersionEntry {
+            version: Version::Update(value),
+            ..
+        }) => Ok(value),
+        _ => Err(StoreError::NotVisible(object_id.to_string())),
+    }
+}
+
+/// The implementation of [`VersionedStore::bulkload`] (Python: `Index.bulkload`): calls [`VersionedStore::put`] of
+/// `store` for each pair, so an override of `put` is used. A store that overrides `bulkload` calls it for the original
+/// behaviour, as Python's `super().bulkload` does.
+///
+/// # Errors
+///
+/// See [`VersionedStore::bulkload`].
+pub fn bulkload_default<S, K, I>(store: &mut S, input_data: I) -> Result<(), StoreError>
+where
+    S: VersionedStore + ?Sized,
+    K: Into<String>,
+    I: IntoIterator<Item = (K, S::Value)>,
+{
+    for (object_id, object) in input_data {
+        store.put(object_id, object)?;
+    }
+    Ok(())
 }
 
 /// A versioned store managing key/value mappings (Python: `VersionedKeyValueStore`).

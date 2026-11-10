@@ -29,7 +29,7 @@ use crate::common::{Account, CountingWhereClause, Stuff, create_fake_data, delet
 use explaindb::{
     Clause, IsolationLevel, JournalEntry, KvStoreEntry, ReadClause, StoreError,
     TransactionalKeyValueStore, TransactionalStore, TrueClause, Validation, Version, VersionEntry,
-    VersionedStore, WhereClause,
+    VersionedStore, WhereClause, get_default,
 };
 use indexmap::IndexMap;
 
@@ -498,11 +498,12 @@ where
 
     // the commit of t_2 fails: t_2 has read an object that t_1 has modified and committed meanwhile
     assert_aborted(store.commit_transaction(ta_id_2));
-    // t_2 is gone and its update of Y is dropped:
+    // t_2 is gone and its update of Y is dropped (`get_default` reads the newest committed version without the rules
+    // of the transactional `get`, which refuses once a transaction has begun):
     assert!(!store.state().td.contains_key(&ta_id_2));
     assert_eq!(store.key_value_store()["Y"].wip, None);
-    assert_eq!(store.get("Y"), Ok(&Stuff { a: 2, b: 0 }));
-    assert_eq!(store.get("X"), Ok(&Stuff { a: 1, b: 100 }));
+    assert_eq!(get_default(&store, "Y"), Ok(&Stuff { a: 2, b: 0 }));
+    assert_eq!(get_default(&store, "X"), Ok(&Stuff { a: 1, b: 100 }));
 }
 
 /// A [`TransactionalKeyValueStore`] with validation method 1 avoids the write skew anomaly, see
@@ -1469,6 +1470,76 @@ fn test_validation_ignores_concurrent_write_outside_read_predicate_with_method_2
     >(Validation::WriteSets);
 }
 
+/// Checks that a transaction of the store `S` that read an object commits if another transaction meanwhile committed
+/// a write that left its value unchanged.
+///
+/// ```text
+/// t_i                                 t_j
+/// begin
+///                                     begin
+/// read a == 42 -> sees A = (42, 0)
+///                                     update A to (42, 0)
+///                                     commit
+/// update A to (5, 0)
+/// commit -> succeeds
+/// ```
+///
+/// A is in the write set of t_j, so validation method 2 compares the version of A in the snapshot of t_i with its
+/// newest committed version; both are (42, 0), so the read of t_i is still valid. The same schedule with a change of
+/// the value of A aborts, see [`check_validation_detects_lost_update_on_read_object`]. Python runs this test with both
+/// validation methods; it runs here once per method.
+fn check_validation_ignores_concurrent_write_that_leaves_read_object_unchanged<S>(
+    validation: Validation,
+) where
+    S: TransactionalStore<Value = Stuff> + Default,
+{
+    let mut store: S = S::default();
+    store.state_mut().validation = validation;
+    store.put("A", Stuff { a: 42, b: 0 }).unwrap();
+
+    let t_i: u64 = store.begin_transaction();
+    let t_j: u64 = store.begin_transaction();
+
+    // t_i reads A:
+    let result: Vec<(String, Stuff)> = store
+        .read_objects(t_i, Some(Rc::new(WhereClause::new("a", "==", 42))), true)
+        .unwrap();
+    assert_eq!(result, [("A".to_string(), Stuff { a: 42, b: 0 })]);
+
+    // t_j writes the value A already has and commits; this puts A in the write set of t_j:
+    store
+        .update_object("A", Stuff { a: 42, b: 0 }, t_j)
+        .unwrap();
+    store.commit_transaction(t_j).unwrap();
+    assert!(store.state().td[&t_j].write_set.contains("A"));
+
+    // t_i overwrites A and must commit, as the version it read is still the newest committed one:
+    store.update_object("A", Stuff { a: 5, b: 0 }, t_i).unwrap();
+    assert_eq!(store.commit_transaction(t_i), Ok(()));
+    assert_eq!(
+        store.state().committed_transactions_trace.last(),
+        Some(&t_i)
+    );
+}
+
+/// A [`TransactionalKeyValueStore`] with validation method 1 commits a transaction whose read object was overwritten
+/// with the same value, see [`check_validation_ignores_concurrent_write_that_leaves_read_object_unchanged`].
+#[test]
+fn test_validation_ignores_concurrent_write_that_leaves_read_object_unchanged_with_method_1() {
+    check_validation_ignores_concurrent_write_that_leaves_read_object_unchanged::<
+        TransactionalKeyValueStore<Stuff>,
+    >(Validation::BruteForce);
+}
+
+/// A [`TransactionalKeyValueStore`] with validation method 2 commits a transaction whose read object was overwritten
+/// with the same value, see [`check_validation_ignores_concurrent_write_that_leaves_read_object_unchanged`].
+#[test]
+fn test_validation_ignores_concurrent_write_that_leaves_read_object_unchanged_with_method_2() {
+    check_validation_ignores_concurrent_write_that_leaves_read_object_unchanged::<
+        TransactionalKeyValueStore<Stuff>,
+    >(Validation::WriteSets);
+}
+
 /// Checks that a read-only transaction of the store `S` always commits, even if another transaction committed a
 /// change of an object it read.
 ///
@@ -2183,9 +2254,9 @@ where
 ///
 /// t_i is removed from the transaction dictionary, its journal holds only `Begin` and `Abort`, and x has no
 /// work-in-progress version. Checked for every combination of t_j updating or deleting x and t_i updating or
-/// deleting x, and for t_j and t_i inserting the same new key. Python also runs the update and delete combinations
-/// on the indexed store, to check that it forwards the isolation level; that variant follows with the indexed store
-/// in step 2 of the port.
+/// deleting x, and for t_j and t_i inserting the same new key. Python also runs all these combinations on the
+/// indexed store, to check that it forwards the isolation level; that variant follows with the indexed store in
+/// step 2 of the port.
 #[test]
 fn test_snapshot_isolation_level_aborts_write_to_object_committed_after_begin() {
     let write_kinds: [WriteKind; 2] = [WriteKind::Update, WriteKind::Delete];

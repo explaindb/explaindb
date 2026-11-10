@@ -11,15 +11,15 @@
       "path": "Cargo.toml"
     },
     {
-      "sha256": "sha256:7b18c5200c6bae13",
+      "sha256": "sha256:689e18f5dad979e0",
       "sources": [],
       "path": "README.md"
     },
     {
-      "sha256": "sha256:df3cf9e6a437df91",
+      "sha256": "sha256:94a1043c882b30fd",
       "sources": [
         {
-          "sha256": "sha256:e50771ebc704b9f6",
+          "sha256": "sha256:b0ef9a6d7e118576",
           "path": "system/benchmarks/workloads.py"
         },
         {
@@ -35,14 +35,14 @@
       "path": "rust-toolchain.toml"
     },
     {
-      "sha256": "sha256:85c82a65ee865a98",
+      "sha256": "sha256:979420de24c47863",
       "sources": [
         {
           "sha256": "sha256:0f03f16811d7a201",
           "path": "system/stores/VersionedKeyValueStore.py"
         },
         {
-          "sha256": "sha256:c2c0ce7ca8be84a5",
+          "sha256": "sha256:20a5490e2c823967",
           "path": "system/stores/MVCC.py"
         },
         {
@@ -72,7 +72,7 @@
       "path": "src/indexes/indexes.rs"
     },
     {
-      "sha256": "sha256:c1370a819e1a148d",
+      "sha256": "sha256:dfe6a51506218acc",
       "sources": [],
       "path": "src/lib.rs"
     },
@@ -97,14 +97,14 @@
       "path": "src/stores.rs"
     },
     {
-      "sha256": "sha256:b842355a247e8c61",
+      "sha256": "sha256:25af97fcfa55d299",
       "sources": [
         {
-          "sha256": "sha256:c2c0ce7ca8be84a5",
+          "sha256": "sha256:20a5490e2c823967",
           "path": "system/stores/MVCC.py"
         },
         {
-          "sha256": "sha256:16cf8eeca61850b9",
+          "sha256": "sha256:48c9617410d035c5",
           "path": "system/interfaces/stores.py"
         },
         {
@@ -115,7 +115,7 @@
       "path": "src/stores/mvcc.rs"
     },
     {
-      "sha256": "sha256:43180c0b63735088",
+      "sha256": "sha256:a52dd3356e8b6f12",
       "sources": [
         {
           "sha256": "sha256:0f03f16811d7a201",
@@ -140,7 +140,7 @@
           "path": "system/tests/query_processing/test_query_processing.py"
         },
         {
-          "sha256": "sha256:d6761dfa9e7bc33d",
+          "sha256": "sha256:4497a51420eb6356",
           "path": "system/tests/stores/test_store_anomalies.py"
         }
       ],
@@ -155,7 +155,7 @@
       "sha256": "sha256:d9bc71b7e1ada1e4",
       "sources": [
         {
-          "sha256": "sha256:b3b3c0a126ec67d6",
+          "sha256": "sha256:a7ad61b400393e61",
           "path": "system/tests/indexes/test_indexing.py"
         }
       ],
@@ -182,10 +182,10 @@
       "path": "tests/stores/main.rs"
     },
     {
-      "sha256": "sha256:0aa34a04701ff488",
+      "sha256": "sha256:60c88681d9077afa",
       "sources": [
         {
-          "sha256": "sha256:c2c0ce7ca8be84a5",
+          "sha256": "sha256:20a5490e2c823967",
           "path": "system/stores/MVCC.py"
         },
         {
@@ -196,20 +196,20 @@
       "path": "tests/stores/mvcc.rs"
     },
     {
-      "sha256": "sha256:aea67291ff5fe185",
+      "sha256": "sha256:4293a0888e701831",
       "sources": [
         {
-          "sha256": "sha256:d6761dfa9e7bc33d",
+          "sha256": "sha256:4497a51420eb6356",
           "path": "system/tests/stores/test_store_anomalies.py"
         }
       ],
       "path": "tests/stores/test_store_anomalies.rs"
     },
     {
-      "sha256": "sha256:06cedd07b9c90079",
+      "sha256": "sha256:a083669477cae1be",
       "sources": [
         {
-          "sha256": "sha256:13a46c53394eafe6",
+          "sha256": "sha256:7b55aacb72336e0e",
           "path": "system/tests/stores/test_stores_basics.py"
         }
       ],
