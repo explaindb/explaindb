@@ -15,6 +15,9 @@ Recursive Model Index is developed in its notebook only:
 - [**Recursive Model Index**](<Recursive Model Index.md>) — a "learned index": models that *predict*
   a key's position instead of navigating pointers.
 
-The three implemented families share the common key/value index interface in
-[`system/interfaces/indexing/Index.py`](../../../system/interfaces/indexing/Index.py), so they are
-interchangeable from the query engine's point of view.
+The B⁺-tree, the bitmap indexes and the radix trie share the common key/value index interface in
+[`system/interfaces/indexing/Index.py`](../../../system/interfaces/indexing/Index.py); the Bloom filter
+is a membership filter of its own. They differ in what they support: none of them supports deletes, the
+bitmap indexes can only be bulkloaded, and unlike the others the B⁺-tree keeps only one value per key.
+The indexed MVCC store uses none of them yet: its indexes are `PythonDictionaryIndex`es, which map a key
+to all of its values.
