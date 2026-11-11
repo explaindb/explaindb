@@ -125,6 +125,20 @@ voice speaks the narration once the sound is switched on).
 Notebook: [Result-DB](notebooks/Result-DB.ipynb)
 [![Open Result-DB on Binder](https://mybinder.org/badge_logo.svg)](https://mybinder.org/v2/gh/explaindb/explaindb/main?urlpath=lab/tree/notebooks/Result-DB.ipynb)
 
+### [b-tree](https://htmlpreview.github.io/?https://github.com/explaindb/explaindb/blob/main/visualizations/b-tree.html)
+
+[<img src="docs/images/visualizations/b-tree.jpg" width="480" alt="A robot in a room of the index reads the interval signs over the holes in its floor; below the key row, chutes lead down to the next level">](https://htmlpreview.github.io/?https://github.com/explaindb/explaindb/blob/main/visualizations/b-tree.html)
+
+A B⁺-tree as a warehouse: each leaf is a section of a rack on rails, holding up to 16 parcels sorted by key, linked to
+its neighbours by chains; above it hangs the index, each inner node a room with up to 8 keys and a chute from each hole
+in its floor down to a child. A robot runs a point query and a range query, then inserts three keys: one that fits, one
+that splits a leaf and one whose splits go up to the root, so that a new root opens and the tree grows at the top. The
+trees are those of the repository's `BPlusTree(8, 16)` (in 3D, with three.js; a synthetic voice speaks the narration
+once the sound is switched on).
+
+Notebook: [B-tree](notebooks/B-tree.ipynb)
+[![Open B-tree on Binder](https://mybinder.org/badge_logo.svg)](https://mybinder.org/v2/gh/explaindb/explaindb/main?urlpath=lab/tree/notebooks/B-tree.ipynb)
+
 ## Notebooks
 
 The notebooks are grouped by the chapters of the [tutorial](docs/tutorial/README.md), which explains each
@@ -254,10 +268,10 @@ ExplainDB is licensed under the [GNU Affero General Public License v3.0](LICENSE
 Copyright (C) 2026 Prof. Dr. Jens Dittrich, Saarland University.
 
 The pages `visualizations/row-or-column.html`, `visualizations/call-through-dbms.html`,
-`visualizations/clock-scan.html` and `visualizations/yannakakis.html` also embed third-party code and fonts under their
-own licenses: three.js (MIT License) and the fonts Archivo and JetBrains Mono (SIL Open Font License 1.1). Each page
-gives their copyright and license notices. All four pages also embed a synthetic voice, spoken with the model
-Ming-3.0-tts (MIT License, voice UK_George); each page names it.
+`visualizations/clock-scan.html`, `visualizations/yannakakis.html` and `visualizations/b-tree.html` also embed
+third-party code and fonts under their own licenses: three.js (MIT License) and the fonts Archivo and JetBrains Mono
+(SIL Open Font License 1.1). Each page gives their copyright and license notices. All five pages also embed a
+synthetic voice, spoken with the model Ming-3.0-tts (MIT License, voice UK_George); each page names it.
 
 ## Contributors
 

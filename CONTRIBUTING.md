@@ -265,8 +265,9 @@ reader's browser itself blocks every load from the network (the line and its rul
 each page in a headless Chromium, driven by [Playwright](https://playwright.dev/python/), and uses
 its controls the way a reader does. The tests fail if a page's script throws an error or logs one
 to the console, if a control does not work, or if the page requests anything but a local file.
-The CI job `visualization_test` runs them in every merge request that changes a page, the test,
-`.gitlab-ci.yml`, `pyproject.toml` or `uv.lock`. It runs in three jobs,
+The CI job `visualization_test` runs them in every merge request that changes a page, the test, the
+module it imports for the B-tree page (`system/tests/repo/b_tree_page_trees.py`), `.gitlab-ci.yml`,
+`pyproject.toml` or `uv.lock`. It runs in three jobs,
 each on its share of the pages (the pages with sound, whose tests take longest, are spread evenly
 over the jobs first; see
 [`docs/changes/038-split-visualization-test`](docs/changes/038-split-visualization-test/DECISION.md)).
@@ -331,10 +332,14 @@ in `PAGES_WITH_SOUND`, so that they fail if it loses its button, and, if its fil
 `PAGES_WITH_PARTS` as well, as they expect the part buttons (`chapter-1`, …) exactly on the pages listed
 there. At least one of its captions must begin with a clip of 4.5 s or more (`test_voice_follows_the_film`
 needs it), no two captions may have the same text, and its clock reads exactly `m:ss / m:ss`. As the tests
-wait at most 15 s for the film to reach a moment (`FILM_TIMEOUT`), its first caption begins a moment after
-the start of the film but within a few seconds of it, the second within about ten seconds of the first,
-and the clip of the first caption lasts more than 1.5 s (`test_a_jump_back_drops_the_clip`); the film
-lasts at most about four minutes. The other rules are checked by the author and the reviewers.
+wait at most 15 s for the film to reach a moment (`FILM_TIMEOUT`), some of them counted in steps of the
+slider (a thousandth of the film), its first caption begins a moment after the start of the film but within
+a few seconds of it, the second within about ten seconds of the first, and the clip of the first caption
+lasts more than 1.5 s (`test_a_jump_back_drops_the_clip`); the film lasts at most about four minutes. A
+longer film, or a later second caption, needs a faster runner: the B-tree page (6:23, its second caption
+after 13.4 s) is such an exception, which passed the shared sound tests in CI (see
+[`docs/changes/040-b-tree`](docs/changes/040-b-tree/DECISION.md)). The other rules are checked by the author
+and the reviewers.
 
 The words used here: a page plays a *film* from its start to its end. A longer film is cut into
 *parts*, e.g. the four orders (queries) of the House DBMS page; the test ids of the part buttons call
@@ -403,7 +408,7 @@ clip of its own (on the row/column page); these are not the segments of the slid
   ([decision 034](docs/changes/034-narration-voice/DECISION.md); e.g. the clock-scan page,
   `clock-scan.html`). Each caption has a clip (a caption said in segments, as on the row/column page, has
   one per segment), embedded as an MP3 `data:` URL (mono, at a constant 48 or 64 kbit/s; at 48 kbit/s the
-  voice adds about 0.5 MB to the page per minute of speech, 0.3 to 0.8 MB on the four pages that speak),
+  voice adds about 0.5 MB to the page per minute of speech, 0.3 to 2.6 MB on the five pages that speak),
   which the page's Content-Security-Policy allows with `media-src data:` (see the note at the end of
   decision 030). Its words light up at the moments the voice says them, so that the subtitles keep the
   voice's pace also with sound off. Sound is off at load, as browsers allow sound only after a click or
@@ -425,7 +430,7 @@ clip of its own (on the row/column page); these are not the segments of the slid
   names its model and voice (on the House DBMS page at the end of the `credit` line, on the clock-scan
   page in the card above it); a comment above the clips names the model, its license (MIT) and how the
   clips were made, and the README says that the page speaks, in its subsection of *Visualizations* and in
-  the section *License*. The voice's code is the same on the four pages that speak; a new page takes it
+  the section *License*. The voice's code is the same on the five pages that speak; a new page takes it
   over. The clips are made outside the repository, as decision 034 describes: every new take is checked
   with a speech recogniser for misspoken or cut words and listened to before it goes into the page.
 - **Fast passages:** while the film runs faster than normal, a badge `▶▶ ×4` (`fast-forward`) says
@@ -525,7 +530,8 @@ start of the film, and `--hold` sets how long the last frame stays (3 s by defau
 
 The CI job `render_video_test` runs the tool's tests (`system/tests/repo/test_render_video.py`) beside
 `visualization_test`, in every merge request that changes the tool, its test, a page, the page
-test, `.gitlab-ci.yml`, `pyproject.toml` or `uv.lock`; only this job installs ffmpeg.
+test, the module it imports for the B-tree page (`b_tree_page_trees.py`), `.gitlab-ci.yml`,
+`pyproject.toml` or `uv.lock`; only this job installs ffmpeg.
 
 ## Logo
 

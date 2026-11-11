@@ -35,6 +35,7 @@ VISUALIZATION_JOB tests every page.
 from __future__ import annotations
 
 import importlib.util
+import json
 import math
 import os
 import re
@@ -47,6 +48,25 @@ from itertools import groupby
 from pathlib import Path
 from typing import TYPE_CHECKING, TypedDict
 from unittest import mock
+
+# the trees and queries of the B-tree page, from a module that uses only the standard library (the CI job installs
+# only Playwright):
+from system.tests.repo.b_tree_page_trees import (
+    B_TREE_PAGE,
+    BETWEEN_LEAVES_RANGE,
+    EXPECTED_BETWEEN_LEAVES,
+    EXPECTED_DIGESTS,
+    EXPECTED_POINT_PATH,
+    EXPECTED_RANGE_HITS,
+    EXPECTED_RANGE_LEAVES,
+    Tree,
+    digest_mismatches,
+    digests,
+    height,
+    keys_of,
+    read_queries,
+    read_start_and_puts,
+)
 
 # the tests that open a browser run only where Playwright is installed (see the module docstring):
 PLAYWRIGHT_AVAILABLE: bool = importlib.util.find_spec("playwright") is not None
@@ -87,17 +107,22 @@ HOUSE_DBMS_PAGE: Path = PAGES_DIR / "call-through-dbms.html"
 # the page on Yannakakis' semi-join reduction, which counts the semi-joins done and the tuples left (decision 032) and
 # speaks its narration with the same voice (decision 038):
 YANNAKAKIS_PAGE: Path = PAGES_DIR / "yannakakis.html"
-# the pages that speak their narration; each must keep its sound button:
+# the pages that speak their narration (the B-tree page, B_TREE_PAGE, with the same voice, decision 040); each must
+# keep its sound button:
 PAGES_WITH_SOUND: frozenset[Path] = frozenset(
-    {CLOCK_SCAN_PAGE, ROW_OR_COLUMN_PAGE, HOUSE_DBMS_PAGE, YANNAKAKIS_PAGE}
+    {CLOCK_SCAN_PAGE, ROW_OR_COLUMN_PAGE, HOUSE_DBMS_PAGE, YANNAKAKIS_PAGE, B_TREE_PAGE}
 )
 # the pages with sound whose film has parts, with a button (chapter-1, ...) that jumps to the start of each:
 PAGES_WITH_PARTS: frozenset[Path] = frozenset(
-    {CLOCK_SCAN_PAGE, HOUSE_DBMS_PAGE, YANNAKAKIS_PAGE}
+    {CLOCK_SCAN_PAGE, HOUSE_DBMS_PAGE, YANNAKAKIS_PAGE, B_TREE_PAGE}
 )
 
 # Next is clicked at most this often on the way from the start of a page to its end:
 MAX_NEXT_CLICKS: int = 300
+
+# a capital letter on its own, as a room named by a letter ("room R", "Q's right half"); not "A", the article, nor a
+# letter in a compound such as "B-tree":
+LETTER_NAME: re.Pattern[str] = re.compile(r"(?<![\w-])(?!A\b)[A-Z](?![\w-])")
 
 # a wait for the film to reach a time (e.g. the first caption, after about 0.75 s on the clock-scan page) ends after
 # this many milliseconds, not after the 5 s of a control: on a slow machine (software rendering) a frame may advance
@@ -164,6 +189,17 @@ def pages_of_job(
         )
     order: list[Path] = sorted(pages, key=lambda path: (not sound(path), path))
     return order[index - 1 :: total]
+
+
+def sections_that_were_there(before: list[int], after: list[int]) -> list[int]:
+    """Returns the places of a tree's sections (in key order) without those of new sections, i.e. without the places
+    that no section held in the tree before.
+
+    @param before: the places of the sections of the tree before an insert, in key order
+    @param after: the places of the sections of the tree after it, in key order
+    @return: after without the places that are not in before; equal to before if no section moved
+    """
+    return [place for place in after if place in before]
 
 
 @dataclass
@@ -2560,6 +2596,425 @@ class YannakakisPageTest(_SoundPageTestCase):
 
         # the page itself passes the check: it sets up its controls, which comes after the check, without an error:
         expect(self.page.get_by_test_id("play")).to_be_enabled()
+        self.assert_no_errors(self.opened)
+
+
+@unittest.skipUnless(PLAYWRIGHT_AVAILABLE, SKIP_REASON)
+class BTreePageTest(_PageTestCase):
+    """Checks that the B-tree page shows the trees of the repository's B+-tree code, BPlusTree(8, 16).
+
+    The page builds its start tree from START, inserts the three keys of PUTS with insertTree, its JavaScript copy of
+    BPlusTree.put, and writes the start tree and the tree after each put into data-trees of its stage.
+    test_b_tree_page_data.py checks the same EXPECTED_DIGESTS (b_tree_page_trees.py) against the real BPlusTree.
+    It also writes, for the same four trees, the place on the rails of each section (leaf), in key order, into
+    data-slots; the places are numbered from the left, one section wide. For the point query and the range query of the
+    film it writes the nodes on the way and the keys found into data-point-path and data-range-hits, which
+    test_b_tree_page_data.py checks against the real BPlusTree as well.
+    """
+
+    PAGE: Path | None = B_TREE_PAGE
+
+    def setUp(self) -> None:
+        """Opens the page, paused at its start, and reads the trees it made and the places of their sections.
+
+        Fails at once, naming the page's errors, if the page stops at start-up (e.g. a check of its numbers fails),
+        instead of letting every test wait in vain for what the page never sets up.
+        """
+        self.opened: OpenedPage = self.open_page(B_TREE_PAGE)
+        self.page: Page = self.opened.page
+        stage = self.page.get_by_test_id("stage")
+
+        # the script sets up the controls at the end of its start-up, after its checks (it waits up to 2.5 s for its
+        # fonts first); a check that fails throws an error instead, which is recorded as soon as Playwright has
+        # handled it:
+        play = self.page.get_by_test_id("play")
+        for _ in range(FILM_TIMEOUT // 100):
+            if self.opened.errors or play.is_enabled():
+                break
+            self.page.wait_for_timeout(100)
+        self.assert_no_errors(self.opened)
+        expect(play).to_be_enabled()
+
+        # the script writes the trees and the places at start-up, before it sets up the controls:
+        expect(stage).to_have_attribute("data-trees", re.compile(r"^\["))
+        # the start tree and the trees after the three puts, as plain data (see Tree):
+        self.trees: list[Tree] = json.loads(stage.get_attribute("data-trees") or "")
+        expect(stage).to_have_attribute("data-slots", re.compile(r"^\["))
+        # per tree, the places of its sections (leaves) in key order, 0 the leftmost:
+        self.slots: list[list[int]] = json.loads(
+            stage.get_attribute("data-slots") or ""
+        )
+
+    def test_at_the_start_the_places_rise_with_the_keys(self) -> None:
+        """At the start, the sections stand on the rails in key order: each one further right than the one before.
+
+        Fails if the start layout puts a section left of a section with smaller keys, or two on one place.
+        """
+        start: list[int] = self.slots[0]
+        self.assertGreater(len(start), 1)
+        self.assertEqual([], [(a, b) for a, b in zip(start, start[1:]) if not a < b])
+
+    def test_no_section_ever_changes_its_place(self) -> None:
+        """From one tree to the next, every section that was there stays at its place, and the sections keep their
+        order; the only change is the new section of a leaf split.
+
+        Fails if a section moves along the rails during an insert (e.g. pushed aside to make room for a new one).
+        """
+        # the four trees: the start tree and the tree after each put:
+        self.assertEqual(len(self.trees), len(self.slots))
+        for before, after in zip(self.slots, self.slots[1:]):
+            self.assertEqual(before, sections_that_were_there(before, after))
+
+    def test_a_new_section_stands_right_next_to_the_section_it_split_from(
+        self,
+    ) -> None:
+        """The first put fits into its leaf; each of the two others splits a leaf, and the new section (the right
+        half, next in key order) stands on the place right after the section it split from.
+
+        Fails if a leaf split puts its new section somewhere else, e.g. into a free place further away.
+        """
+        new_sections: list[list[int]] = []
+        for put, (before, after) in enumerate(zip(self.slots, self.slots[1:]), 1):
+            new: list[int] = [i for i, place in enumerate(after) if place not in before]
+            new_sections.append(new)
+
+            # the section it split from is the one before it in key order:
+            for i in new:
+                self.assertEqual(
+                    after[i - 1] + 1,
+                    after[i],
+                    f"put {put}: its new section is not right after the one it split from",
+                )
+
+        # one new section in each of the last two puts:
+        self.assertEqual([0, 1, 1], [len(new) for new in new_sections])
+
+    def test_no_place_is_ever_held_by_two_sections(self) -> None:
+        """In each of the four trees, no two sections stand on the same place.
+
+        Fails if a leaf split puts its new section onto a place that a section already holds.
+        """
+        for places in self.slots:
+            self.assertEqual(len(places), len(set(places)))
+
+    def test_the_page_makes_the_trees_of_the_code(self) -> None:
+        """The page's start tree and its tree after each of the three puts are those that the code makes.
+
+        Fails if insertTree splits a node otherwise than BPlusTree.put (e.g. another key moves up), or if the page
+        builds other keys of the inner nodes from START than the least key of each subtree to their right.
+        """
+        self.assertEqual(
+            EXPECTED_DIGESTS, digests(self.trees), digest_mismatches(self.trees)
+        )
+        self.assert_no_errors(self.opened)
+
+    def test_the_queries_take_the_way_and_find_the_keys_of_the_code(self) -> None:
+        """The point query passes through the nodes that the code's get visits on its way to 7013, from the root
+        down to the section, and the range query finds the keys that the code's get_all_in_range finds, in the
+        sections that it scans (test_b_tree_page_data.py checks these against BPlusTree).
+
+        Fails if the page's point query takes another hole in some room than the code (e.g. when the descent or
+        POINT_KEY changes), or if its range query starts or stops a section too early or too late, or with another
+        range.
+        """
+        stage = self.page.get_by_test_id("stage")
+        point_path: list[list[int]] = json.loads(
+            stage.get_attribute("data-point-path") or ""
+        )
+        range_hits: list[int] = json.loads(stage.get_attribute("data-range-hits") or "")
+        range_leaves: list[int] = json.loads(
+            stage.get_attribute("data-range-leaves") or ""
+        )
+
+        # the keys of each node on the way, from the root down, the keys found, and the sections read for them, by
+        # their least keys:
+        self.assertEqual(EXPECTED_POINT_PATH, point_path)
+        self.assertEqual(EXPECTED_RANGE_HITS, range_hits)
+        self.assertEqual(EXPECTED_RANGE_LEAVES, range_leaves)
+
+    def test_each_put_adds_its_key_and_the_last_one_splits_the_root(self) -> None:
+        """Each of the three puts adds its key to the tree; the last one splits the root, so the tree grows from 4
+        levels to 5 under a new root with one key, and the stage shows height 4 at the start, still 4 when the last
+        put begins, and 5 at the end.
+
+        Spells out what the digests check; also fails if the height on the stage does not follow the tree on screen
+        (e.g. stays 4 after the root split, or shows 5 as soon as the last put begins, long before the new root
+        appears).
+        """
+        _, puts = read_start_and_puts()
+
+        # the start tree and the tree after each put:
+        self.assertEqual(4, len(self.trees))
+
+        # each put adds its key and no other, and the leaves keep their keys in ascending order:
+        for before, key, after in zip(self.trees, puts, self.trees[1:]):
+            self.assertEqual(sorted([*keys_of(before), key]), keys_of(after))
+
+        # only the last put adds a level; the new root holds the one key that moved up from the old root:
+        self.assertEqual([4, 4, 4, 5], [height(tree) for tree in self.trees])
+        self.assertEqual(1, len(self.trees[-1]["keys"]))
+
+        # the stage shows the height of the tree on screen, at the start and at the end of the film:
+        stage = self.page.get_by_test_id("stage")
+        expect(stage).to_have_attribute("data-height", "4")
+
+        # part 7 begins with the last put, the one that splits the root; the new root appears only about a minute
+        # later, so the tree on screen still has height 4:
+        self.page.get_by_test_id("chapter-7").click()
+        expect(self.page.get_by_test_id("operation")).to_have_text("insert(7060)")
+        expect(stage).to_have_attribute("data-height", "4")
+
+        self.page.get_by_test_id("scrub").fill("1000")
+        expect(self.page.get_by_test_id("play")).to_have_attribute(
+            "data-state", "ended"
+        )
+        expect(stage).to_have_attribute("data-height", "5")
+        self.assert_no_errors(self.opened)
+
+    def test_each_part_begins_by_naming_itself_and_no_room_has_a_letter_name(
+        self,
+    ) -> None:
+        """The first caption of each part names the part as its button does (e.g. "Let's run a point query on key
+        7013." for "3 · Point query"), and no caption or step in the header calls a room by a letter (e.g. "room R",
+        "Q's right half"), which the picture does not show.
+
+        Fails if a part begins with a caption that does not say what the part shows (e.g. "We are looking for key
+        7013."), or if a caption or a step's title names a room or node by a single capital letter.
+        """
+        play = self.page.get_by_test_id("play")
+        first_captions: dict[str, str] = {}
+        lettered: list[str] = []
+
+        # Next from stop to stop up to the end; at each stop, the part on screen, the step and the caption:
+        clicks: int = 0
+        while play.get_attribute("data-state") != "ended":
+            self.assertLess(clicks, MAX_NEXT_CLICKS, "Next did not reach the end")
+            self.page.get_by_test_id("next").click()
+            clicks += 1
+            part: str = (
+                self.page.locator(
+                    '[data-testid^="chapter-"][aria-current="true"]'
+                ).text_content()
+                or ""
+            )
+            step: str = self.page.get_by_test_id("step-name").text_content() or ""
+            caption: str = self.page.get_by_test_id("nar-text").text_content() or ""
+            first_captions.setdefault(part, caption)
+            lettered.extend(
+                text for text in (step, caption) if LETTER_NAME.search(text)
+            )
+
+        # no step or caption names a room by a letter:
+        self.assertEqual([], lettered)
+
+        # each of the seven parts begins with a caption that has every word of the part's name, e.g. "point" and
+        # "query" for "3 · Point query" ("split" also in "splits"):
+        self.assertEqual(7, len(first_captions))
+        for button, caption in first_captions.items():
+            name: str = button.split("·")[-1].strip().lower()
+            for word in name.split():
+                self.assertIn(word, caption.lower(), f"part {button!r}")
+        self.assert_no_errors(self.opened)
+
+    def load_copy(self, changes: dict[str, str]) -> None:
+        """Loads a changed copy of the page into the page opened in setUp, with the errors recorded so far cleared.
+
+        open_page opens only the page itself, as the class has a PAGE; set_content puts the copy into the same tab, so
+        that its errors and outside requests are recorded as for the page. The first page's script (and that of an
+        earlier copy) keeps running in the same window: its closures still hold its own elements and its own film,
+        which are no longer shown and which it draws only on request (it is paused, and nothing asks it), so it can
+        neither change the copy nor record an error for it.
+
+        @param changes: each text to change (found in the page, else the test fails) and what it becomes; every place
+            of the text is changed, e.g. a caption and the text noted with its clip alike (plain text with spaces,
+            never inside the clips' base64 data, which has none)
+        """
+        html: str = B_TREE_PAGE.read_text(encoding="utf-8")
+        for old, new in changes.items():
+            self.assertIn(old, html, "the text to change was not found")
+            html = html.replace(old, new)
+        self.opened.errors.clear()
+        self.page.set_content(html)
+
+    def test_the_page_stops_if_a_caption_no_longer_says_what_the_page_gives(
+        self,
+    ) -> None:
+        """At start-up, the page checks that its captions name the numbers that its constants and its tree give: a copy
+        with one changed number in a caption stops with an error that names the words it misses and never sets up its
+        controls; one copy for each kind of number: a key moved up by a split, the point query's key (POINT_KEY), the
+        range query's range (RANGE), a key the film inserts (PUTS) and the number of nodes the point query passes
+        through. The page itself passes the check (setUp).
+
+        The captions are spoken by recorded clips, so their numbers are typed by hand; with the check, the page fails
+        its tests once its constants or its tree no longer give them, instead of saying something else than it shows.
+        """
+        # (kind, the caption's words, the same with another number, the words the check misses):
+        cases: list[tuple[str, str, str, str]] = [
+            ("a split", "6961 goes into", "6962 goes into", "6961 goes into"),
+            (
+                "POINT_KEY",
+                "point query on key 7013.",
+                "point query on key 7014.",
+                "point query on key 7013.",
+            ),
+            (
+                "RANGE",
+                "range query from 6267 to 6306:",
+                "range query from 6268 to 6306:",
+                "range query from 6267 to 6306:",
+            ),
+            (
+                "PUTS",
+                "Let's insert key 6284.",
+                "Let's insert key 6285.",
+                "Let's insert key 6284.",
+            ),
+            (
+                "the height",
+                "looking into four nodes.",
+                "looking into five nodes.",
+                "7013, found by looking into four nodes.",
+            ),
+        ]
+        for kind, words, changed, missed in cases:
+            with self.subTest(kind=kind):
+                self.load_copy({words: changed})
+
+                # the copy throws the error once it has loaded its fonts; the error is recorded as soon as Playwright
+                # has handled it:
+                error: str = f'uncaught: no caption says "{missed}"'
+                for _ in range(FILM_TIMEOUT // 100):
+                    if error in self.opened.errors:
+                        break
+                    self.page.wait_for_timeout(100)
+                self.assertEqual([error], self.opened.errors)
+                self.assertEqual([], self.opened.outside_requests)
+
+                # the copy stops there: it never sets up its controls, so Play stays disabled, as the HTML writes it:
+                expect(self.page.get_by_test_id("play")).to_be_disabled()
+
+    def test_a_range_from_between_two_sections_starts_where_the_robot_lands(
+        self,
+    ) -> None:
+        """On a copy whose range query begins at 6270, which falls between two sections (6269 ends one, 6271 begins
+        the next), the range query reads the sections that the code's get_all_in_range scans for that range
+        (EXPECTED_BETWEEN_LEAVES, which test_b_tree_page_data.py checks against BPlusTree): from the one the robot's way
+        down lands in, before the gap, along the chains to the one with the first key after the range.
+
+        Fails if the page starts at the first section whose last key is in the range or after it, which skips the
+        section the robot lands in.
+        """
+        point_key, (least, greatest) = read_queries()
+        new_least, new_greatest = BETWEEN_LEAVES_RANGE
+
+        # a copy with the range from 6270, its caption changed alike, so that the page's check of the captions passes:
+        self.load_copy(
+            {
+                f"const POINT_KEY = {point_key}, RANGE = [{least}, {greatest}];": (
+                    f"const POINT_KEY = {point_key}, RANGE = [{new_least}, {new_greatest}];"
+                ),
+                f"range query from {least} to {greatest}": (
+                    f"range query from {new_least} to {new_greatest}"
+                ),
+            }
+        )
+        expect(self.page.get_by_test_id("play")).to_be_enabled(timeout=FILM_TIMEOUT)
+        self.assert_no_errors(self.opened)
+
+        # the sections it reads, by their least keys:
+        leaves: list[int] = json.loads(
+            self.page.get_by_test_id("stage").get_attribute("data-range-leaves") or ""
+        )
+        self.assertEqual(EXPECTED_BETWEEN_LEAVES, leaves)
+
+    def test_the_end_card_names_the_voice(self) -> None:
+        """The last line of the end card, the credit, ends by saying that the voice is synthetic and naming its model
+        and voice."""
+        voice_named: str = "The voice is synthetic: Ming-3.0 TTS, voice UK_George."
+
+        # at the end, the end card shows, and its credit ends with the voice's (read as shown, so that the line breaks
+        # of the HTML count as spaces):
+        self.page.get_by_test_id("scrub").fill("1000")
+        expect(self.page.get_by_test_id("legend")).to_have_css("opacity", "1")
+        expect(self.page.get_by_test_id("credit")).to_have_text(
+            re.compile(re.escape(voice_named) + "$"), use_inner_text=True
+        )
+        self.assert_no_errors(self.opened)
+
+    def test_the_sound_hint_gives_way_to_the_end_card(self) -> None:
+        """With sound off, the hint "Switch on audio (M)" fades out while the end card fades in, which it would cover on
+        a narrow window, and shows again before it."""
+        hint = self.page.get_by_test_id("sound-hint")
+        scrub = self.page.get_by_test_id("scrub")
+
+        # at the start, the hint shows in full:
+        expect(hint).to_have_text("Switch on audio (M)")
+        expect(hint).to_have_css("opacity", "1")
+
+        # at the end, where the end card shows, the hint has faded out:
+        scrub.fill("1000")
+        expect(self.page.get_by_test_id("legend")).to_have_css("opacity", "1")
+        expect(hint).to_have_css("opacity", "0")
+
+        # back at the start, it shows again:
+        scrub.fill("0")
+        expect(hint).to_have_css("opacity", "1")
+        self.assert_no_errors(self.opened)
+
+    def test_the_texture_caches_stay_within_their_limits(self) -> None:
+        """Jumping with the slider to 200 moments all through the film, back and forth, the page draws more pictures
+        of the sections' fronts and of the rooms' key rows than its caches may keep, yet neither cache ever holds more
+        than its limit (the pictures in use included), and the fronts' cache reaches its limit: the caches free old
+        pictures.
+
+        Fails if a cache stops freeing pictures (e.g. it gives up at the oldest one when that one is still in use), if
+        its limit grows (a front takes about 0.8 MB on the GPU, a key row about 0.6 MB), or if the page stops writing
+        the sizes.
+        """
+        stage = self.page.get_by_test_id("stage")
+        limits: dict[str, int] = json.loads(
+            stage.get_attribute("data-cache-limits") or ""
+        )
+
+        # the limits are small: 60 fronts, and a key row per room (68 in the film) and a few more:
+        self.assertEqual(60, limits["fronts"])
+        self.assertLessEqual(limits["rows"], 80)
+
+        # the slider jumps forwards to every tenth step, then back to the steps between; after each jump, the page's
+        # notes are read: how many fronts and key rows each cache holds and how many it has drawn so far (null where
+        # the page has written nothing yet; at the start, it has drawn no front, only each room's key row):
+        notes: list[list[str | None]] = self.page.get_by_test_id("scrub").evaluate(
+            """scrub => {
+                const stage = document.querySelector('[data-testid="stage"]'), notes = [];
+                const steps = [...Array(100).keys()];
+                for (const value of [...steps.map((i) => i * 10), ...steps.map((i) => 995 - i * 10)]) {
+                    scrub.value = String(value);
+                    scrub.dispatchEvent(new Event('input', { bubbles: true }));
+                    const { cacheFronts, cacheRows, cacheMadeFronts, cacheMadeRows } = stage.dataset;
+                    notes.push([cacheFronts, cacheRows, cacheMadeFronts, cacheMadeRows].map((value) => value ?? null));
+                }
+                return notes;
+            }"""
+        )
+        self.assertEqual(200, len(notes))
+
+        # the key rows' cache holds rows from the start on, at least one per room, never more than its limit:
+        self.assertNotIn(None, [note[1] for note in notes])
+        rows: list[int] = [int(note[1] or "") for note in notes]
+        self.assertGreaterEqual(min(rows), 1)
+        self.assertLessEqual(max(rows), limits["rows"])
+
+        # the fronts' cache, once the film shows fronts, never holds more than its limit, and is full at some moment:
+        fronts: list[int] = [int(note[0]) for note in notes if note[0] is not None]
+        self.assertGreater(len(fronts), 0)
+        self.assertLessEqual(max(fronts), limits["fronts"])
+        self.assertEqual(limits["fronts"], max(fronts))
+
+        # more pictures were drawn than each cache may keep, so the caches have freed some:
+        self.assertNotIn(None, notes[-1])
+        made_fronts, made_rows = int(notes[-1][2] or ""), int(notes[-1][3] or "")
+        self.assertGreater(made_fronts, limits["fronts"])
+        self.assertGreater(made_rows, limits["rows"])
         self.assert_no_errors(self.opened)
 
 
