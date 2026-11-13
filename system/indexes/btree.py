@@ -537,7 +537,7 @@ class BPlusTree[Key, Value](AbstractBTree[Key, Value]):
 
         def split(self) -> SplitHappens[Key]:
             """Split operation for leaf nodes. This implementation splits the keys and values of this Leaf into two
-            Leaves.
+            Leaves and links them into the chain of leaves in place of this Leaf.
             Note: No re-use of this instance, we are creating two new Leaf instances.
 
             :return: A SplitHappens wrapping the left leaf, the right leaf, and the new pivot.
@@ -546,19 +546,38 @@ class BPlusTree[Key, Value](AbstractBTree[Key, Value]):
             # find middle (aka pivot) element:
             mid: int = len(self.keys) // 2
 
-            # return two new Leaf instances and the pivot key,
+            # create two new Leaf instances,
             # note: this is in spirit similar to what happens in a partitioning step in quicksort:
+            left_leaf: BPlusTree.Leaf = BPlusTree.Leaf(
+                self.capacity, self.keys[:mid], self.values[:mid]
+            )
+            right_leaf: BPlusTree.Leaf = BPlusTree.Leaf(
+                self.capacity, self.keys[mid:], self.values[mid:]
+            )
+
+            # redirect leaf pointers for sequential scanning:
+            # is there a leaf to the left of self?: update its next pointer:
+            if self.previous:
+                self.previous.next = left_leaf
+
+            # new left node points to the previous leaf:
+            left_leaf.previous = self.previous
+            # new left node points to the right node (just created by the split):
+            left_leaf.next = right_leaf
+
+            # new right node points to the new left node (just created by the split):
+            right_leaf.previous = left_leaf
+            # new right node points to the next leaf:
+            right_leaf.next = self.next
+
+            # is there a leaf to the right of self?: update its previous pointer:
+            if self.next:
+                self.next.previous = right_leaf
+
+            # return the two new leaves and the pivot key separating them; unlike in Inner.split, the pivot stays in
+            # the right leaf as its least key:
             return SplitHappens[Key](
-                # left leaf:
-                left_node=BPlusTree.Leaf(
-                    self.capacity, self.keys[:mid], self.values[:mid]
-                ),
-                # right leaf:
-                right_node=BPlusTree.Leaf(
-                    self.capacity, self.keys[mid:], self.values[mid:]
-                ),
-                # the pivot (key) separating the two partitions (aka leaves):
-                pivot=self.keys[mid],
+                left_node=left_leaf, right_node=right_leaf, pivot=self.keys[mid]
             )
 
         def put(self, key: Key, value: Value) -> PutInfo:
@@ -599,34 +618,9 @@ class BPlusTree[Key, Value](AbstractBTree[Key, Value]):
             # the leaf overflows temporarily: it holds one key more than allowed:
             assert len(self.keys) == self.capacity + 1
 
-            # (2.) split the leaf:
-            # call split to create two new leaf nodes:
-            split_happens: SplitHappens[Key] = self.split()
-
-            # the split of a leaf returns two leaves:
-            left_leaf: BPlusTree.Leaf = cast(BPlusTree.Leaf, split_happens.left_node)
-            right_leaf: BPlusTree.Leaf = cast(BPlusTree.Leaf, split_happens.right_node)
-
-            # (3.) redirect leaf pointers for sequential scanning
-            # is there a leaf to the left of self?: update its next pointer
-            if self.previous:
-                self.previous.next = left_leaf
-
-            # new left node points to the previous leaf:
-            left_leaf.previous = self.previous
-            # new left node points to the right node (just created by the split):
-            left_leaf.next = right_leaf
-
-            # new right node points to the new left node (just created by the split):
-            right_leaf.previous = left_leaf
-            # new right node points to the next leaf:
-            right_leaf.next = self.next
-
-            if self.next:
-                self.next.previous = right_leaf
-
-            # return the split information up the call stack:
-            return split_happens
+            # (2.) split the leaf into two new leaves, which take its place in the chain of leaves, and return the
+            # split information up the call stack:
+            return self.split()
 
         def get(self, key: Key) -> Iterator[Value]:
             """Returns the value for the given key if it exists.
