@@ -287,26 +287,30 @@ class BPlusTree[Key, Value](AbstractBTree[Key, Value]):
                 child.show()
 
         def split(self) -> SplitHappens[Key]:
-            """Split-operation for inner nodes. Splits the keys and children of this node into two inner nodes plus
-            pivot.
+            """Split-operation for inner nodes. This implementation splits the keys and children of this node into two
+            inner nodes plus pivot.
             Note: No re-use of this instance, we are creating two new Inner-instances.
 
             :return: A SplitHappens wrapping the left node, the right node, and the new pivot.
             """
 
             # find middle (aka pivot) element:
-            mid = len(self.keys) // 2
+            mid: int = len(self.keys) // 2
 
-            # create new inner nodes:
-            left_node = BPlusTree.Inner(
-                self.capacity, self.keys[:mid], self.children[: mid + 1]
-            )
-            right_node = BPlusTree.Inner(
-                self.capacity, self.keys[mid + 1 :], self.children[mid + 1 :]
-            )
-
+            # return two new Inner instances and the pivot key,
+            # note: this is in spirit similar to what happens in a partitioning step in quicksort:
+            # BUT: the pivot is REMOVED from the partitions, it moves up into the parent! (compare with Leaf.split)
             return SplitHappens[Key](
-                left_node=left_node, right_node=right_node, pivot=self.keys[mid]
+                # left node:
+                left_node=BPlusTree.Inner(
+                    self.capacity, self.keys[:mid], self.children[: mid + 1]
+                ),
+                # right node:
+                right_node=BPlusTree.Inner(
+                    self.capacity, self.keys[mid + 1 :], self.children[mid + 1 :]
+                ),
+                # the pivot (key) separating the two partitions (aka nodes):
+                pivot=self.keys[mid],
             )
 
         def put(self, key: Key, value: Value) -> PutInfo:
@@ -325,19 +329,19 @@ class BPlusTree[Key, Value](AbstractBTree[Key, Value]):
             if (
                 type(put_info) == SplitHappens
             ):  # a split happened in the layer immediately below this node
-                sr: SplitHappens[Key] = cast(SplitHappens[Key], put_info)
+                split_happens: SplitHappens[Key] = cast(SplitHappens[Key], put_info)
                 # check if this node is full:
                 if self.is_full():
-                    pivot_pos = bisect.bisect_left(self.keys, sr.pivot)
+                    pivot_pos = bisect.bisect_left(self.keys, split_happens.pivot)
                     del self.children[
                         pivot_pos
                     ]  # remove old child and replace with the two new children (obtained through split in layer below)
                     # insert the two new children at the correct position:
-                    self.children.insert(pivot_pos, sr.left_node)
-                    self.children.insert(pivot_pos + 1, sr.right_node)
-                    self.keys.insert(
-                        pivot_pos, sr.pivot
-                    )  # now `self.keys` contains one element too many
+                    self.children.insert(pivot_pos, split_happens.left_node)
+                    self.children.insert(pivot_pos + 1, split_happens.right_node)
+                    # insert the pivot: this node now overflows temporarily, as it holds capacity + 1 keys, one more
+                    # than allowed; the split right below replaces it by two new nodes:
+                    self.keys.insert(pivot_pos, split_happens.pivot)
 
                     # split this node:
                     return self.split()
@@ -346,9 +350,9 @@ class BPlusTree[Key, Value](AbstractBTree[Key, Value]):
                 del self.children[
                     pos
                 ]  # remove old child and replace with the two new children (obtained through split in layer below)
-                self.children.insert(pos, sr.left_node)
-                self.children.insert(pos + 1, sr.right_node)
-                self.keys.insert(pos, sr.pivot)
+                self.children.insert(pos, split_happens.left_node)
+                self.children.insert(pos + 1, split_happens.right_node)
+                self.keys.insert(pos, split_happens.pivot)
 
             return NoSplit()
 
@@ -532,7 +536,8 @@ class BPlusTree[Key, Value](AbstractBTree[Key, Value]):
             print(self.values)
 
         def split(self) -> SplitHappens[Key]:
-            """Split-operation for leaf nodes. Splits the keys and values of this Leaf into two Leaves.
+            """Split operation for leaf nodes. This implementation splits the keys and values of this Leaf into two
+            Leaves.
             Note: No re-use of this instance, we are creating two new Leaf instances.
 
             :return: A SplitHappens wrapping the left leaf, the right leaf, and the new pivot.
@@ -541,14 +546,18 @@ class BPlusTree[Key, Value](AbstractBTree[Key, Value]):
             # find middle (aka pivot) element:
             mid: int = len(self.keys) // 2
 
-            # return two new Leaf instances and the pivot key:
+            # return two new Leaf instances and the pivot key,
+            # note: this is in spirit similar to what happens in a partitioning step in quicksort:
             return SplitHappens[Key](
+                # left leaf:
                 left_node=BPlusTree.Leaf(
                     self.capacity, self.keys[:mid], self.values[:mid]
                 ),
+                # right leaf:
                 right_node=BPlusTree.Leaf(
                     self.capacity, self.keys[mid:], self.values[mid:]
                 ),
+                # the pivot (key) separating the two partitions (aka leaves):
                 pivot=self.keys[mid],
             )
 
@@ -572,23 +581,31 @@ class BPlusTree[Key, Value](AbstractBTree[Key, Value]):
 
             if not self.is_full():
                 # leaf was not full _before_ inserting the new key-value pair:
+                assert len(self.keys) < self.capacity
                 self.keys.insert(pos, key)
                 self.values.insert(pos, value)
 
                 return NoSplit()
+
+            # the leaf is full:
+            assert len(self.keys) == self.capacity
+
             # maximum capacity reached (before inserting!): split the leaf
             # variant implemented: first insert allowing for overflow, then split
             # (1.) insert key-value pair at correct position:
             self.keys.insert(pos, key)
             self.values.insert(pos, value)
 
+            # the leaf overflows temporarily: it holds one key more than allowed:
+            assert len(self.keys) == self.capacity + 1
+
             # (2.) split the leaf:
             # call split to create two new leaf nodes:
-            sr: SplitHappens[Key] = self.split()
+            split_happens: SplitHappens[Key] = self.split()
 
             # the split of a leaf returns two leaves:
-            left_leaf: BPlusTree.Leaf = cast(BPlusTree.Leaf, sr.left_node)
-            right_leaf: BPlusTree.Leaf = cast(BPlusTree.Leaf, sr.right_node)
+            left_leaf: BPlusTree.Leaf = cast(BPlusTree.Leaf, split_happens.left_node)
+            right_leaf: BPlusTree.Leaf = cast(BPlusTree.Leaf, split_happens.right_node)
 
             # (3.) redirect leaf pointers for sequential scanning
             # is there a leaf to the left of self?: update its next pointer
@@ -609,7 +626,7 @@ class BPlusTree[Key, Value](AbstractBTree[Key, Value]):
                 self.next.previous = right_leaf
 
             # return the split information up the call stack:
-            return sr
+            return split_happens
 
         def get(self, key: Key) -> Iterator[Value]:
             """Returns the value for the given key if it exists.
@@ -843,9 +860,11 @@ class BPlusTree[Key, Value](AbstractBTree[Key, Value]):
 
         # B+tree only consists of a single leaf node that gets split
         if type(put_info) == SplitHappens:
-            sr: SplitHappens[Key] = cast(SplitHappens[Key], put_info)
+            split_happens: SplitHappens[Key] = cast(SplitHappens[Key], put_info)
             self.root = BPlusTree.Inner(
-                self.inner_capacity, [sr.pivot], [sr.left_node, sr.right_node]
+                self.inner_capacity,
+                [split_happens.pivot],
+                [split_happens.left_node, split_happens.right_node],
             )
 
     def get(self, key: Key) -> Iterator[Value]:
