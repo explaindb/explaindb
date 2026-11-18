@@ -70,6 +70,30 @@ class StorageLayerTest(AbstractUnitTest):
         with self.assertRaises(ValueError):
             sl_DRAM.put("42", "42")
 
+    def test_storage_layer_capacity_must_be_at_least_one(self) -> None:
+        """The constructor rejects a max_capacity below 1, as such a layer could never store anything."""
+
+        # a capacity of 0 is rejected, both with and without a layer below:
+        sl_ssd: StorageLayer[str, str] = StorageLayer[str, str](
+            max_capacity=100, name="SSD"
+        )
+        with self.assertRaisesRegex(ValueError, "max_capacity"):
+            StorageLayer[str, str](max_capacity=0, name="DRAM", layer_below=sl_ssd)
+        with self.assertRaisesRegex(ValueError, "max_capacity"):
+            StorageLayer[str, str](max_capacity=0, name="DRAM")
+
+        # a negative capacity is rejected as well:
+        with self.assertRaisesRegex(ValueError, "max_capacity"):
+            StorageLayer[str, str](max_capacity=-1, name="DRAM")
+
+        # the smallest valid capacity, 1, is enough to store one entry:
+        sl_DRAM: StorageLayer[str, str] = StorageLayer[str, str](
+            max_capacity=1, name="DRAM"
+        )
+        sl_DRAM.put("a", "a")
+        self.assertEqual(sl_DRAM.get("a"), "a")
+        self.assertEqual(sl_DRAM.size(), 1)
+
     def test_storage_layer_prefix_addressing(self):
 
         class PrefixConversion(AddressConversionStrategy[str]):

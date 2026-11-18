@@ -59,12 +59,19 @@ class StorageLayer[Address, StorageUnit](KeyValueStore[Address, StorageUnit]):
     ):
         """Create a new storage layer with the given capacity, name, as well optionally a reference to the layer below.
 
-        @param max_capacity: The maximum number of key-value pairs that can be stored in this layer.
+        @param max_capacity: The maximum number of key-value pairs that can be stored in this layer. Must be at
+            least 1.
         @param name: The name of this storage layer.
         @param layer_below: The storage layer below this one in the hierarchy. Can be None. With an address
             conversion strategy, the layer below stores whole pages, not units of this layer's type.
         @param address_conversion_strategy: A strategy to convert addresses from one address space to another.
+        @raise ValueError: if max_capacity is less than 1.
         """
+        # a layer without a single slot could never store anything:
+        if max_capacity < 1:
+            raise ValueError(
+                f"max_capacity of {name} must be at least 1, got {max_capacity}"
+            )
         super().__init__()
         self.max_capacity: int = max_capacity
         self._name: str = name
