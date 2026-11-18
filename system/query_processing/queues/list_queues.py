@@ -66,10 +66,7 @@ class ListQueue[ObjectType](ReadWriteQueue[ObjectType], Iterator):
         return self.buffer.pop(0)
 
     def size(self) -> int:
-        """Returns the number of elements inserted into this queue so far.
-
-        @return The number of elements inserted into this queue so far.
-        """
+        """See :meth:`WriteQueue.size`."""
         return len(self.buffer)
 
     def close(self) -> None:

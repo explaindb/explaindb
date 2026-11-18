@@ -56,7 +56,7 @@ class QueueTest(unittest.TestCase):
             ListQueueFactory[Person](),
             ExternalQueueFactory[Person](number_of_objects_in_buffer),
         ]:
-            # create a copy of the sorted list:
+            # copy the input list (the check below pops from the copy):
             persons2: list[Person] = copy.deepcopy(persons)
 
             # create a queue:
@@ -84,5 +84,5 @@ class QueueTest(unittest.TestCase):
 
 
 if __name__ == "__main__":
-    # only execute a specific test class
+    # run all tests of this module:
     unittest.main(argv=["ignored", "-v"], verbosity=2, exit=False)

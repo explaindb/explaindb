@@ -34,7 +34,8 @@ class ReadQueue[ObjectType](ABC, Iterator):
 
     @abstractmethod
     def pop(self) -> ObjectType:
-        """Removes and returns the first element of the queue"""
+        """Removes and returns the first element of the queue. A queue that cannot remove elements, such as
+        the disk-backed ExternalQueue, raises :class:`NotImplementedError`."""
 
     @abstractmethod
     def close(self) -> None:
@@ -42,10 +43,11 @@ class ReadQueue[ObjectType](ABC, Iterator):
 
     @abstractmethod
     def set_memory_limit(self, memory_limit: int) -> None:
-        """Sets the memory limit for the queue. This is useful for queues that are disk-based and can use a buffer in
-        memory to speed up access. If the memory limit is set to 0, the queue should not use any memory buffer.
+        """Sets the memory limit for the queue as the number of objects it may keep in memory. This is useful for
+        queues that are disk-based and use a buffer in memory to speed up access; an in-memory queue ignores it.
 
-        @param memory_limit The memory limit in bytes to use for the queue."""
+        @param memory_limit The number of objects the queue may keep in memory; must be greater than 0.
+        """
 
 
 class WriteQueue[ObjectType](ABC):
@@ -68,16 +70,18 @@ class WriteQueue[ObjectType](ABC):
 
     @abstractmethod
     def size(self) -> int:
-        """Returns the number of elements inserted into this queue so far.
+        """Returns the number of elements in this queue: all elements inserted so far, minus those removed
+        with pop().
 
-        @return The number of elements inserted into this queue so far."""
+        @return The number of elements in this queue."""
 
     @abstractmethod
     def set_memory_limit(self, memory_limit: int) -> None:
-        """Sets the memory limit for the queue. This is useful for queues that are disk-based and can use a buffer in
-        memory to speed up access. If the memory limit is set to 0, the queue should not use any memory buffer.
+        """Sets the memory limit for the queue as the number of objects it may keep in memory. This is useful for
+        queues that are disk-based and use a buffer in memory to speed up access; an in-memory queue ignores it.
 
-        @param memory_limit The memory limit in bytes to use for the queue."""
+        @param memory_limit The number of objects the queue may keep in memory; must be greater than 0.
+        """
 
 
 class ReadWriteQueue[ObjectType](ReadQueue[ObjectType], WriteQueue[ObjectType], ABC):
