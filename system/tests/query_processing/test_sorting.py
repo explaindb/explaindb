@@ -158,6 +158,38 @@ class MergeSortingTest(unittest.TestCase):
 
                 self.assertEqual(count, number_of_tuples)
 
+    def test_external_sorting_with_fan_in_plus_one_tuples_in_main_memory(self) -> None:
+        """External merge sort sorts correctly when main memory holds only fan_in + 1 tuples, e.g. three tuples
+        for a fan-in of 2: an intermediate merge of fan_in runs then holds one tuple of each input run and one
+        tuple of its output run in main memory."""
+        number_of_tuples: int = 100
+        persons: list[Person] = self.create_data(number_of_tuples=number_of_tuples)
+
+        for number_of_tuples_in_main_memory, fan_in in [(3, 2), (6, 5)]:
+            queue_factory: QueueFactory[Person]
+            for queue_factory in [
+                ListQueueFactory[Person](),
+                ExternalQueueFactory[Person](number_of_tuples_in_main_memory),
+            ]:
+                with self.subTest(
+                    number_of_tuples_in_main_memory=number_of_tuples_in_main_memory,
+                    fan_in=fan_in,
+                    queue_factory=type(queue_factory).__name__,
+                ):
+                    # sort the persons in runs of number_of_tuples_in_main_memory tuples, then merge at most
+                    # fan_in runs at a time:
+                    ems: ExternalMergeSort[Person] = ExternalMergeSort[Person](
+                        input_data=persons.__iter__(),
+                        queue_factory=queue_factory,
+                        number_of_tuples_in_main_memory=number_of_tuples_in_main_memory,
+                        fan_in=fan_in,
+                    )
+                    ems.create_runs()
+                    ems.merge()
+
+                    # the output holds every person exactly once, in sorted order:
+                    self.assertEqual(list(ems), sorted(persons))
+
 
 if __name__ == "__main__":
     # only execute a specific test class

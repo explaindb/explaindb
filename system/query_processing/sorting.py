@@ -274,7 +274,8 @@ class ExternalMergeSort[ObjectType](Iterator):
 
         @param input_data: The input data to create runs from.
         @param queue_factory: The factory to use to create read and write queues.
-        @param number_of_tuples_in_main_memory: The number of tuples that can be stored in memory.
+        @param number_of_tuples_in_main_memory: The number of tuples that can be stored in memory. Must be at least
+        fan_in + 1, which is one tuple per input run plus one for the output run.
         @param fan_in: The fan-in of the merge sort.
 
         """
@@ -353,7 +354,7 @@ class ExternalMergeSort[ObjectType](Iterator):
             )
 
             # asserts to check memory distribution:
-            assert memory_for_ssm > len(
+            assert memory_for_ssm >= len(
                 next_runs
             ), "memory_for_ssm too low, not even one element per run available"
             assert (
