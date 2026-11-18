@@ -20,7 +20,8 @@ beyond memory, so the algorithm can be written as if everything were in memory.
   (spill-to-disk), `list_queues.py` (in-memory), and `queue_factories.py`.
 - **Interface:** [`system/interfaces/queues.py`](../../../system/interfaces/queues.py).
 - **Tests:** [`system/tests/query_processing/test_sorting.py`](../../../system/tests/query_processing/test_sorting.py),
-  [`system/tests/query_processing/queues/test_queues.py`](../../../system/tests/query_processing/queues/test_queues.py).
+  [`system/tests/query_processing/queues/test_queues.py`](../../../system/tests/query_processing/queues/test_queues.py),
+  [`system/tests/query_processing/queues/test_external_queues.py`](../../../system/tests/query_processing/queues/test_external_queues.py).
 
 ## The idea in one picture
 

@@ -39,7 +39,7 @@ class ExternalQueue[ObjectType](ReadWriteQueue):
         """Initializes the ExternalQueue.
 
         @param memory_limit: The number of objects that can be buffered in memory before the buffer is spilled
-        to the backing file.
+        to the backing file. Reading uses a second buffer that holds up to the same number of objects.
         """
         super().__init__(memory_limit)
 
@@ -47,48 +47,56 @@ class ExternalQueue[ObjectType](ReadWriteQueue):
 
         # open a temporary file:
         self.file = tempfile.NamedTemporaryFile(delete=True)
+
+        # write buffer: inserted elements that are not flushed to the file yet:
         self.buffer = list[ObjectType]()
+
+        # read buffer: elements read back from the file, returned one by one by __next__:
+        self.read_buffer: list[ObjectType] = list[ObjectType]()
         self.element_read_position_in_buffer = 0
+
+        # file positions of the next element to read and of the end of the flushed elements, and the number of
+        # flushed elements:
         self.current_read_seek = 0
         self.current_write_seek = 0
         self.total_flushed_so_far = 0
 
     def reset(self) -> None:
-        """Resets the queue to the initial state."""
-        self.file.seek(0)
-        self.buffer = list[ObjectType]()
+        """See :meth:`ReadWriteQueue.reset`.
+
+        Empties the read buffer and moves the read position to the start of the file. The write buffer and the
+        write position stay as they are, so unflushed elements are kept and the next flush still appends.
+        """
+        self.read_buffer = list[ObjectType]()
         self.element_read_position_in_buffer = 0
         self.current_read_seek = 0
-        self.current_write_seek = 0
-        self.total_flushed_so_far = 0
 
     def __iter__(self):
         """Returns the iterator object. Required to be able to loop over the contents of the queue.
-        Sets the element read position in the buffer to 0 and the current read seek to 0.
+        Rewinds reading to the first element of the queue, see :meth:`reset`.
         """
-        self.element_read_position_in_buffer = 0
-        self.current_read_seek = 0
+        self.reset()
 
         return self
 
     def __next__(self) -> ObjectType:
-        """Returns the next entry from the queue without removing it. In this implementation, the buffer is filled
-        if it is empty and the element read position is beyond the data available in the buffer.
+        """Returns the next entry from the queue without removing it. In this implementation, the read buffer is
+        filled from the file once the element read position is beyond the data available in the read buffer.
         """
-        # element read position beyond the data available in the buffer?
-        if self.element_read_position_in_buffer >= len(self.buffer):
-            # fill the buffer:
+        # element read position beyond the data available in the read buffer?
+        if self.element_read_position_in_buffer >= len(self.read_buffer):
+            # fill the read buffer:
             self._fill_buffer()
 
             # reset the element read position:
             self.element_read_position_in_buffer = 0
 
-            # buffer is empty?
-            if len(self.buffer) == 0:
+            # read buffer is empty?
+            if len(self.read_buffer) == 0:
                 raise StopIteration
 
-        # retrieve the next element from the buffer:
-        element: ObjectType = self.buffer[self.element_read_position_in_buffer]
+        # retrieve the next element from the read buffer:
+        element: ObjectType = self.read_buffer[self.element_read_position_in_buffer]
 
         # increment the element read position:
         self.element_read_position_in_buffer += 1
@@ -113,12 +121,18 @@ class ExternalQueue[ObjectType](ReadWriteQueue):
         self.buffer.append(entry)
 
     def flush(self) -> int:
-        """Flushes the buffer to the file, i.e. writes the contents of the buffer to the file and empty the buffer."""
+        """See :meth:`WriteQueue.flush`.
+
+        Appends the write buffer to the file after the elements flushed before, then empties the write buffer.
+        """
 
         if len(self.buffer) == 0:
             return 0
 
         elements_written: int = len(self.buffer)
+
+        # move to the end of the flushed elements, as a read may have moved the file position:
+        self.file.seek(self.current_write_seek)
 
         # write contents of the buffer to the file:
         for element in self.buffer:
@@ -126,6 +140,8 @@ class ExternalQueue[ObjectType](ReadWriteQueue):
             # nosemgrep: python.lang.security.deserialization.pickle.avoid-pickle
             pickle.dump(element, self.file)
 
+        # the next flush continues where this one stopped:
+        self.current_write_seek = self.file.tell()
         self.total_flushed_so_far += elements_written
 
         # empty the buffer by initializing it with an empty list:
@@ -134,14 +150,18 @@ class ExternalQueue[ObjectType](ReadWriteQueue):
         return elements_written
 
     def _fill_buffer(self) -> int:
-        """Fills the buffer if empty. Discards the previous contents of the buffer.
+        """Flushes the write buffer, so that the file holds all elements in insertion order, then replaces the
+        contents of the read buffer with the next elements from the file, at most memory_limit many.
 
-        @return The number of objects read from the file for this call to fill_buffer()
+        @return The number of objects read from the file for this call to _fill_buffer()
         """
-        # empty the buffer:
-        self.buffer = list[ObjectType]()
+        # flush the write buffer, so that reads also return the elements that were not flushed yet:
+        self.flush()
 
-        # read the contents of the file into the buffer:
+        # empty the read buffer:
+        self.read_buffer = list[ObjectType]()
+
+        # read the contents of the file into the read buffer:
         self.file.seek(self.current_read_seek)
         item_count = 0
         while item_count < self.memory_limit:
@@ -149,7 +169,7 @@ class ExternalQueue[ObjectType](ReadWriteQueue):
                 # the file holds only what this queue wrote (see flush):
                 # nosemgrep: python.lang.security.deserialization.pickle.avoid-pickle
                 item: ObjectType = pickle.load(self.file)
-                self.buffer.append(item)
+                self.read_buffer.append(item)
                 item_count += 1
             except EOFError:
                 break
@@ -158,7 +178,7 @@ class ExternalQueue[ObjectType](ReadWriteQueue):
         self.current_read_seek = self.file.tell()
 
         # return the number of objects read:
-        return len(self.buffer)
+        return len(self.read_buffer)
 
     def close(self) -> None:
         """Closes the temporary file backing the queue. This will also delete that file."""

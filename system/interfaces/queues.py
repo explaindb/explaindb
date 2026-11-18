@@ -92,7 +92,12 @@ class ReadWriteQueue[ObjectType](ReadQueue[ObjectType], WriteQueue[ObjectType], 
         self.memory_limit: int = memory_limit
 
     def reset(self) -> None:
-        """Resets the queue to the initial state."""
+        """Rewinds reading: after this call, the next call of next() and every new iteration start again at the
+        first element of the queue. The contents of the queue and :meth:`size` stay unchanged; elements inserted
+        but not flushed yet are kept.
+
+        The default implementation does nothing; it suits queues whose reads keep no position of their own.
+        """
 
     def set_memory_limit(self, memory_limit: int) -> None:
         """See :meth:`WriteQueue.set_memory_limit`."""
