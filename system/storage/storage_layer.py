@@ -121,14 +121,14 @@ class StorageLayer[Address, StorageUnit](KeyValueStore[Address, StorageUnit]):
         """See :meth:`Index.put`.
 
         Overwrites any previous mapping for the given key; the value is stored
-        without copying. If this layer is at capacity, it first evicts one entry
-        (see :meth:`evict`), even if the key is already stored here; a failed
-        eviction raises ``ValueError``. With an address conversion strategy,
-        evicted entries are dropped, so values put into this layer are lost on
-        eviction.
+        without copying. If the key is not stored here yet and this layer is at
+        capacity, it first evicts one entry (see :meth:`evict`); a failed
+        eviction raises ``ValueError``. Overwriting a key already stored here
+        never evicts. With an address conversion strategy, evicted entries are
+        dropped, so values put into this layer are lost on eviction.
         """
 
-        if self.size() >= self.max_capacity:
+        if address not in self.storage and self.size() >= self.max_capacity:
             # evict some data to the layer below to make room for the new mapping:
             elements_evicted: int = self.evict()
             if elements_evicted == 0:

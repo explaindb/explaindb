@@ -172,3 +172,64 @@ class StorageLayerTest(AbstractUnitTest):
         # ... so it is still served after the SSD entry is removed.
         sl_ssd.delete("2")
         self.assertEqual(sl_DRAM.get("21"), "9")
+
+    def test_storage_layer_overwrite_in_full_layer_does_not_evict(self) -> None:
+        """Overwriting a stored key in a full layer keeps all its entries and evicts nothing to the layer below."""
+
+        # a full DRAM layer with three entries above an empty SSD:
+        sl_ssd: StorageLayer[str, str] = StorageLayer[str, str](
+            max_capacity=100, name="SSD"
+        )
+        sl_DRAM: StorageLayer[str, str] = StorageLayer[str, str](
+            max_capacity=3, name="DRAM", layer_below=sl_ssd
+        )
+        for key in ["0", "1", "2"]:
+            sl_DRAM.put(key, key)
+
+        # overwrite "1": DRAM still holds all three keys, and nothing reaches the SSD:
+        sl_DRAM.put("1", "one")
+        self.assertListEqual(list(sl_DRAM.storage.keys()), ["0", "1", "2"])
+        self.assertEqual(sl_DRAM.get("1"), "one")
+        self.assertEqual(sl_ssd.size(), 0)
+
+        # overwrite "2", the largest key and hence the eviction candidate: again nothing is evicted:
+        sl_DRAM.put("2", "two")
+        self.assertListEqual(list(sl_DRAM.storage.keys()), ["0", "1", "2"])
+        self.assertEqual(sl_DRAM.get("2"), "two")
+        self.assertEqual(sl_ssd.size(), 0)
+
+    def test_storage_layer_overwrite_in_full_layer_without_layer_below(self) -> None:
+        """Overwriting a key in a full layer without a layer below succeeds, as no room has to be made."""
+
+        # a full single layer with two entries:
+        sl_DRAM: StorageLayer[str, str] = StorageLayer[str, str](
+            max_capacity=2, name="DRAM"
+        )
+        sl_DRAM.put("a", "a")
+        sl_DRAM.put("b", "b")
+
+        # overwrite "a": the new value is stored and the layer keeps both entries:
+        sl_DRAM.put("a", "A")
+        self.assertEqual(sl_DRAM.get("a"), "A")
+        self.assertEqual(sl_DRAM.size(), 2)
+
+    def test_storage_layer_overwrite_of_fixed_eviction_candidate(self) -> None:
+        """Overwriting a fixed key in a full layer succeeds even though that key is the eviction candidate."""
+
+        # a full DRAM layer with two entries above an empty SSD:
+        sl_ssd: StorageLayer[str, str] = StorageLayer[str, str](
+            max_capacity=100, name="SSD"
+        )
+        sl_DRAM: StorageLayer[str, str] = StorageLayer[str, str](
+            max_capacity=2, name="DRAM", layer_below=sl_ssd
+        )
+        sl_DRAM.put("a", "a")
+        sl_DRAM.put("b", "b")
+
+        # fix "b", the largest key and hence the eviction candidate:
+        sl_DRAM.fix("b")
+
+        # overwrite "b": the new value is stored in DRAM, and nothing reaches the SSD:
+        sl_DRAM.put("b", "B")
+        self.assertEqual(sl_DRAM.get("b"), "B")
+        self.assertEqual(sl_ssd.size(), 0)
