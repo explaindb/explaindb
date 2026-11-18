@@ -116,3 +116,23 @@ because the graphics card places a mesh thousands of kilometres long only to abo
 renderer does not show this, so the split follows the page's rule for giant geometry near the camera instead: a short
 piece near the camera (`CABLE_NEAR`), as the shaft's walls and guides are split into pieces growing tenfold from both
 ends (`tenfoldPieces`).
+
+Voice (2026-11-17, stacked on the page's merge request): the page speaks its narration with the voice of the other
+pages (Ming-3.0-tts, UK_George; decision 034), its code taken over from the B-tree page. Numbers and abbreviations are
+written out for the voice (e.g. "ell one" for L1 at the start of a clip, where "L" alone was swallowed). The scenes
+where the voice speaks are longer so that every clip plays at its own pace (at most 3 % faster): the film runs 3:53
+instead of 3:12 (4:00 after the reviews below). Every take was checked with the speech recogniser and for gaps (no
+pause longer than 0.72 s inside a clip, all at the end of a sentence or after a comma).
+
+After the user's notes on the voiced page (2026-11-18): what the voice names lights up while it is said (a green frame
+round the register tray, the cache line's crate, the crate the robot pulls in, the register, the page's pallet, a ring
+round the platter; the stopwatch outlined), with the clips' word times; in the sizes view the factors appear on the
+right of the shaft as the voice says them, and the view widens to main memory's whole block. The badge reads "time
+lapse"; the L1 caption says that one value of 8 bytes goes into the register. Two drawing faults seen in Firefox on an
+M1 are mended without a test, as the tests' renderer does not show them: the platter's face has a hole round the head
+(its 124 km long triangles showed through the crates drawn there), and the blocks' signs stand in front of a block by a
+ten-thousandth of its width (on the SSD's block, kilometres wide, 3 cm flickered).
+
+Second round of notes (2026-11-18): the captions of the levels say that their time is a round trip (the access time,
+down and back up), as do the depth signs; the card at the end lists every level's round trip (cycles, real and human
+time) and stays 8 s; the badge's text is larger, and the page measures its width from its longest text.

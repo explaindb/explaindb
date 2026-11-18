@@ -110,14 +110,27 @@ YANNAKAKIS_PAGE: Path = PAGES_DIR / "yannakakis.html"
 # the storage hierarchy as a mine shaft under the House DBMS, its depth strictly to scale with the access times
 # (decision 045):
 STORAGE_HIERARCHY_PAGE: Path = PAGES_DIR / "storage-hierarchy.html"
-# the pages that speak their narration (the B-tree page, B_TREE_PAGE, with the same voice, decision 040); each must
-# keep its sound button:
+# the pages that speak their narration (the B-tree page, B_TREE_PAGE, and the storage hierarchy page,
+# STORAGE_HIERARCHY_PAGE, with the same voice, decisions 040 and 045); each must keep its sound button:
 PAGES_WITH_SOUND: frozenset[Path] = frozenset(
-    {CLOCK_SCAN_PAGE, ROW_OR_COLUMN_PAGE, HOUSE_DBMS_PAGE, YANNAKAKIS_PAGE, B_TREE_PAGE}
+    {
+        CLOCK_SCAN_PAGE,
+        ROW_OR_COLUMN_PAGE,
+        HOUSE_DBMS_PAGE,
+        YANNAKAKIS_PAGE,
+        B_TREE_PAGE,
+        STORAGE_HIERARCHY_PAGE,
+    }
 )
 # the pages with sound whose film has parts, with a button (chapter-1, ...) that jumps to the start of each:
 PAGES_WITH_PARTS: frozenset[Path] = frozenset(
-    {CLOCK_SCAN_PAGE, HOUSE_DBMS_PAGE, YANNAKAKIS_PAGE, B_TREE_PAGE}
+    {
+        CLOCK_SCAN_PAGE,
+        HOUSE_DBMS_PAGE,
+        YANNAKAKIS_PAGE,
+        B_TREE_PAGE,
+        STORAGE_HIERARCHY_PAGE,
+    }
 )
 
 # Next is clicked at most this often on the way from the start of a page to its end:
@@ -3131,10 +3144,12 @@ class StorageHierarchyPageTest(_PageTestCase):
     # the steps of the short unloading back at the floor after L2, L3 and DRAM, in their order: the robot takes the
     # value out of the crate, puts it in (the value flies across into the register), and it is stored:
     SHORT_UNLOAD_STEPS: list[str] = ["take", "put", "stored"]
+    # L1's pickup: the robot loads its crate slowly, once, while the voice tells it (s of film):
+    LOAD_L1: float = 14.3
     # after L1, the unloading takes this many seconds of film, then the robot stands still this many more, while the
     # text says that only the value goes into a register and the crate stays in L1:
     UNLOAD_L1: float = 6.5
-    STILL_AFTER_L1: float = 3
+    STILL_AFTER_L1: float = 5.3
 
     class StopwatchBoxes(TypedDict):
         """Where the stopwatch's fields and labels are at one moment, and what the fields show (see
@@ -3285,15 +3300,48 @@ class StorageHierarchyPageTest(_PageTestCase):
     def stages_between(
         self, start: float, end: float, step: float
     ) -> list[dict[str, str]]:
-        """Moves the shared page from start to end in steps (see stage_at, any phase) and reads the stage each time.
+        """Moves the shared page from start to end in steps with the slider, as stage_at does (any phase), and reads
+        the stage each time; all in one call into the page, which shows a time at once when the slider moves, and
+        with ``data-sampling`` on the stage, which tells the page not to draw the picture meanwhile (one call per
+        step, each drawn, took several minutes of a CI job for the class's sweeps). Asserts that the stage shows each
+        time (its data-t, with three decimals).
 
         @param start: the first time of the film
         @param end: the last time (included when a step lands on it)
         @param step: the time between two readings
-        @return: the stage's attributes at each time, in order
+        @return: the stage's attributes at each time (without ``data-``, e.g. ``human-s``), in order
         """
         count: int = int((end - start) / step + 1e-9) + 1
-        return [self.stage_at(start + k * step, None)[1] for k in range(count)]
+        times: list[float] = [start + k * step for k in range(count)]
+        page: Page = self.opened.page
+        stage = page.get_by_test_id("stage")
+
+        # the stage has its attributes (as read_stage waits for), then each time in turn, read at once:
+        expect(stage).to_have_attribute(
+            "data-phase", re.compile(".+"), timeout=FILM_TIMEOUT
+        )
+        stages: list[dict[str, str]] = page.get_by_test_id("scrub").evaluate(
+            """(scrub, [times, stage]) => {
+                const duration = Number(stage.dataset.duration);
+                scrub.step = 'any';
+                stage.dataset.sampling = ''; // (the page then computes each time without drawing it)
+                try {
+                    return times.map((seconds) => {
+                        scrub.value = String(seconds / duration * Number(scrub.max));
+                        scrub.dispatchEvent(new Event('input'));
+                        return Object.fromEntries([...stage.attributes]
+                            .filter((a) => a.name.startsWith('data-') && a.name !== 'data-sampling')
+                            .map((a) => [a.name.slice('data-'.length), a.value]));
+                    });
+                } finally {
+                    delete stage.dataset.sampling;
+                }
+            }""",
+            [times, stage.element_handle()],
+        )
+        for seconds, shown in zip(times, stages):
+            self.assertAlmostEqual(seconds, float(shown["t"]), delta=1e-3)
+        return stages
 
     def assert_close(self, expected: float, actual: float, what: str) -> None:
         """Asserts that actual equals expected up to rounding: a relative difference of at most 1e-12."""
@@ -3501,10 +3549,11 @@ class StorageHierarchyPageTest(_PageTestCase):
         self,
     ) -> None:
         """Just after the cage leaves the hard disk, where the fast-forward factor has its most digits, the badge says
-        that the film runs fast while the cage keeps its speed, and its whole text fits into the badge.
+        that the film runs as a time lapse while the cage keeps its speed, and its whole text fits into the badge; so
+        does the longer text while the cage stands at the hard disk ("arrived · the stopwatch stands still").
 
-        Fails if the badge leaves out that the cage keeps 1.6 km/h, or if it is too narrow for its longest text and
-        cuts the end off (e.g. "1.6 km" without "/h").
+        Fails if the badge leaves out that the film is a time lapse or that the cage keeps 1.6 km/h, or if it is too
+        narrow for its longest text and cuts the end off (e.g. "1.6 km" without "/h", or "still" as "stil").
         """
         _, levels = self.read_levels()
         opened, stage = self.stage_at(
@@ -3514,8 +3563,9 @@ class StorageHierarchyPageTest(_PageTestCase):
 
         # at the Earth's centre, the factor has eight digits (up to 14,250,000):
         self.assertGreater(float(stage["factor"]), 10_000_000)
+        expect(badge).to_contain_text("time lapse ×")
         expect(opened.page.get_by_test_id("ff-label")).to_have_text(
-            "film fast-forward · the cage keeps 1.6 km/h"
+            "the cage keeps 1.6 km/h"
         )
 
         # nothing is cut off: the text is no wider than the badge:
@@ -3523,22 +3573,30 @@ class StorageHierarchyPageTest(_PageTestCase):
             "(badge) => [badge.scrollWidth, badge.clientWidth]"
         )
         self.assertLessEqual(widths[0], widths[1], "the badge cuts its text off")
-        self.assert_no_new_errors()
+
+        # nor at the hard disk itself, with the longer label of an arrival and the same factor:
+        self.stage_at(float(levels["HARD DISK"]["pickup-from"]) + 1, "pickup")
+        expect(opened.page.get_by_test_id("ff-label")).to_have_text(
+            "arrived · the stopwatch stands still"
+        )
+        widths = badge.evaluate("(badge) => [badge.scrollWidth, badge.clientWidth]")
+        self.assertLessEqual(widths[0], widths[1], "the badge cuts its text off")
 
     def test_at_l1_the_robot_pulls_a_crate_into_the_cage_while_the_stopwatch_stands_still(
         self,
     ) -> None:
-        """While the cage stands at L1 (7 s of film: the loading is shown slowly once), the robot loads a crate step by
-        step in the order of ``LOAD_STEPS``: it walks to the cage's open side, reaches into the rack and pulls a crate
-        straight across into the cage, the crate passing the places of ``CRATE_PLACES`` in order: out of the rack,
-        across the gap, into the cage. While it pulls and holds the crate, its hands, as its arms point, are on the
-        crate's grip (at most 2 cm away along the pull). On the way down the cage has no crate yet; it rides up loaded,
-        the crate in the cage. All the while, the robot stands on the cage's floor, and the stopwatch stands at half
-        L1's access time (4 cycles × 0.5 s / 2 = 1.0 s). The pickup is read every 0.1 s, so that each step is seen.
+        """While the cage stands at L1 (``LOAD_L1`` s of film: the loading is shown slowly once), the robot loads a crate
+        step by step in the order of ``LOAD_STEPS``: it walks to the cage's open side, reaches into the rack and pulls
+        a crate straight across into the cage, the crate passing the places of ``CRATE_PLACES`` in order: out of the
+        rack, across the gap, into the cage. While it pulls and holds the crate, its hands, as its arms point, are on
+        the crate's grip (at most 2 cm away along the pull). On the way down the cage has no crate yet; it rides up
+        loaded, the crate in the cage. All the while, the robot stands on the cage's floor, and the stopwatch stands at
+        half L1's access time (4 cycles × 0.5 s / 2 = 1.0 s). The pickup is read every 0.1 s, so that each step is
+        seen.
 
-        Fails if the cage carries a crate on the way down, if L1's pickup is not 7 s long, if a step or a place of the
-        crate is unknown, missing, comes twice or out of order, if the crate is not in the cage by the end of the pickup
-        or when the cage rides up, if the crate moves away from the robot's hands while it pulls or holds it, if the
+        Fails if the cage carries a crate on the way down, if L1's pickup is not ``LOAD_L1`` s long, if a step or a
+        place of the crate is unknown, missing, comes twice or out of order, if the crate is not in the cage by the end
+        of the pickup or when the cage rides up, if the crate moves away from the robot's hands while it pulls or holds it, if the
         robot floats above or sinks into the cage's floor, or if the stopwatch runs on during the loading.
         """
         _, levels = self.read_levels()
@@ -3552,8 +3610,8 @@ class StorageHierarchyPageTest(_PageTestCase):
         self.assertEqual("", stage["crate"])
         self.assertAlmostEqual(0.0, float(stage["robot-floor"]), delta=1e-9)
 
-        # L1's pickup lasts 7 s of film:
-        self.assert_close(7, up_from - pickup_from, "L1's pickup")
+        # L1's pickup lasts LOAD_L1 s of film:
+        self.assert_close(self.LOAD_L1, up_from - pickup_from, "L1's pickup")
 
         # every 0.1 s of the pickup: a known step, a known place of the crate, the robot's hands on the grip while it
         # pulls and holds the crate, the robot on the cage's floor, and the stopwatch standing at the way down:
@@ -4128,9 +4186,11 @@ class StorageHierarchyPageTest(_PageTestCase):
 
         # out once, then only in (1 % slack for rounding):
         ride: list[tuple[float, float]] = []  # (time, picture's half height)
-        for step in range(1, int((back_from - up_from) * 4)):
-            opened, stage = self.stage_at(up_from + step / 4, "up")
-            ride.append((up_from + step / 4, float(stage["view-h"])))
+        for stage in self.stages_between(
+            up_from + 0.25, up_from + (int((back_from - up_from) * 4) - 1) / 4, 0.25
+        ):
+            self.assertEqual("up", stage["phase"], stage["t"])
+            ride.append((float(stage["t"]), float(stage["view-h"])))
         top: int = max(range(len(ride)), key=lambda i: ride[i][1])
         for (t0, h0), (t1, h1) in zip(ride[:top], ride[1 : top + 1]):
             self.assertGreaterEqual(
@@ -4148,10 +4208,9 @@ class StorageHierarchyPageTest(_PageTestCase):
         # every second from 3 s after leaving until home: never out, and in by at most eight times a second:
         heights: list[tuple[float, float]] = []  # (time, picture's half height)
         seconds: float = up_from + 3
-        while seconds < back_from:
-            opened, stage = self.stage_at(seconds, "up")
-            heights.append((seconds, float(stage["view-h"])))
-            seconds += 1
+        for stage in self.stages_between(seconds, back_from - 1e-6, 1):
+            self.assertEqual("up", stage["phase"], stage["t"])
+            heights.append((float(stage["t"]), float(stage["view-h"])))
         for (t0, h0), (t1, h1) in zip(heights, heights[1:]):
             self.assertLessEqual(
                 h1,
@@ -4189,23 +4248,21 @@ class StorageHierarchyPageTest(_PageTestCase):
 
         # the moment the half height gets lower than 100 km, to a tenth of a second, before the cage is home:
         seconds: float = up_from + 3
-        while seconds < back_from:
-            opened, stage = self.stage_at(seconds, "up")
+        for stage in self.stages_between(seconds, back_from - 1e-6, 0.1):
+            self.assertEqual("up", stage["phase"], stage["t"])
+            seconds = float(stage["t"])
             if float(stage["view-h"]) < 1e5:
                 break
-            seconds += 0.1
+        else:
+            seconds = back_from
         self.assertLess(seconds, back_from, "the picture never gets lower than 100 km")
 
         # every 0.2 s around that moment: the time, the half height, the detail:
         seen: list[tuple[float, float, float]] = []  # (time, half height, detail)
-        for step in range(-12, 13):
-            opened, stage = self.stage_at(seconds + step * 0.2, "up")
+        for stage in self.stages_between(seconds - 2.4, seconds + 2.4 + 1e-6, 0.2):
+            self.assertEqual("up", stage["phase"], stage["t"])
             seen.append(
-                (
-                    seconds + step * 0.2,
-                    float(stage["view-h"]),
-                    float(stage["near-detail"]),
-                )
+                (float(stage["t"]), float(stage["view-h"]), float(stage["near-detail"]))
             )
 
         # none at 100 km and more, all at 30 km and less, and both sides are sampled:
@@ -4779,6 +4836,98 @@ class StorageHierarchyPageTest(_PageTestCase):
         finally:
             # the page's clock runs again:
             page.evaluate("() => { performance.now = window.__now; }")
+
+    def test_what_the_voice_names_lights_up_while_it_says_it(self) -> None:
+        """Every half second from the film's start to the ride down to L1, and through the sizes view after main memory,
+        the stage names what is lit because the voice names it (``data-highlight``, separated by ``|``): the register tray only in step 2
+        (the core and its registers), the crate of the cache line only in step 3 (a crate is a cache line); in step 8
+        (the faster, the smaller), the factors appear one after the other, as the voice says them (L2 ×64, then L3
+        ×768, then DRAM ×699,051), each staying once it is there, and only in that step (``data-scene``).
+
+        Fails if something lights up in another step than the one whose words name it, never lights up, or if a factor
+        comes out of order or goes again.
+        """
+        _, levels = self.read_levels()
+
+        def lit_by_step(start: float, end: float) -> list[tuple[str, set[str]]]:
+            """Returns, every half second from start to end, the step's number and what is lit then."""
+            return [
+                (stage["scene"], set(filter(None, stage["highlight"].split("|"))))
+                for stage in self.stages_between(start, end, 0.5)
+            ]
+
+        # from the start to the ride down to L1: the registers and the cache line, each in its own step:
+        early = lit_by_step(0, float(levels["L1"]["down-from"]))
+        for name, step in (("registers", "2"), ("cache line", "3")):
+            steps: set[str] = {scene for scene, lit in early if name in lit}
+            self.assertEqual({step}, steps, f"{name} lit in steps {steps}")
+
+        # through the sizes view: the factors one after the other, each staying, only in step 8:
+        sizes = lit_by_step(
+            float(levels["DRAM"]["back-from"]), float(levels["NVMe SSD"]["down-from"])
+        )
+        factors: list[str] = ["L2 ×64", "L3 ×768", "DRAM ×699,051"]
+        shown_so_far: list[list[str]] = [
+            [name for name in factors if name in lit] for _, lit in sizes
+        ]
+        for (scene, _), names in zip(sizes, shown_so_far):
+            if names:
+                self.assertEqual("8", scene, f"factors {names} in step {scene}")
+        counts: list[int] = [len(names) for names in shown_so_far if names]
+        self.assertEqual([1, 2, 3], sorted(set(counts)), f"{shown_so_far}")
+        for names in shown_so_far:
+            self.assertEqual(factors[: len(names)], names, "a factor out of order")
+        self.assertEqual(sorted(counts), counts, "a factor goes again")
+
+    def test_the_card_at_the_end_lists_every_round_trip(self) -> None:
+        """At the end, the card lists the round trip of the registers and of every level (``round-trips``, a row
+        ``trip-<level>`` each, in order from the registers to the hard disk): its cycles with thousands separators,
+        the real time as the stopwatch writes it, and the human time of the slides (``HUMAN_TEXTS``, the registers half
+        a second).
+
+        Fails if a level is missing or out of order, or if a row gives other cycles or another human time than the
+        slides.
+        """
+        # half a second before the film's end, with the card shown:
+        self.read_levels()
+        duration: float = float(
+            self.opened.page.get_by_test_id("stage").get_attribute("data-duration")
+            or ""
+        )
+        opened, _ = self.stage_at(duration - 0.5, None)
+        rows = opened.page.get_by_test_id("round-trips").locator("tbody tr")
+
+        # one row per level, in order, with its cycles and its human time:
+        expected: list[tuple[str, int, str]] = [("registers", 1, "0.5 s")] + [
+            (key, cycles, self.HUMAN_TEXTS[key])
+            for key, (cycles, _) in self.SLIDES.items()
+        ]
+        expect(rows).to_have_count(len(expected))
+        test_ids: list[str] = rows.evaluate_all(
+            "(rows) => rows.map((r) => r.dataset.testid)"
+        )
+        self.assertEqual(
+            [
+                "trip-registers",
+                "trip-l1",
+                "trip-l2",
+                "trip-l3",
+                "trip-main-memory",
+                "trip-nvme-ssd",
+                "trip-hard-disk",
+            ],
+            test_ids,
+        )
+        cells: list[list[str]] = rows.evaluate_all(
+            "(rows) => rows.map((r) => [...r.cells].map((c) => c.textContent))"
+        )
+        for (key, cycles, human), (_, shown_cycles, real, shown_human) in zip(
+            expected, cells
+        ):
+            with self.subTest(level=key):
+                self.assertEqual(f"{cycles:,}", shown_cycles)
+                self.assertEqual(human, shown_human)
+                self.assertRegex(real, r"^\d+(\.\d+)? (ns|µs|ms)$")
 
 
 @unittest.skipUnless(PLAYWRIGHT_AVAILABLE, SKIP_REASON)

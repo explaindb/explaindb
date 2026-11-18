@@ -149,7 +149,8 @@ disk at the Earth's centre. A cage rides down at one constant speed; a stopwatch
 the time in a human scale (one cycle is half a second), while the film fast-forwards with the depth. A crate is one
 cache line, eight values side by side: at each level the robot pulls one into the cage, on its way up a copy stays in
 every faster level, and back at the floor the robot puts the value into a register. An SSD or a hard disk delivers a
-page of 64 crates; the hard disk is a platter that turns, the Earth cut open to show it (in 3D, with three.js).
+page of 64 crates; the hard disk is a platter that turns, the Earth cut open to show it (in 3D, with three.js; a
+synthetic voice speaks the narration once the sound is switched on).
 
 ## Notebooks
 
@@ -283,7 +284,7 @@ The pages `visualizations/row-or-column.html`, `visualizations/call-through-dbms
 `visualizations/clock-scan.html`, `visualizations/yannakakis.html`, `visualizations/b-tree.html` and
 `visualizations/storage-hierarchy.html` also embed third-party code and fonts under their own licenses: three.js (MIT
 License) and the fonts Archivo and JetBrains Mono (SIL Open Font License 1.1). Each page gives their copyright and
-license notices. The first five pages also embed a synthetic voice, spoken with the model Ming-3.0-tts (MIT License,
+license notices. All six pages also embed a synthetic voice, spoken with the model Ming-3.0-tts (MIT License,
 voice UK_George); each page names it. `visualizations/storage-hierarchy.html` also embeds map data from Natural Earth
 (public domain).
 
