@@ -39,7 +39,9 @@ class AddressConversionStrategy[Address](ABC):
         @param address: The address as seen by this storage layer.
         @return: A pair (layer_below_address, offset): the first element is the
             address to look up in the layer below (e.g. a page id); the second is
-            the offset used to index into the fetched storage unit in this layer.
+            the offset of the wanted sub-unit inside the fetched page. The offset
+            must be accepted by ``int()``, and the page fetched from the layer
+            below must support ``page[int(offset)]``.
         """
         raise NotImplementedError
 
@@ -59,7 +61,8 @@ class StorageLayer[Address, StorageUnit](KeyValueStore[Address, StorageUnit]):
 
         @param max_capacity: The maximum number of key-value pairs that can be stored in this layer.
         @param name: The name of this storage layer.
-        @param layer_below: The storage layer below this one in the hierarchy. Can be None.
+        @param layer_below: The storage layer below this one in the hierarchy. Can be None. With an address
+            conversion strategy, the layer below stores whole pages, not units of this layer's type.
         @param address_conversion_strategy: A strategy to convert addresses from one address space to another.
         """
         super().__init__()
@@ -78,10 +81,13 @@ class StorageLayer[Address, StorageUnit](KeyValueStore[Address, StorageUnit]):
         """See :meth:`PointQueryMixIn.get`.
 
         Storage-hierarchy variant: returns the single stored unit for the
-        address rather than an iterator. On a miss in this layer, the address is
-        looked up in the layer below (after optional address conversion) and the
-        result is cached in this layer. Raises ``KeyError`` if there is no layer
-        below to satisfy the miss.
+        address rather than an iterator. On a miss in this layer, the unit is
+        fetched from the layer below; with an address conversion strategy, the
+        page for the address prefix is fetched and only ``page[int(offset)]`` is
+        kept. A deep copy is stored in this layer via :meth:`put`, which may
+        evict another entry or raise ``ValueError``. Raises ``KeyError`` if the
+        lookup misses in every layer down to the bottom one; with an address
+        conversion strategy, the layer below is asked for the page address.
         """
 
         # do we have this address in the storage of this storage layer?
@@ -114,9 +120,12 @@ class StorageLayer[Address, StorageUnit](KeyValueStore[Address, StorageUnit]):
     def put(self, address: Address, storage_unit: StorageUnit):
         """See :meth:`Index.put`.
 
-        Overwrites any previous mapping for the given key. If this layer is at
-        capacity, it first evicts an entry to the layer below to make room; a
-        failed eviction raises ``ValueError``.
+        Overwrites any previous mapping for the given key; the value is stored
+        without copying. If this layer is at capacity, it first evicts one entry
+        (see :meth:`evict`), even if the key is already stored here; a failed
+        eviction raises ``ValueError``. With an address conversion strategy,
+        evicted entries are dropped, so values put into this layer are lost on
+        eviction.
         """
 
         if self.size() >= self.max_capacity:
@@ -130,30 +139,39 @@ class StorageLayer[Address, StorageUnit](KeyValueStore[Address, StorageUnit]):
         self.storage[address] = storage_unit
 
     def fix(self, address: Address):
-        """Fix the key-value pair in this storage layer, i.e. this mapping may not be evicted anymore"""
+        """Fix the key in this storage layer, i.e. this mapping is never evicted. If the key that
+        :meth:`choose_eviction_candidate` picks is fixed, eviction raises ``ValueError`` instead of picking
+        another key. The key need not be stored here, and :meth:`delete` does not unfix it.
+        """
 
         self.fixed.add(address)
 
     def unfix(self, address: Address):
-        """Unfixes the key-value pair in this storage layer, i.e. this mapping may again be evicted"""
+        """Unfixes the key in this storage layer, i.e. this mapping may again be evicted. Raises
+        ``KeyError`` if the key is not fixed."""
 
         self.fixed.remove(address)
 
     def choose_eviction_candidate(self) -> Address:
-        """Choose a key to evict from this storage layer. This implementation chooses a random key to evict
-        (which is stupid and just done here for educational purposes: a real implementation would have a more
-        sophisticated eviction policy like LRU, LFU, etc.).
+        """Choose a key to evict from this storage layer. This implementation always picks the largest key, so
+        that tests are deterministic (which is stupid and just done here for educational purposes: a real
+        implementation would have a more sophisticated eviction policy like LRU, LFU, etc.). Fixed keys are not
+        skipped.
         """
         # TODO: implement a real eviction policy here
         # TODO: refactor to use strategy pattern
         return max(self.storage.keys())  # max key to have stability in tests
 
     def evict(self) -> int:
-        """Evict some data from this storage layer to the layer below to make room for new data.
+        """Evict the entry chosen by :meth:`choose_eviction_candidate` to make room for new data. Without an
+        address conversion strategy, the entry is written to the layer below; with one, it is only dropped
+        here, as the layer below holds the whole page.
 
-        @return: The number of key-value pairs evicted from this storage layer.
+        @return: 1 if an entry was evicted, 0 if there is no layer below (nothing is evicted then).
+        @raise ValueError: if the chosen key is fixed, if this layer is empty, or if writing the entry to the
+            layer below fails (the entry then stays in this layer).
         """
-        # if we have a layer below, evict some data to it:
+        # evict only if there is a layer below:
         if self.layer_below is not None:
             # evict a key:
             key_to_evict: Address = self.choose_eviction_candidate()

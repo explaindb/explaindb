@@ -16,17 +16,18 @@ layer caches individual sub-units of the pages held below it.
 - **Implementation:** [`system/storage/storage_layer.py`](../../../system/storage/storage_layer.py) —
   `StorageLayer` (get/put, capacity, `fix`/eviction) and `AddressConversionStrategy` for prefix
   addressing.
-- **Interface:** [`system/interfaces/stores.py`](../../../system/interfaces/stores.py) and the key/value
-  contract in [`system/interfaces/indexing/Index.py`](../../../system/interfaces/indexing/Index.py).
+- **Interface:** the key/value contract `KeyValueStore` in
+  [`system/interfaces/indexing/Index.py`](../../../system/interfaces/indexing/Index.py).
 - **Tests:** [`system/tests/storage/test_storage.py`](../../../system/tests/storage/test_storage.py) — including the
   prefix-addressing and eviction behaviour.
 
 ## The idea in one picture
 
 ```
-   DRAM [fast, small] ── miss ──► SSD [slow, large, authoritative]
+   DRAM [fast, small] ── miss ──► SSD [slow, large]
       ▲                              │
-      └──── cache the fetched unit ──┘        evict when full (just drop locally)
+      └──── cache the fetched unit ──┘        evict when full: write back to the SSD
+                                              (just drop locally under prefix addressing)
    prefix address "21" = page 2, offset 1 ──► fetch SSD page 2, cache offset 1 in DRAM
 ```
 

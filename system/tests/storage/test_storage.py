@@ -38,7 +38,8 @@ class StorageLayerTest(AbstractUnitTest):
         sl_DRAM: StorageLayer[str, str] = StorageLayer[str, str](
             max_capacity=5, name="DRAM", layer_below=sl_ssd
         )
-        # insert some entries to force eviction
+        # insert 10 entries to force eviction; eviction always picks the largest key, so from "5" on each put
+        # evicts the key put just before it: DRAM keeps "0"-"3" and "9", the SSD receives "4"-"8":
         for i in range(10):
             sl_DRAM.put(str(i), str(i))
 
@@ -51,7 +52,8 @@ class StorageLayerTest(AbstractUnitTest):
         self.assertListEqual(list(sl_DRAM.storage.keys()), ["0", "1", "2", "3", "9"])
         self.assertListEqual(list(sl_ssd.storage.keys()), ["4", "5", "6", "7", "8"])
 
-        # test get:
+        # test get: "0" is a hit; the miss on "5" copies it up from the SSD (it stays there too) and evicts
+        # the largest DRAM key "9" to the SSD:
         self.assertEqual(sl_DRAM.get("0"), "0")
         self.assertEqual(sl_DRAM.get("5"), "5")
 
@@ -63,7 +65,7 @@ class StorageLayerTest(AbstractUnitTest):
         # sl_DRAM.show()
         # sl_ssd.show()
 
-        # test fix:
+        # test fix: "5" is the largest key and hence the eviction candidate, so the next put cannot make room:
         sl_DRAM.fix("5")
         with self.assertRaises(ValueError):
             sl_DRAM.put("42", "42")
@@ -72,9 +74,7 @@ class StorageLayerTest(AbstractUnitTest):
 
         class PrefixConversion(AddressConversionStrategy[str]):
             def split_address(self, address: str) -> tuple[str, str]:
-                """Split the given address into two parts and return both parts.
-                Returns the first character of the address, second character of the address
-                """
+                """Split into (page id = first character, offset = rest of the address)."""
                 return address[:1], address[1:]
 
         # simple storage hierarchy with only two layers:
@@ -109,17 +109,8 @@ class StorageLayerTest(AbstractUnitTest):
         # sl_ssd.show()
 
     def test_storage_layer_prefix_addressing_eviction_keeps_layer_below_intact(self):
-        """
-        Eviction from a layer that uses an address-conversion strategy must not
-        corrupt the layer below.
-
-        Symptom: with a conversion strategy, eviction used the wrong half of the
-        split address and wrote a single extracted sub-unit back to the layer
-        below, clobbering a whole page there.
-        Expected: under a conversion strategy the upper layer is a read cache;
-        eviction drops the entry locally and leaves the layer below unchanged.
-        Observed (before the fix): the page below is overwritten with one byte.
-        """
+        """Under an address-conversion strategy, eviction drops the cached sub-unit locally and leaves every
+        page in the layer below unchanged."""
 
         class PrefixConversion(AddressConversionStrategy[str]):
             def split_address(self, address: str) -> tuple[str, str]:
