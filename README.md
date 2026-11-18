@@ -139,6 +139,18 @@ once the sound is switched on).
 Notebook: [B-tree](notebooks/B-tree.ipynb)
 [![Open B-tree on Binder](https://mybinder.org/badge_logo.svg)](https://mybinder.org/v2/gh/explaindb/explaindb/main?urlpath=lab/tree/notebooks/B-tree.ipynb)
 
+### [storage-hierarchy](https://htmlpreview.github.io/?https://github.com/explaindb/explaindb/blob/main/visualizations/storage-hierarchy.html)
+
+[<img src="docs/images/visualizations/storage-hierarchy.jpg" width="480" alt="The Earth in cross-section, a quarter cut away to show its mantle and core, the mine shaft from the DBMS house running down towards the centre">](https://htmlpreview.github.io/?https://github.com/explaindb/explaindb/blob/main/visualizations/storage-hierarchy.html)
+
+The storage hierarchy as a mine shaft under the House DBMS, its depth to scale as access time: one CPU cycle
+(5.7 GHz) is 11.2 cm, so L1 lies 45 cm under the basement floor, main memory 64 m, an NVMe SSD 32 km down and a hard
+disk at the Earth's centre. A cage rides down at one constant speed; a stopwatch shows the cycles, the real time and
+the time in a human scale (one cycle is half a second), while the film fast-forwards with the depth. A crate is one
+cache line, eight values side by side: at each level the robot pulls one into the cage, on its way up a copy stays in
+every faster level, and back at the floor the robot puts the value into a register. An SSD or a hard disk delivers a
+page of 64 crates; the hard disk is a platter that turns, the Earth cut open to show it (in 3D, with three.js).
+
 ## Notebooks
 
 The notebooks are grouped by the chapters of the [tutorial](docs/tutorial/README.md), which explains each
@@ -268,10 +280,12 @@ ExplainDB is licensed under the [GNU Affero General Public License v3.0](LICENSE
 Copyright (C) 2026 Prof. Dr. Jens Dittrich, Saarland University.
 
 The pages `visualizations/row-or-column.html`, `visualizations/call-through-dbms.html`,
-`visualizations/clock-scan.html`, `visualizations/yannakakis.html` and `visualizations/b-tree.html` also embed
-third-party code and fonts under their own licenses: three.js (MIT License) and the fonts Archivo and JetBrains Mono
-(SIL Open Font License 1.1). Each page gives their copyright and license notices. All five pages also embed a
-synthetic voice, spoken with the model Ming-3.0-tts (MIT License, voice UK_George); each page names it.
+`visualizations/clock-scan.html`, `visualizations/yannakakis.html`, `visualizations/b-tree.html` and
+`visualizations/storage-hierarchy.html` also embed third-party code and fonts under their own licenses: three.js (MIT
+License) and the fonts Archivo and JetBrains Mono (SIL Open Font License 1.1). Each page gives their copyright and
+license notices. The first five pages also embed a synthetic voice, spoken with the model Ming-3.0-tts (MIT License,
+voice UK_George); each page names it. `visualizations/storage-hierarchy.html` also embeds map data from Natural Earth
+(public domain).
 
 ## Contributors
 

@@ -107,6 +107,9 @@ HOUSE_DBMS_PAGE: Path = PAGES_DIR / "call-through-dbms.html"
 # the page on Yannakakis' semi-join reduction, which counts the semi-joins done and the tuples left (decision 032) and
 # speaks its narration with the same voice (decision 038):
 YANNAKAKIS_PAGE: Path = PAGES_DIR / "yannakakis.html"
+# the storage hierarchy as a mine shaft under the House DBMS, its depth strictly to scale with the access times
+# (decision 045):
+STORAGE_HIERARCHY_PAGE: Path = PAGES_DIR / "storage-hierarchy.html"
 # the pages that speak their narration (the B-tree page, B_TREE_PAGE, with the same voice, decision 040); each must
 # keep its sound button:
 PAGES_WITH_SOUND: frozenset[Path] = frozenset(
@@ -267,7 +270,9 @@ class _PageTestCase(unittest.TestCase):
         cls.browser = cls.playwright.chromium.launch()
         cls.addClassCleanup(cls.browser.close)
 
-    def open_page(self, path: Path, reduced_motion: bool = True) -> OpenedPage:
+    def open_page(
+        self, path: Path, reduced_motion: bool = True, query: str = ""
+    ) -> OpenedPage:
         """Opens the page at path in a new browser context, which is closed after the test.
 
         Errors and outside requests are recorded from before the page loads. A class with a PAGE opens only that page,
@@ -276,17 +281,44 @@ class _PageTestCase(unittest.TestCase):
         @param path: the HTML file of the page
         @param reduced_motion: whether the browser asks for reduced motion; the pages then do not start playing on
             their own, so that every test starts from a paused page at time 0
+        @param query: added to the page's URL, e.g. ``?t=12.5&paused`` for a page that opens at the time given there
         @return: the opened page with the lists of errors and outside requests
         @raise AssertionError: if the class has a PAGE and path is another page; raised before the browser is used
         """
-        if self.PAGE is not None and path != self.PAGE:
+        return self.open_page_in(
+            self.browser, self.addCleanup, path, reduced_motion, query
+        )
+
+    @classmethod
+    def open_page_in(
+        cls,
+        browser: Browser,
+        add_cleanup: Callable[[Callable[[], None]], None],
+        path: Path,
+        reduced_motion: bool = True,
+        query: str = "",
+    ) -> OpenedPage:
+        """Opens the page at path as open_page does, in a new context of the given browser, and hands the closing of
+        that context to add_cleanup: open_page closes it after the test, while setUpClass, with ``cls.addClassCleanup``,
+        keeps one page open for all tests of the class.
+
+        @param browser: the browser to open the page in
+        @param add_cleanup: registers a function to call once the page is no longer needed
+        @param path: the HTML file of the page
+        @param reduced_motion: whether the browser asks for reduced motion; the pages then do not start playing on
+            their own, so that every test starts from a paused page at time 0
+        @param query: added to the page's URL, e.g. ``?t=12.5&paused`` for a page that opens at the time given there
+        @return: the opened page with the lists of errors and outside requests
+        @raise AssertionError: if the class has a PAGE and path is another page; raised before the browser is used
+        """
+        if cls.PAGE is not None and path != cls.PAGE:
             raise AssertionError(
-                f"{type(self).__name__} opens {path}, but its PAGE is {self.PAGE}"
+                f"{cls.__name__} opens {path}, but its PAGE is {cls.PAGE}"
             )
-        context = self.browser.new_context(
+        context = browser.new_context(
             reduced_motion="reduce" if reduced_motion else "no-preference"
         )
-        self.addCleanup(context.close)
+        add_cleanup(context.close)
         # every control reacts at once, so a control that is missing fails after 5 s, not after Playwright's 30 s:
         context.set_default_timeout(5_000)
         opened: OpenedPage = OpenedPage(context.new_page())
@@ -314,7 +346,7 @@ class _PageTestCase(unittest.TestCase):
         )
         opened.page.on("pageerror", record_error)
         opened.page.on("console", record_console)
-        opened.page.goto(path.as_uri())
+        opened.page.goto(path.as_uri() + query)
         return opened
 
     def assert_no_errors(self, opened: OpenedPage) -> None:
@@ -3016,6 +3048,1737 @@ class BTreePageTest(_PageTestCase):
         self.assertGreater(made_fronts, limits["fronts"])
         self.assertGreater(made_rows, limits["rows"])
         self.assert_no_errors(self.opened)
+
+
+@unittest.skipUnless(PLAYWRIGHT_AVAILABLE, SKIP_REASON)
+class StorageHierarchyPageTest(_PageTestCase):
+    """Checks the numbers of the storage hierarchy page against the slides (slide set 08, decision 045): where each
+    level lies and how many crates it holds, and what the stopwatch, the depth and the fast-forward badge show during
+    the cage's rides.
+
+    The page writes each level into a child of the hidden element ``levels``, as data-* attributes; their depths are
+    metres below the basement floor, which lies 5 m below the Earth's surface. It writes the state of the cage into
+    data-* of ``stage``; there, depths are metres below the surface. A URL with ``?t=<seconds>&paused`` opens the page
+    paused at that time of the film.
+
+    Opening the page takes seconds on a GPU emulated in software (as in CI), so the tests share one page, opened in
+    setUpClass, and move it to each time they check with the slider (see stage_at). That shows the same as opening the
+    page at the time: all the page shows is a function of the film's time. The slider keeps the step ``any`` that
+    stage_at gives it for the rest of the tests, so that it can stand at any time of the film, not only at its 1000
+    steps. Each test checks only the errors that the shared page has had during the test (see setUp).
+    """
+
+    PAGE: Path | None = STORAGE_HIERARCHY_PAGE
+    # the page that the tests share, paused, and its levels as read_levels returns them; both set in setUpClass:
+    opened: OpenedPage
+    shared_levels: tuple[float, dict[str, dict[str, str]]]
+    # how many errors and outside requests the shared page had had when the test began; set in setUp:
+    errors_before: int
+    requests_before: int
+    # the page is ready once it has prepared its GPU programs, a few per frame: on a GPU emulated in software, some 6 s
+    # on a fast machine and several times that on a slow CI runner, so a wait for it ends after this many milliseconds:
+    READY_TIMEOUT: int = 8 * FILM_TIMEOUT
+
+    # the levels below the registers, from the slides: access time in CPU cycles and size in bytes:
+    SLIDES: dict[str, tuple[int, int]] = {
+        "L1": (4, 48 * 1024),
+        "L2": (17, 3 * 1024**2),
+        "L3": (84, 36 * 1024**2),
+        "DRAM": (570, 32 * 1024**3),
+        "NVMe SSD": (285_000, 2 * 1024**4),
+        "HARD DISK": (57_000_000, 2 * 1024**4),
+    }
+    # each level's access time in human time, as the stopwatch writes it once the cage is back:
+    HUMAN_TEXTS: dict[str, str] = {
+        "L1": "2 s",
+        "L2": "8.5 s",
+        "L3": "42 s",
+        "DRAM": "4 min 45 s",
+        "NVMe SSD": "39.6 h",
+        "HARD DISK": "330 days",
+    }
+    # the levels that are a block of crates round the shaft; the hard disk is a platter:
+    BLOCKS: list[str] = ["L1", "L2", "L3", "DRAM", "NVMe SSD"]
+    # the Earth's radius, and the depth of the basement floor (the CPU core) below the surface (m):
+    EARTH_RADIUS: float = 6_371_000
+    FLOOR_DEPTH: float = 5
+    # the depth of one CPU cycle (m), so that the hard disk's 57,000,000 cycles end at the Earth's centre:
+    SCALE: float = (EARTH_RADIUS - FLOOR_DEPTH) / 57_000_000
+    # one cycle takes half a second of human time:
+    HUMAN_S_PER_CYCLE: float = 0.5
+    # a cycle of the CPU (5.7 GHz) in real time, in ns:
+    REAL_NS_PER_CYCLE: float = 0.175
+    # a crate is one cache line, flat and open at the top: 8 parcels side by side (4 along x, 2 deep), 2.36 m wide (x),
+    # as high as a parcel (0.44 m) and 1.08 m deep (z):
+    CRATE_BYTES: int = 64
+    CRATE_WIDTH: float = 2.36
+    CRATE_HEIGHT: float = 0.44
+    CRATE_DEPTH: float = 1.08
+    # the fast-forward factor while the cage picks up a crate: the level's cycles over L1's 4:
+    PICKUP_FACTORS: dict[str, float] = {"L2": 4.25, "HARD DISK": 14_250_000}
+    # the levels that send one crate up, pulled from their rack; the NVMe SSD and the hard disk deliver a pallet:
+    CRATE_LEVELS: list[str] = ["L1", "L2", "L3", "DRAM"]
+    # the platter turns once in this many seconds of film (not to scale: slow enough to watch, plain to see):
+    PLATTER_TURN: float = 5
+    # the steps of loading a crate at a level of crates, in their order: the robot walks to the cage's open side,
+    # reaches into the rack and pulls a crate straight across into the cage:
+    LOAD_STEPS: list[str] = ["walk", "reach", "pull", "loaded"]
+    # where the crate is, in the order of the loading: none shown, still in the rack, on its way across, in the cage:
+    CRATE_PLACES: list[str] = ["", "rack", "gap", "cage"]
+    # the steps of the detailed unloading back at the floor after L1, in their order: the robot takes the value out of
+    # the crate, turns, walks to the register tray, puts the value in, it is stored, and the robot walks back:
+    UNLOAD_STEPS: list[str] = ["take", "turn", "walk", "put", "stored", "back"]
+    # the steps of the short unloading back at the floor after L2, L3 and DRAM, in their order: the robot takes the
+    # value out of the crate, puts it in (the value flies across into the register), and it is stored:
+    SHORT_UNLOAD_STEPS: list[str] = ["take", "put", "stored"]
+    # after L1, the unloading takes this many seconds of film, then the robot stands still this many more, while the
+    # text says that only the value goes into a register and the crate stays in L1:
+    UNLOAD_L1: float = 6.5
+    STILL_AFTER_L1: float = 3
+
+    class StopwatchBoxes(TypedDict):
+        """Where the stopwatch's fields and labels are at one moment, and what the fields show (see
+        test_the_stopwatch_fields_keep_their_places_whatever_the_numbers)."""
+
+        # the left and right edge of each field, then the left edge of each label (px):
+        edges: list[float]
+        # for each field, the width of its text and of its box (px):
+        widths: list[list[int]]
+        # the text of each field:
+        texts: list[str]
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        """Opens the page once for all tests of the class, paused at its start, waits until it has drawn its warm-up
+        frames, reads its levels (see read_levels) and asserts that it loaded without errors and requested only local
+        files; the page's browser context is closed after the last test.
+        """
+        super().setUpClass()
+        cls.opened = cls.open_page_in(
+            cls.browser, cls.addClassCleanup, STORAGE_HIERARCHY_PAGE, query="?paused"
+        )
+        page: Page = cls.opened.page
+
+        # the page has prepared the GPU's programs and textures and drawn a frame:
+        expect(page.get_by_test_id("stage")).to_have_attribute(
+            "data-ready", "true", timeout=cls.READY_TIMEOUT
+        )
+
+        # the script lays out the levels after the fonts have loaded (at most 2.5 s), all in one go:
+        levels = page.get_by_test_id("levels")
+        expect(levels).to_have_attribute(
+            "data-scale", re.compile(r"^\d"), timeout=FILM_TIMEOUT
+        )
+        scale: float = float(levels.get_attribute("data-scale") or "")
+        attributes: dict[str, dict[str, str]] = levels.evaluate(
+            """(box) => Object.fromEntries([...box.children].map((level) => [
+                level.dataset.key,
+                Object.fromEntries([...level.attributes].filter((a) => a.name.startsWith('data-'))
+                    .map((a) => [a.name.slice('data-'.length), a.value])),
+            ]))"""
+        )
+        cls.shared_levels = scale, attributes
+
+        # the page loaded without errors and requested only local files (from here on, each test checks its own):
+        if cls.opened.errors or cls.opened.outside_requests:
+            raise AssertionError(
+                f"the page had errors {cls.opened.errors} or requested more than local files "
+                f"{cls.opened.outside_requests}"
+            )
+
+    def setUp(self) -> None:
+        """Notes how many errors and outside requests the shared page has had before the test, so that the test checks
+        only those of its own time (see assert_no_new_errors), and checks them once more after the test, for an error
+        that comes after the test's last check (e.g. in a frame the page draws later).
+        """
+        super().setUp()
+        self.errors_before = len(self.opened.errors)
+        self.requests_before = len(self.opened.outside_requests)
+        self.addCleanup(self.assert_no_new_errors)
+
+    def assert_no_new_errors(self) -> None:
+        """Asserts that the shared page has neither had an error nor requested anything but a local file since the test
+        began."""
+        self.assertEqual(
+            [], self.opened.errors[self.errors_before :], "the page had errors"
+        )
+        self.assertEqual(
+            [],
+            self.opened.outside_requests[self.requests_before :],
+            "the page requested more than local files",
+        )
+
+    def read_levels(self) -> tuple[float, dict[str, dict[str, str]]]:
+        """Returns the levels that setUpClass read from the shared page, and asserts that the page has had no errors
+        since the test began.
+
+        @return: the depth of one cycle (``data-scale`` of ``levels``), and for each level, by its ``data-key``, its
+            data-* attributes without ``data-``, e.g. for L1 ``{"key": "L1", "crates": "768", "down-from": "...", ...}``
+        """
+        self.assert_no_new_errors()
+        return self.shared_levels
+
+    def stage_at(
+        self, seconds: float, phase: str | None
+    ) -> tuple[OpenedPage, dict[str, str]]:
+        """Moves the shared page to the given time with the slider, waits until it shows that time with the cage in
+        the given phase, and reads the stage's data-* attributes without ``data-`` (e.g. ``human-s``).
+
+        The slider pauses the film; the page then shows what it shows when opened at ``?t=<seconds>&paused``.
+
+        @param seconds: the time of the film
+        @param phase: the phase of the cage's ride at that time, e.g. ``down``; None: any phase (not waited for)
+        @return: the shared page, and the stage's attributes
+        """
+        page: Page = self.opened.page
+        stage = page.get_by_test_id("stage")
+
+        # the slider goes to the time's share of the film's length; with step "any", the slider does not round it to
+        # its 1000 steps:
+        duration: float = float(stage.get_attribute("data-duration") or "")
+        page.get_by_test_id("scrub").evaluate(
+            """(s, [seconds, duration]) => {
+                s.step = 'any';
+                s.value = String(seconds / duration * Number(s.max));
+                s.dispatchEvent(new Event('input'));
+            }""",
+            [seconds, duration],
+        )
+
+        # the stage shows that time (its data-t has three decimals):
+        page.wait_for_function(
+            "([stage, seconds]) => Math.abs(Number(stage.dataset.t) - seconds) <= 1e-3",
+            arg=[stage.element_handle(), seconds],
+            timeout=FILM_TIMEOUT,
+        )
+        return self.opened, self.read_stage(self.opened, phase)
+
+    @staticmethod
+    def read_stage(
+        opened: OpenedPage, phase: str | None, timeout: int = FILM_TIMEOUT
+    ) -> dict[str, str]:
+        """Waits until the page shows the cage in the given phase, and reads the stage's data-* attributes without
+        ``data-`` (e.g. ``human-s``).
+
+        @param opened: a paused page
+        @param phase: the phase of the cage's ride at the page's time, e.g. ``down``; None: any phase, once the stage
+            shows one (the caller has waited for the page's time)
+        @param timeout: how long to wait for the phase (ms); READY_TIMEOUT for a page just opened, which first prepares
+            its GPU programs
+        @return: the stage's attributes
+        """
+        stage = opened.page.get_by_test_id("stage")
+
+        # the stage has all its attributes once the script shows a time (opened at the time of a URL, only after the
+        # fonts have loaded):
+        if phase is None:
+            expect(stage).to_have_attribute(
+                "data-phase", re.compile(".+"), timeout=timeout
+            )
+        else:
+            expect(stage).to_have_attribute("data-phase", phase, timeout=timeout)
+        return stage.evaluate(
+            """(stage) => Object.fromEntries([...stage.attributes].filter((a) => a.name.startsWith('data-'))
+                .map((a) => [a.name.slice('data-'.length), a.value]))"""
+        )
+
+    def stages_between(
+        self, start: float, end: float, step: float
+    ) -> list[dict[str, str]]:
+        """Moves the shared page from start to end in steps (see stage_at, any phase) and reads the stage each time.
+
+        @param start: the first time of the film
+        @param end: the last time (included when a step lands on it)
+        @param step: the time between two readings
+        @return: the stage's attributes at each time, in order
+        """
+        count: int = int((end - start) / step + 1e-9) + 1
+        return [self.stage_at(start + k * step, None)[1] for k in range(count)]
+
+    def assert_close(self, expected: float, actual: float, what: str) -> None:
+        """Asserts that actual equals expected up to rounding: a relative difference of at most 1e-12."""
+        self.assertAlmostEqual(expected, actual, delta=1e-12 * abs(expected), msg=what)
+
+    def test_the_levels_lie_at_their_cycles_and_hold_their_crates(self) -> None:
+        """Each level's stop, where the cage's floor stops, lies its cycles of the slides below the basement floor, one
+        cycle (6,371 km − 5 m) / 57,000,000 deep, so that the hard disk's stop lies at the Earth's centre; each level
+        holds one crate per 64 bytes. A block's top layer of crates stands on its stop, so the block's top lies one
+        crate's height (0.44 m) above it; the platter's top (its read head) is its stop. The blocks of L1 to the SSD
+        have just enough layers of crate places round the shaft, reach down one crate's height per layer, and end above
+        the next level's top.
+
+        Fails if the scale, a level's stop or its number of crates drifts from the slides, if a block's top layer does
+        not stand on its stop, if a block has a layer too many or too few for its crates, if its bottom does not follow
+        its layers, or if a block reaches into the next level.
+        """
+        scale, levels = self.read_levels()
+
+        # one cycle's depth:
+        self.assert_close(self.SCALE, scale, "data-scale")
+
+        # the registers: 80 values (640 bytes) in a tray one cycle below the floor:
+        self.assertEqual("80", levels["REGISTERS"]["values"])
+        self.assert_close(self.SCALE, float(levels["REGISTERS"]["top"]), "registers")
+
+        # each level's stop lies its cycles deep, and each level holds one crate per 64 bytes:
+        for key, (cycles, size) in self.SLIDES.items():
+            with self.subTest(level=key):
+                self.assertEqual(size // self.CRATE_BYTES, int(levels[key]["crates"]))
+                stop: float = cycles * self.SCALE
+                self.assert_close(stop, float(levels[key]["stop"]), "stop")
+
+                # the top layer of crates stands on the stop; the platter's top is the stop itself:
+                top: float = stop if key == "HARD DISK" else stop - self.CRATE_HEIGHT
+                self.assert_close(top, float(levels[key]["top"]), "top")
+
+        # the hard disk's stop lies at the Earth's centre:
+        self.assert_close(
+            self.EARTH_RADIUS - self.FLOOR_DEPTH,
+            float(levels["HARD DISK"]["stop"]),
+            "the hard disk's stop",
+        )
+
+        # each block: layers of crate places, cols × rows less the holes (the shaft, 3 × 5, and in L1 also the room
+        # under the register tray, 3 × 6), with the last layer partly filled:
+        next_keys: list[str] = list(self.SLIDES)[1:]
+        for key, next_key in zip(self.BLOCKS, next_keys):
+            with self.subTest(block=key):
+                level: dict[str, str] = levels[key]
+                cols, rows, holes = (
+                    int(level[name]) for name in ("cols", "rows", "holes")
+                )
+                crates, layers = int(level["crates"]), int(level["layers"])
+                self.assertEqual(33 if key == "L1" else 15, holes)
+                places: int = cols * rows - holes
+                self.assertLess((layers - 1) * places, crates)
+                self.assertLessEqual(crates, layers * places)
+                self.assert_close(
+                    cols * self.CRATE_WIDTH, float(level["width"]), "width"
+                )
+
+                # the block reaches down one crate's height per layer, and ends above the next level's top:
+                self.assert_close(
+                    float(level["top"]) + layers * self.CRATE_HEIGHT,
+                    float(level["bottom"]),
+                    "bottom",
+                )
+                self.assertLessEqual(
+                    float(level["bottom"]), float(levels[next_key]["top"])
+                )
+
+    def test_the_platter_has_just_enough_rings_for_the_hard_disks_crates(self) -> None:
+        """The hard disk's platter holds its crates in one layer on each of its two faces, in rings a crate's depth
+        (1.08 m) apart from r0 outwards, each with as many crates as fit along its inner edge: it has just enough rings,
+        the last one partly filled, and is as thick as a real platter for its width (1.27 mm for 95 mm).
+
+        Fails if the platter has a ring too many or too few for its crates (e.g. when the crates per ring are counted
+        along the outer edge), or if its thickness does not follow its width.
+        """
+        _, levels = self.read_levels()
+
+        # the rings of both faces hold the crates; one ring fewer would not:
+        disk: dict[str, str] = levels["HARD DISK"]
+        r0, rings, crates = float(disk["r0"]), int(disk["rings"]), int(disk["crates"])
+
+        def on_both_faces(n: int) -> int:
+            """Returns how many crates the n innermost rings of both faces hold."""
+            return 2 * sum(
+                math.floor(2 * math.pi * (r0 + self.CRATE_DEPTH * i) / self.CRATE_WIDTH)
+                for i in range(n)
+            )
+
+        self.assertGreaterEqual(on_both_faces(rings), crates)
+        self.assertLess(on_both_faces(rings - 1), crates)
+
+        # as thick as a real platter for its width: 1.27 mm for 95 mm:
+        radius: float = r0 + rings * self.CRATE_DEPTH
+        self.assert_close(2 * radius * 1.27 / 95, float(disk["thickness"]), "thickness")
+
+    def test_after_each_ride_the_stopwatch_shows_the_access_time(self) -> None:
+        """Half a second after the cage is back from a level, the stopwatch shows the level's access time from the
+        slides: half a second of human time per cycle, the cycles in the header with thousands separators, and the
+        human time in the unit of the captions (``HUMAN_TEXTS``); the cage is back at the floor.
+
+        Fails if a round trip takes more or less human time than the slides' cycles (e.g. when the cage's speed or a
+        level's depth changes), if the cage does not come back up, or if the header rounds or writes the cycles or the
+        human time otherwise.
+        """
+        _, levels = self.read_levels()
+        for key, (cycles, _) in self.SLIDES.items():
+            with self.subTest(level=key):
+                opened, stage = self.stage_at(
+                    float(levels[key]["back-from"]) + 0.5, "back"
+                )
+
+                # back at the floor from this level:
+                self.assertEqual(key, stage["level"])
+                self.assert_close(self.FLOOR_DEPTH, float(stage["depth"]), "depth")
+
+                # the stopwatch shows the access time, in human time and in cycles:
+                self.assert_close(
+                    cycles * self.HUMAN_S_PER_CYCLE, float(stage["human-s"]), "human-s"
+                )
+                expect(opened.page.get_by_test_id("sw-cycles")).to_have_text(
+                    f"{cycles:,}"
+                )
+                expect(opened.page.get_by_test_id("sw-human")).to_have_text(
+                    self.HUMAN_TEXTS[key]
+                )
+
+    def test_the_cage_rides_down_at_one_constant_speed(self) -> None:
+        """At the film's time halfway between ``down-from`` and ``pickup-from`` of L2 and of the SSD (still on the ride
+        down: the film runs faster the deeper the cage is, so the cage is then far less than halfway down; for the SSD,
+        whose pickup begins with a view from afar, some 2 s past the ride's own middle), the cage has gone 4 cycles'
+        depth per second of human time (the speed shown, 1.6 km/h), the fast-forward factor is its depth below the
+        floor over L1's stop (at least 1), and the depth ruler's marker stands at the cage's depth.
+
+        Fails if the cage's speed changes with the depth (e.g. the film's fast-forward leaks into the stopwatch), if
+        the badge's factor is not proportional to the depth, or if the ruler's marker is missing or stands at another
+        depth than the cage.
+        """
+        _, levels = self.read_levels()
+        l1_stop: float = float(levels["L1"]["stop"])
+        for key in ("L2", "NVMe SSD"):
+            with self.subTest(level=key):
+                middle: float = (
+                    float(levels[key]["down-from"]) + float(levels[key]["pickup-from"])
+                ) / 2
+                opened, stage = self.stage_at(middle, "down")
+                below_floor: float = float(stage["depth"]) - self.FLOOR_DEPTH
+
+                # on the way to this level, between the floor and the level's stop:
+                self.assertEqual(key, stage["level"])
+                self.assertGreater(below_floor, 0)
+                self.assertLess(below_floor, float(levels[key]["stop"]))
+
+                # the speed: 4 cycles' depth per second of human time, about 1.6 km/h:
+                self.assert_close(
+                    4 * self.SCALE, below_floor / float(stage["human-s"]), "speed"
+                )
+                self.assertEqual(round(4 * self.SCALE * 3.6, 1), float(stage["speed"]))
+
+                # the fast-forward factor grows with the depth:
+                self.assert_close(
+                    max(1, below_floor / l1_stop), float(stage["factor"]), "factor"
+                )
+
+                # the ruler draws its marker at the cage's depth (read back from where it drew it, so up to rounding):
+                self.assertNotEqual("", stage["marker-depth"], "no marker on the ruler")
+                self.assert_close(
+                    float(stage["depth"]), float(stage["marker-depth"]), "marker-depth"
+                )
+                self.assert_no_new_errors()
+
+    def test_during_a_pickup_the_badge_shows_the_slides_factor(self) -> None:
+        """While the cage waits at L2 and at the hard disk for its crate or its page, the fast-forward factor is the
+        slides' factor, the level's cycles over L1's 4 (4.25 and 14,250,000), and the stopwatch shows half the access
+        time, the way down.
+
+        Fails if the badge shows another factor on arrival than the slides, or if the stopwatch runs on during the
+        pickup.
+        """
+        _, levels = self.read_levels()
+        for key, factor in self.PICKUP_FACTORS.items():
+            with self.subTest(level=key):
+                cycles: int = self.SLIDES[key][0]
+                opened, stage = self.stage_at(
+                    float(levels[key]["pickup-from"]) + 1, "pickup"
+                )
+
+                # at this level, with the slides' factor:
+                self.assertEqual(key, stage["level"])
+                self.assert_close(factor, float(stage["factor"]), "factor")
+
+                # the stopwatch stands at the way down, half the access time:
+                self.assert_close(
+                    cycles * self.HUMAN_S_PER_CYCLE / 2,
+                    float(stage["human-s"]),
+                    "human-s",
+                )
+                self.assert_no_new_errors()
+
+    def test_leaving_the_hard_disk_the_badge_says_only_the_film_runs_fast(
+        self,
+    ) -> None:
+        """Just after the cage leaves the hard disk, where the fast-forward factor has its most digits, the badge says
+        that the film runs fast while the cage keeps its speed, and its whole text fits into the badge.
+
+        Fails if the badge leaves out that the cage keeps 1.6 km/h, or if it is too narrow for its longest text and
+        cuts the end off (e.g. "1.6 km" without "/h").
+        """
+        _, levels = self.read_levels()
+        opened, stage = self.stage_at(
+            float(levels["HARD DISK"]["up-from"]) + 0.01, "up"
+        )
+        badge = opened.page.get_by_test_id("fast-forward")
+
+        # at the Earth's centre, the factor has eight digits (up to 14,250,000):
+        self.assertGreater(float(stage["factor"]), 10_000_000)
+        expect(opened.page.get_by_test_id("ff-label")).to_have_text(
+            "film fast-forward · the cage keeps 1.6 km/h"
+        )
+
+        # nothing is cut off: the text is no wider than the badge:
+        widths: list[int] = badge.evaluate(
+            "(badge) => [badge.scrollWidth, badge.clientWidth]"
+        )
+        self.assertLessEqual(widths[0], widths[1], "the badge cuts its text off")
+        self.assert_no_new_errors()
+
+    def test_at_l1_the_robot_pulls_a_crate_into_the_cage_while_the_stopwatch_stands_still(
+        self,
+    ) -> None:
+        """While the cage stands at L1 (7 s of film: the loading is shown slowly once), the robot loads a crate step by
+        step in the order of ``LOAD_STEPS``: it walks to the cage's open side, reaches into the rack and pulls a crate
+        straight across into the cage, the crate passing the places of ``CRATE_PLACES`` in order: out of the rack,
+        across the gap, into the cage. While it pulls and holds the crate, its hands, as its arms point, are on the
+        crate's grip (at most 2 cm away along the pull). On the way down the cage has no crate yet; it rides up loaded,
+        the crate in the cage. All the while, the robot stands on the cage's floor, and the stopwatch stands at half
+        L1's access time (4 cycles × 0.5 s / 2 = 1.0 s). The pickup is read every 0.1 s, so that each step is seen.
+
+        Fails if the cage carries a crate on the way down, if L1's pickup is not 7 s long, if a step or a place of the
+        crate is unknown, missing, comes twice or out of order, if the crate is not in the cage by the end of the pickup
+        or when the cage rides up, if the crate moves away from the robot's hands while it pulls or holds it, if the
+        robot floats above or sinks into the cage's floor, or if the stopwatch runs on during the loading.
+        """
+        _, levels = self.read_levels()
+        l1: dict[str, str] = levels["L1"]
+        pickup_from, up_from = float(l1["pickup-from"]), float(l1["up-from"])
+        cycles: int = self.SLIDES["L1"][0]
+
+        # on the way down, the cage has no crate yet; the robot stands on its floor:
+        opened, stage = self.stage_at(float(l1["down-from"]) + 0.5, "down")
+        self.assertEqual("", stage["load"])
+        self.assertEqual("", stage["crate"])
+        self.assertAlmostEqual(0.0, float(stage["robot-floor"]), delta=1e-9)
+
+        # L1's pickup lasts 7 s of film:
+        self.assert_close(7, up_from - pickup_from, "L1's pickup")
+
+        # every 0.1 s of the pickup: a known step, a known place of the crate, the robot's hands on the grip while it
+        # pulls and holds the crate, the robot on the cage's floor, and the stopwatch standing at the way down:
+        steps: list[str] = []
+        places: list[str] = []
+        for stage in self.stages_between(pickup_from + 0.05, up_from - 0.05, 0.1):
+            with self.subTest(t=stage["t"]):
+                self.assertEqual("pickup", stage["phase"])
+                self.assertIn(stage["load"], self.LOAD_STEPS)
+                self.assertIn(stage["crate"], self.CRATE_PLACES)
+                if stage["load"] in ("pull", "loaded"):
+                    self.assertLessEqual(float(stage["grip"]), 0.02, "grip")
+                self.assertAlmostEqual(0.0, float(stage["robot-floor"]), delta=1e-9)
+                self.assert_close(
+                    cycles * self.HUMAN_S_PER_CYCLE / 2,
+                    float(stage["human-s"]),
+                    "human-s",
+                )
+            steps.append(stage["load"])
+            places.append(stage["crate"])
+
+        # the steps come in their order, each once, the last one loaded; the crate goes from nowhere (hidden in the
+        # rack) out of the rack, across the gap, into the cage, never back:
+        self.assertEqual(self.LOAD_STEPS, [step for step, _ in groupby(steps)])
+        self.assertEqual(self.CRATE_PLACES, [place for place, _ in groupby(places)])
+
+        # just after the cage leaves, it rides up with the crate in the cage, the robot still on its floor:
+        opened, stage = self.stage_at(up_from + 0.3, "up")
+        self.assertEqual("loaded", stage["load"])
+        self.assertEqual("cage", stage["crate"])
+        self.assertAlmostEqual(0.0, float(stage["robot-floor"]), delta=1e-9)
+
+    def test_every_level_of_crates_sends_one_crate_up_and_the_ssd_and_disk_a_pallet(
+        self,
+    ) -> None:
+        """At the end of the pickup at L1, L2, L3 and DRAM (0.05 s before the cage leaves), the robot has pulled the
+        crate into the cage and holds it by its grip (load ``loaded``, crate ``cage``, hands at most 2 cm away), on the
+        cage's floor and without a pallet. Just after the cage leaves a level, it rides up with what the level gives:
+        from L1, L2, L3 and DRAM that one crate, and no pallet; from the NVMe SSD and the hard disk a pallet of 64
+        crates (a 4 KB page), and no single crate (load and crate empty).
+
+        Fails if a pull has not finished by the end of the pickup (the crate still in the rack or on its way across, or
+        the robot's hands off its grip), if the robot is not on the cage's floor there, if a level of crates sends the
+        cage up without its crate or with a pallet, or if the SSD or the hard disk sends the cage up without its pallet
+        or shows a single crate beside it.
+        """
+        _, levels = self.read_levels()
+        for key in self.SLIDES:
+            with self.subTest(level=key):
+                up_from: float = float(levels[key]["up-from"])
+                crate_level: bool = key in self.CRATE_LEVELS
+
+                # at the end of the loading at a level of crates, the crate is in the cage and the robot holds it:
+                if crate_level:
+                    opened, stage = self.stage_at(up_from - 0.05, "pickup")
+                    self.assertEqual(key, stage["level"])
+                    self.assertEqual(
+                        ("loaded", "cage", "false"),
+                        (stage["load"], stage["crate"], stage["pallet"]),
+                    )
+                    self.assertLessEqual(float(stage["grip"]), 0.02, "grip")
+                    self.assertAlmostEqual(0.0, float(stage["robot-floor"]), delta=1e-9)
+                    self.assert_no_new_errors()
+
+                opened, stage = self.stage_at(up_from + 0.3, "up")
+
+                # riding up from this level, with one crate in the cage or a pallet:
+                self.assertEqual(key, stage["level"])
+                expected: tuple[str, str, str] = (
+                    ("loaded", "cage", "false") if crate_level else ("", "", "true")
+                )
+                self.assertEqual(
+                    expected, (stage["load"], stage["crate"], stage["pallet"])
+                )
+                if crate_level:
+                    self.assertAlmostEqual(0.0, float(stage["robot-floor"]), delta=1e-9)
+                self.assert_no_new_errors()
+
+    def test_an_arrow_marks_the_cage_whenever_it_is_too_small_to_see(self) -> None:
+        """A green arrow labelled "THE CAGE" appears exactly when the cage would be too small to find: while it rides
+        down or up or picks up a crate and the picture's half height (``data-view-h``) is more than 50 m. In the
+        close-ups, at L1's pickup and on the ride down to L2 (the camera follows the cage closely), there is no arrow;
+        in the views from far away, DRAM's pickup (the whole block of main memory, hundreds of metres), the ride down
+        to the SSD (an overview of 20 km) and the ride up from the hard disk (the whole Earth), there is one.
+
+        Fails if the arrow is missing far away, where the cage is far smaller than a pixel, or if it clutters the
+        close-ups, where the cage is plain to see.
+        """
+        _, levels = self.read_levels()
+
+        def middle(key: str, start: str, end: str) -> float:
+            """Returns the time halfway between two times of a level, e.g. its ``down-from`` and ``pickup-from``."""
+            return (float(levels[key][start]) + float(levels[key][end])) / 2
+
+        # (level, time of the film, phase of the cage, whether the arrow shows):
+        cases: list[tuple[str, float, str, str]] = [
+            ("L1", float(levels["L1"]["pickup-from"]) + 2, "pickup", "false"),
+            ("L2", middle("L2", "down-from", "pickup-from"), "down", "false"),
+            # (once the camera has zoomed out to the whole block: the zoom takes 2.4 s)
+            ("DRAM", float(levels["DRAM"]["pickup-from"]) + 2.5, "pickup", "true"),
+            (
+                "NVMe SSD",
+                middle("NVMe SSD", "down-from", "pickup-from"),
+                "down",
+                "true",
+            ),
+            ("HARD DISK", middle("HARD DISK", "up-from", "back-from"), "up", "true"),
+        ]
+        for key, seconds, phase, arrow in cases:
+            with self.subTest(level=key, phase=phase):
+                opened, stage = self.stage_at(seconds, phase)
+
+                # at this level, with the arrow shown only from far away:
+                self.assertEqual(key, stage["level"])
+                self.assertEqual(arrow, stage["arrow"])
+                self.assert_no_new_errors()
+
+    def test_the_cage_stays_in_the_picture_during_rides_and_zooms(self) -> None:
+        """While the cage rides down or up or picks up its crate, also while the camera zooms in or out, the cage's
+        middle stays in the picture (``data-cage-screen``, "x,y" in normalized device coordinates, -1 … 1, left to
+        right and bottom to top): at most half the picture's height above its middle (0.5, plus 0.1 for the
+        perspective), at most 0.45 below it (plus 0.1), and inside it from left to right. The moments: leaving DRAM's
+        block view, zooming out on the way down to the SSD and the hard disk, zooming into the platter, and climbing
+        fast from the hard disk while the camera zooms out to the whole Earth.
+
+        Fails if the camera lags behind the cage during a zoom, so that the cage (and its arrow) leaves the picture,
+        or if the stage stops reporting where the cage is.
+        """
+        _, levels = self.read_levels()
+
+        def at(key: str, start: str, offset: float) -> float:
+            """Returns a time of the film: a level's time (e.g. its ``down-from``) plus an offset (s)."""
+            return float(levels[key][start]) + offset
+
+        # (level, time of the film, phase of the cage):
+        cases: list[tuple[str, float, str]] = [
+            # leaving the whole block's view of main memory:
+            ("DRAM", at("DRAM", "up-from", 0.5), "up"),
+            # zooming out on the way down, then riding down, then up again:
+            ("NVMe SSD", at("NVMe SSD", "down-from", 1.0), "down"),
+            ("NVMe SSD", at("NVMe SSD", "down-from", 4.0), "down"),
+            ("NVMe SSD", at("NVMe SSD", "up-from", 1.0), "up"),
+            # zooming out on the way down, then riding down:
+            ("HARD DISK", at("HARD DISK", "down-from", 1.5), "down"),
+            ("HARD DISK", at("HARD DISK", "down-from", 8), "down"),
+            # the zoom into the platter's view, before the pickup's last segment starts at pickup-from:
+            ("HARD DISK", at("HARD DISK", "pickup-from", -1.5), "pickup"),
+            # climbing fast while the camera zooms out to the whole Earth:
+            ("HARD DISK", at("HARD DISK", "up-from", 1.0), "up"),
+            ("HARD DISK", at("HARD DISK", "up-from", 2.0), "up"),
+            ("HARD DISK", at("HARD DISK", "up-from", 4.0), "up"),
+        ]
+        for key, seconds, phase in cases:
+            with self.subTest(level=key, phase=phase, t=seconds):
+                opened, stage = self.stage_at(seconds, phase)
+                self.assertEqual(key, stage["level"])
+
+                # where the cage's middle is in the picture, with three decimals:
+                self.assertRegex(stage["cage-screen"], r"^-?\d+\.\d{3},-?\d+\.\d{3}$")
+                x, y = (float(part) for part in stage["cage-screen"].split(","))
+                where: str = f"cage at x {x}, y {y}"
+                self.assertLessEqual(abs(x), 0.95, where)
+                self.assertLessEqual(y, 0.6, where)
+                self.assertGreaterEqual(y, -0.55, where)
+                self.assert_no_new_errors()
+
+    def test_the_stage_reports_the_films_time_and_length(self) -> None:
+        """At three times of the film (picking up at L1, riding down to L2, riding up from the hard disk), the stage's
+        ``data-t`` is the time the page was opened at (``?t=<seconds>&paused``), in seconds with exactly three
+        decimals, and its ``data-duration`` is the film's length: the same at all three, after the cage is back from the
+        hard disk, and the total the clock shows ("m:ss / m:ss", whole seconds cut off as the page writes them). Each
+        time opens a page of its own, as this checks the time of the URL, not the slider's (see stage_at).
+
+        Fails if the stage reports another time than the one shown (e.g. the time before the jump of the URL), writes
+        it with more or fewer decimals, or if its length differs from the clock's total or ends before the film does.
+        """
+        _, levels = self.read_levels()
+
+        def clock_text(seconds: float) -> str:
+            """Returns a time (s) as the clock writes it: whole minutes, then whole seconds with two digits."""
+            return f"{math.floor(seconds / 60)}:{math.floor(seconds % 60):02d}"
+
+        # (level, time of the film, phase of the cage):
+        cases: list[tuple[str, float, str]] = [
+            ("L1", float(levels["L1"]["pickup-from"]) + 1, "pickup"),
+            ("L2", float(levels["L2"]["down-from"]) + 0.5, "down"),
+            ("HARD DISK", float(levels["HARD DISK"]["up-from"]) + 1, "up"),
+        ]
+        durations: list[float] = []
+        for key, seconds, phase in cases:
+            with self.subTest(level=key, phase=phase):
+                # a page of its own, opened paused at the time:
+                opened: OpenedPage = self.open_page(
+                    STORAGE_HIERARCHY_PAGE, query=f"?t={seconds}&paused"
+                )
+                stage: dict[str, str] = self.read_stage(
+                    opened, phase, self.READY_TIMEOUT
+                )
+
+                # the time shown, with exactly three decimals:
+                self.assertRegex(stage["t"], r"^\d+\.\d{3}$")
+                self.assertAlmostEqual(seconds, float(stage["t"]), delta=1e-3)
+
+                # the film's length, after the cage is back from the hard disk, and the clock's total:
+                duration: float = float(stage["duration"])
+                durations.append(duration)
+                self.assertGreater(duration, float(levels["HARD DISK"]["back-from"]))
+                expect(opened.page.get_by_test_id("clock")).to_have_text(
+                    f"{clock_text(seconds)} / {clock_text(duration)}"
+                )
+                self.assert_no_errors(opened)
+                # close the page before the next one opens, not only at the end of the test:
+                opened.page.context.close()
+
+        # the same length at every time of the film:
+        self.assertEqual(len(cases), len(durations))
+        self.assertEqual(1, len(set(durations)), f"lengths {durations}")
+
+    def test_the_platter_turns_one_turn_in_five_seconds(self) -> None:
+        """At two moments of the hard disk's first pickup, 3.5 s and 2.5 s before ``pickup-from`` (the platter's own
+        view), the stage's ``data-platter-turn`` is the platter's angle in radians, in [0, 2π), equal to
+        ((t mod 5) / 5) · 2π for the film's time t: one turn in 5 s of film (not to scale, but plain to see), the angle
+        growing with the time (which way that turns on the screen is not checked). Between the two moments it has
+        turned forward by (Δt / 5) · 2π (mod 2π).
+
+        Fails if the platter stands still, turns backwards or at another speed, if its angle depends on anything but
+        the film's time (e.g. on the time since the page was opened), or if the stage stops reporting it.
+        """
+        _, levels = self.read_levels()
+        pickup_from: float = float(levels["HARD DISK"]["pickup-from"])
+        full_turn: float = 2 * math.pi
+
+        def turn_apart(expected: float, actual: float) -> float:
+            """Returns how far two angles (radians) lie apart round the circle, so 0 and just below 2π are close."""
+            difference: float = (actual - expected) % full_turn
+            return min(difference, full_turn - difference)
+
+        # (time of the film, angle of the platter) at both moments:
+        seen: list[tuple[float, float]] = []
+        for offset in (-3.5, -2.5):
+            with self.subTest(offset=offset):
+                opened, stage = self.stage_at(pickup_from + offset, "pickup")
+                self.assertEqual("HARD DISK", stage["level"])
+
+                # the angle, with four decimals, in [0, 2π), as a function of the film's time only:
+                self.assertRegex(stage["platter-turn"], r"^\d+\.\d{4}$")
+                t, turn = float(stage["t"]), float(stage["platter-turn"])
+                self.assertGreaterEqual(turn, 0)
+                self.assertLess(turn, full_turn)
+                self.assertLessEqual(
+                    turn_apart(
+                        (t % self.PLATTER_TURN) / self.PLATTER_TURN * full_turn, turn
+                    ),
+                    1e-3,
+                    f"platter at {turn} rad at t {t}",
+                )
+                seen.append((t, turn))
+                self.assert_no_new_errors()
+
+        # between the two moments, the platter turned forward by Δt / 5 of a turn:
+        self.assertEqual(2, len(seen))
+        (t0, turn0), (t1, turn1) = seen
+        self.assertAlmostEqual(1, t1 - t0, delta=1e-3)
+        self.assertAlmostEqual(
+            (t1 - t0) / self.PLATTER_TURN * full_turn,
+            (turn1 - turn0) % full_turn,
+            delta=1e-3,
+            msg=f"turned from {turn0} to {turn1} rad in {t1 - t0} s",
+        )
+
+    def test_the_stopwatch_fields_keep_their_places_whatever_the_numbers(self) -> None:
+        """At five moments with numbers of very different lengths (on the way down to L1, up from DRAM, the SSD and
+        the hard disk, and back from the hard disk, e.g. "9" against "57,000,000" cycles, "4.48 s" against
+        "18 min 17 s"), every field of the stopwatch in the header (level, cycles, real, human time, depth) has the same
+        left and right edge, and every label ("cycles", "real", ...) the same left edge, to 0.5 px; each field's text
+        fits into its box.
+
+        Fails if a field's width follows its text, so that the header jumps while the numbers count (the labels after
+        it move), or if a field is too narrow for its longest value and cuts it off or spills over.
+        """
+        _, levels = self.read_levels()
+        fields: list[str] = ["sw-level", "sw-cycles", "sw-real", "sw-human", "sw-depth"]
+        labels: list[str] = [
+            "sw-cycles-label",
+            "sw-real-label",
+            "sw-human-label",
+            "sw-depth-label",
+        ]
+
+        # (level, time of the film, phase of the cage):
+        cases: list[tuple[str, float, str]] = [
+            ("L1", float(levels["L1"]["down-from"]) + 0.5, "down"),
+            ("DRAM", float(levels["DRAM"]["up-from"]) + 2, "up"),
+            ("NVMe SSD", float(levels["NVMe SSD"]["up-from"]) + 6, "up"),
+            ("HARD DISK", float(levels["HARD DISK"]["up-from"]) + 3, "up"),
+            ("HARD DISK", float(levels["HARD DISK"]["back-from"]) + 0.5, "back"),
+        ]
+        # at each moment: the left and right edge of each field, then the left edge of each label (px):
+        edges_seen: list[list[float]] = []
+        # at each moment: the text of each field:
+        texts_seen: list[list[str]] = []
+        for key, seconds, phase in cases:
+            with self.subTest(level=key, phase=phase):
+                opened, stage = self.stage_at(seconds, phase)
+                self.assertEqual(key, stage["level"])
+                header: (
+                    StorageHierarchyPageTest.StopwatchBoxes
+                ) = opened.page.get_by_test_id("stopwatch").evaluate(
+                    """(stopwatch, [fieldIds, labelIds]) => {
+                            const byId = (id) => stopwatch.querySelector(`[data-testid="${id}"]`);
+                            const fields = fieldIds.map(byId);
+                            return {
+                                edges: [
+                                    ...fields.flatMap((field) => {
+                                        const box = field.getBoundingClientRect();
+                                        return [box.left, box.right];
+                                    }),
+                                    ...labelIds.map((id) => byId(id).getBoundingClientRect().left),
+                                ],
+                                widths: fields.map((field) => [field.scrollWidth, field.clientWidth]),
+                                texts: fields.map((field) => field.textContent),
+                            };
+                        }""",
+                    [fields, labels],
+                )
+
+                # each field's text fits into its box:
+                for field, (scroll_width, client_width), text in zip(
+                    fields, header["widths"], header["texts"]
+                ):
+                    self.assertLessEqual(
+                        scroll_width,
+                        client_width + 1,
+                        f"{field} cuts off {text!r}: {scroll_width} px in {client_width} px",
+                    )
+                edges_seen.append(header["edges"])
+                texts_seen.append(header["texts"])
+
+        # the moments show numbers of different lengths, else the test proves nothing:
+        self.assertEqual(len(cases), len(edges_seen))
+        for index in (fields.index("sw-cycles"), fields.index("sw-human")):
+            self.assertGreater(
+                len({len(texts[index]) for texts in texts_seen}),
+                1,
+                f"{fields[index]} has one length only: {texts_seen}",
+            )
+
+        # every edge stands where it stood at the first moment:
+        first: list[float] = edges_seen[0]
+        for (key, _, phase), edges, texts in zip(cases, edges_seen, texts_seen):
+            for index, (expected, actual) in enumerate(zip(first, edges)):
+                self.assertAlmostEqual(
+                    expected,
+                    actual,
+                    delta=0.5,
+                    msg=f"edge {index} at {key} ({phase}), texts {texts}: {edges} vs. {first}",
+                )
+
+    def test_the_stopwatch_keeps_its_place_whatever_the_steps_name(self) -> None:
+        """With a short step name in the header ("04/15 · L1"), the page's longest ("02/15 · The core and its
+        registers") and one twice as long, the stopwatch has the same left and top edge, to 0.5 px, on a wide screen
+        (1280 px, top right, beside the name) and on a narrow one (900 px, on the first line, above the name); it stays
+        inside the screen and clear of the step's text.
+
+        Fails if a long step name pushes the stopwatch onto a line of its own (on a wide screen) or one line further
+        down (on a narrow one): then it jumps whenever the step changes.
+        """
+        self.read_levels()
+        page: Page = self.opened.page
+        long_name: str = "02/15 · The core and its registers"
+        names: list[str] = ["04/15 · L1", long_name, f"{long_name} · {long_name}"]
+        try:
+            for width in (1280, 900):
+                with self.subTest(width=width):
+                    page.set_viewport_size({"width": width, "height": 720})
+                    # for each name: the stopwatch's box and the step's box (px); the name is put back at once, in the
+                    # same task, so that no frame of the film shows it:
+                    boxes: list[dict[str, dict[str, float]]] = page.get_by_test_id(
+                        "step-name"
+                    ).evaluate(
+                        """(stepName, names) => {
+                            const shown = stepName.textContent;
+                            const box = (testId) => {
+                                const r = document.querySelector(`[data-testid="${testId}"]`).getBoundingClientRect();
+                                return { left: r.left, right: r.right, top: r.top, bottom: r.bottom };
+                            };
+                            const seen = names.map((name) => {
+                                stepName.textContent = name;
+                                return { stopwatch: box('stopwatch'), step: box('step') };
+                            });
+                            stepName.textContent = shown;
+                            return seen;
+                        }""",
+                        names,
+                    )
+                    first: dict[str, float] = boxes[0]["stopwatch"]
+                    for name, seen in zip(names, boxes):
+                        stopwatch, step = seen["stopwatch"], seen["step"]
+                        for edge in ("left", "top"):
+                            self.assertAlmostEqual(
+                                first[edge],
+                                stopwatch[edge],
+                                delta=0.5,
+                                msg=f"{edge} edge with {name!r}: {stopwatch} vs. {first}",
+                            )
+                        self.assertLessEqual(
+                            stopwatch["right"],
+                            width,
+                            f"stopwatch leaves the screen: {stopwatch}",
+                        )
+                        # beside the step's text, or above it:
+                        self.assertTrue(
+                            step["right"] <= stopwatch["left"] + 0.5
+                            or stopwatch["bottom"] <= step["top"] + 0.5,
+                            f"stopwatch {stopwatch} overlaps step {step} with {name!r}",
+                        )
+        finally:
+            # back to the size of the other tests' pages (Playwright's default), and one frame, in which the page
+            # follows the new size, before the next test:
+            page.set_viewport_size({"width": 1280, "height": 720})
+            page.evaluate(
+                "() => new Promise((done) => requestAnimationFrame(() => done()))"
+            )
+
+    def test_back_at_the_floor_the_robot_puts_the_value_into_a_register(
+        self,
+    ) -> None:
+        """Back at the floor from a level of crates, the robot puts the value it fetched into a register, step by step
+        (``data-unload``): after L1, in detail, in the order of ``UNLOAD_STEPS``: it takes the value out of the crate,
+        turns, walks to the register tray, puts the value in, the value is stored, and the robot walks back; after L2
+        (and L3 and DRAM), short, in the order of ``SHORT_UNLOAD_STEPS``: it takes the value, which flies across into
+        the register, and it is stored. Back from the NVMe SSD there is no unloading (``""``). Each stay is read every
+        0.1 s, so that each step is seen. After L1 the robot (``data-robot-at``) puts and stores the value at least 3 m
+        left of where it took it, by the register tray, and ends where it began; it never jumps (at most 0.7 m in
+        0.1 s), its hands are on the crate's grip while it takes the value, and its legs (``data-legs``) swing while it
+        walks to the tray and stand together whenever it stands.
+
+        Fails if a step is unknown, missing, comes twice or out of order, if the robot does not really walk to the tray
+        (only the step's name changes), jumps, or does not come back, if its arms drop while it takes the value, if its
+        legs never swing or stand apart while it stands, if the short unloading after L2 is missing or out of order, or
+        if the SSD's pallet is unloaded like a crate.
+        """
+        _, levels = self.read_levels()
+
+        # after L1, every 0.1 s of the stay at the floor: the steps, and where the robot stands (x, z):
+        back_from: float = float(levels["L1"]["back-from"])
+        stay: list[dict[str, str]] = self.stages_between(
+            back_from + 0.05,
+            back_from + self.UNLOAD_L1 + self.STILL_AFTER_L1 - 0.05,
+            0.1,
+        )
+        for stage in stay:
+            self.assertEqual(
+                ("L1", "back"), (stage["level"], stage["phase"]), stage["t"]
+            )
+        steps: list[str] = [stage["unload"] for stage in stay]
+        self.assertEqual(self.UNLOAD_STEPS, [step for step, _ in groupby(steps)])
+
+        # while it takes the value out, its arms are forward, as on the ride up: its hands on the crate's grip:
+        for stage in stay:
+            if stage["unload"] == "take":
+                self.assertLessEqual(
+                    float(stage["grip"]), 0.02, f"grip at {stage['t']}"
+                )
+
+        # the robot puts and stores the value by the tray, at least 3 m left of where it took it, and comes back:
+        places: list[tuple[float, ...]] = [
+            tuple(float(v) for v in stage["robot-at"].split(",")) for stage in stay
+        ]
+        start_x, start_z = places[0]
+        for (x, _), step in zip(places, steps):
+            if step in ("put", "stored"):
+                self.assertLessEqual(x, start_x - 3, f"{step} at x {x}, from {start_x}")
+        self.assertAlmostEqual(start_x, places[-1][0], delta=0.01)
+        self.assertAlmostEqual(start_z, places[-1][1], delta=0.01)
+
+        # it walks, never jumps (at most 0.7 m in 0.1 s: its fastest step, on the way back, is about 0.6 m); wherever it
+        # stands, its legs stand together, and while it walks to the tray they swing:
+        standing: int = 0
+        for before, after, (x0, z0), (x1, z1) in zip(
+            stay, stay[1:], places, places[1:]
+        ):
+            where: str = f"{before['t']} s to {after['t']} s"
+            self.assertLessEqual(
+                math.hypot(x1 - x0, z1 - z0), 0.7, f"the robot jumps, {where}"
+            )
+            if (x0, z0) == (x1, z1):
+                standing += 1
+                self.assertEqual(
+                    "0.000", after["legs"], f"legs apart while it stands, {where}"
+                )
+        self.assertGreater(standing, 0, "the robot never stands")
+        self.assertTrue(
+            any(
+                float(stage["legs"]) > 0.05
+                for stage in stay
+                if stage["unload"] == "walk"
+            ),
+            "the legs do not swing while the robot walks",
+        )
+
+        # after L2, every 0.1 s of its stay: the short unloading's steps, in order:
+        l2_back: float = float(levels["L2"]["back-from"])
+        short_stay: list[dict[str, str]] = self.stages_between(
+            l2_back + 0.05, float(levels["L3"]["down-from"]) - 0.05, 0.1
+        )
+        short_steps: list[str] = [
+            stage["unload"] for stage in short_stay if stage["level"] == "L2"
+        ]
+        self.assertEqual(
+            self.SHORT_UNLOAD_STEPS, [step for step, _ in groupby(short_steps)]
+        )
+
+        # back from the NVMe SSD, nothing is unloaded:
+        opened, stage = self.stage_at(
+            float(levels["NVMe SSD"]["back-from"]) + 0.5, "back"
+        )
+        self.assertEqual("NVMe SSD", stage["level"])
+        self.assertEqual("", stage["unload"])
+
+    def test_in_the_basement_the_robot_walks_to_the_registers_and_back(self) -> None:
+        """From the film's start to the ride down to L1 (through the House's view and the basement's), every quarter
+        of a second, the robot moves at most 0.75 m (it walks, at most 3 m/s); while it reaches into the registers
+        (phase ``reach``) it stands at least 3 m left of where it started, by the cage's open side next to the register
+        tray; at the end it stands where it started, where it waits for the crate at L1.
+
+        Fails if the robot jumps out of the cage to the registers (or back), if it does not go to the registers for
+        the reach, or if it starts the ride from another place than it waits at (a jump at the ride's start).
+        """
+        _, levels = self.read_levels()
+
+        # every quarter of a second up to the ride down to L1: the time, the cage's phase and the robot's place:
+        seen: list[tuple[float, str, float, float]] = []  # (time, phase, x, z)
+        for stage in self.stages_between(0, float(levels["L1"]["down-from"]), 0.25):
+            x, z = (float(v) for v in stage["robot-at"].split(","))
+            seen.append((float(stage["t"]), stage["phase"], x, z))
+
+        # it walks, never jumps:
+        for (t0, _, x0, z0), (t1, _, x1, z1) in zip(seen, seen[1:]):
+            self.assertLessEqual(
+                math.hypot(x1 - x0, z1 - z0),
+                0.75,
+                f"the robot jumps between {t0} s ({x0}, {z0}) and {t1} s ({x1}, {z1})",
+            )
+
+        # it reaches by the registers, and ends where it started:
+        start_x: float = seen[0][2]
+        at_reach: list[float] = [x for _, phase, x, _ in seen if phase == "reach"]
+        self.assertTrue(at_reach, "no reach sampled")
+        self.assertTrue(
+            all(x <= start_x - 3 for x in at_reach),
+            f"not by the registers: {at_reach} from {start_x}",
+        )
+        self.assertAlmostEqual(seen[0][2], seen[-1][2], delta=0.01)
+        self.assertAlmostEqual(seen[0][3], seen[-1][3], delta=0.01)
+
+    def test_coming_home_from_the_hard_disk_the_camera_zooms_in_early_and_slowly(
+        self,
+    ) -> None:
+        """On the ride up from the hard disk, every quarter of a second, the picture (``data-view-h``, its half height
+        in metres) grows to one highest point and from there only gets smaller or stays: the camera zooms out once as
+        the cage leaves, then only in. Once it has zoomed out (3 s after leaving) until the cage is home, every second
+        the picture gets smaller by at most eight times; halfway home it is already at most a hundredth of the overview
+        of the whole Earth (7,400 km).
+
+        Fails if the camera stays on the overview and zooms in only at the end (some million times in a few seconds),
+        if it zooms in and out on the way out (in, out, in while the cage leaves), or if it zooms out on the way home.
+        """
+        _, levels = self.read_levels()
+        up_from: float = float(levels["HARD DISK"]["up-from"])
+        back_from: float = float(levels["HARD DISK"]["back-from"])
+
+        # out once, then only in (1 % slack for rounding):
+        ride: list[tuple[float, float]] = []  # (time, picture's half height)
+        for step in range(1, int((back_from - up_from) * 4)):
+            opened, stage = self.stage_at(up_from + step / 4, "up")
+            ride.append((up_from + step / 4, float(stage["view-h"])))
+        top: int = max(range(len(ride)), key=lambda i: ride[i][1])
+        for (t0, h0), (t1, h1) in zip(ride[:top], ride[1 : top + 1]):
+            self.assertGreaterEqual(
+                h1,
+                h0 / 1.01,
+                f"zooms in while leaving, {t0} s to {t1} s: {h0} m to {h1} m",
+            )
+        for (t0, h0), (t1, h1) in zip(ride[top:], ride[top + 1 :]):
+            self.assertLessEqual(
+                h1,
+                h0 * 1.01,
+                f"zooms out on the way home, {t0} s to {t1} s: {h0} m to {h1} m",
+            )
+
+        # every second from 3 s after leaving until home: never out, and in by at most eight times a second:
+        heights: list[tuple[float, float]] = []  # (time, picture's half height)
+        seconds: float = up_from + 3
+        while seconds < back_from:
+            opened, stage = self.stage_at(seconds, "up")
+            heights.append((seconds, float(stage["view-h"])))
+            seconds += 1
+        for (t0, h0), (t1, h1) in zip(heights, heights[1:]):
+            self.assertLessEqual(
+                h1,
+                h0 * 1.01,
+                f"the camera zooms out between {t0} s and {t1} s: {h0} m to {h1} m",
+            )
+            self.assertLessEqual(
+                h0 / h1,
+                8,
+                f"the camera zooms in fast between {t0} s and {t1} s: {h0} m to {h1} m",
+            )
+
+        # halfway home, at most a hundredth of the Earth's overview:
+        halfway: float = (up_from + back_from) / 2
+        self.assertLessEqual(
+            min(h for t, h in heights if t <= halfway),
+            7.4e6 / 100,
+            f"not zoomed in halfway home: {heights}",
+        )
+
+    def test_coming_closer_the_strata_and_their_signs_fade_in(self) -> None:
+        """On the ride up from the hard disk, every 0.2 s from 2.5 s before to 2.5 s after the moment the picture's
+        half height (``data-view-h``) gets lower than 100 km (where the Earth cut open gives way to the strata of the
+        section): the strata's grain and colours, the section's signs and holes and the sky (``data-near-detail``, 0
+        none ... 1 all) are 0 while the half height is 100 km or more and 1 from 30 km down (the SSD's overview, 29 km,
+        in full); in between they grow, by at most 0.5 from one sample to the next, and at least one sample shows them
+        half-way (0.2 to 0.8). Samples are seen on both sides: at 100 km or more, and at 30 km or less.
+
+        Fails if the strata's textures and the signs appear all at once ("out of nowhere"), or if they come in at
+        another scale (e.g. later, from 30 km only).
+        """
+        _, levels = self.read_levels()
+        up_from: float = float(levels["HARD DISK"]["up-from"])
+        back_from: float = float(levels["HARD DISK"]["back-from"])
+
+        # the moment the half height gets lower than 100 km, to a tenth of a second, before the cage is home:
+        seconds: float = up_from + 3
+        while seconds < back_from:
+            opened, stage = self.stage_at(seconds, "up")
+            if float(stage["view-h"]) < 1e5:
+                break
+            seconds += 0.1
+        self.assertLess(seconds, back_from, "the picture never gets lower than 100 km")
+
+        # every 0.2 s around that moment: the time, the half height, the detail:
+        seen: list[tuple[float, float, float]] = []  # (time, half height, detail)
+        for step in range(-12, 13):
+            opened, stage = self.stage_at(seconds + step * 0.2, "up")
+            seen.append(
+                (
+                    seconds + step * 0.2,
+                    float(stage["view-h"]),
+                    float(stage["near-detail"]),
+                )
+            )
+
+        # none at 100 km and more, all at 30 km and less, and both sides are sampled:
+        self.assertTrue(any(height >= 1e5 for _, height, _ in seen), f"{seen}")
+        self.assertTrue(any(height <= 3e4 for _, height, _ in seen), f"{seen}")
+        for t, height, detail in seen:
+            if height >= 1e5:
+                self.assertEqual(
+                    0, detail, f"detail {detail} at {t} s, the picture {height} m high"
+                )
+            if height <= 3e4:
+                self.assertEqual(
+                    1, detail, f"detail {detail} at {t} s, the picture {height} m high"
+                )
+
+        # in between, it grows step by step, and is seen half-way:
+        for (t0, _, d0), (t1, _, d1) in zip(seen, seen[1:]):
+            self.assertLessEqual(
+                d0, d1, f"the detail fades out between {t0} s and {t1} s"
+            )
+            self.assertLessEqual(
+                d1 - d0,
+                0.5,
+                f"the detail jumps between {t0} s and {t1} s: {d0} to {d1}",
+            )
+        self.assertTrue(
+            any(0.2 <= d <= 0.8 for _, _, d in seen), f"never half-way: {seen}"
+        )
+
+    def test_after_l1_the_robot_stands_still_with_the_value_stored(self) -> None:
+        """After L1's unloading (``UNLOAD_L1`` seconds after the cage is back at the floor) the robot stands still for
+        ``STILL_AFTER_L1`` seconds: at the start, the middle and the end of that time, the film is still back from L1,
+        the unloading is over (``data-unload`` is ``back``, the last step), the used crate is gone (``data-crate`` is
+        ``""``), and the robot (``data-robot-at``) stands at the same place each time, within 1 cm of where it stood on
+        the ride down to L1, its legs together (``data-legs`` 0); just after it, the film shows the start of the ride
+        to L2.
+
+        Fails if the still time is missing (the film moves on to L2 at once), if it is made by drawing the unloading
+        out (the robot still carries the value, still walks, or the crate is still there), or if it lasts longer than
+        planned.
+        """
+        _, levels = self.read_levels()
+
+        # where the robot stands on the ride down to L1:
+        _, stage = self.stage_at(float(levels["L1"]["down-from"]) + 0.5, "down")
+        home: tuple[float, ...] = tuple(float(v) for v in stage["robot-at"].split(","))
+
+        # at the start, the middle and the end of the still time: back from L1, unloaded, no crate, the robot still:
+        still_from: float = float(levels["L1"]["back-from"]) + self.UNLOAD_L1
+        places: list[str] = []
+        for offset in (0.2, self.STILL_AFTER_L1 / 2, self.STILL_AFTER_L1 - 0.2):
+            with self.subTest(offset=offset):
+                opened, stage = self.stage_at(still_from + offset, "back")
+                self.assertEqual("L1", stage["level"])
+                self.assertEqual("back", stage["unload"])
+                self.assertEqual("", stage["crate"])
+                self.assertEqual("0.000", stage["legs"])
+                places.append(stage["robot-at"])
+                x, z = (float(v) for v in stage["robot-at"].split(","))
+                self.assertLessEqual(
+                    math.hypot(x - home[0], z - home[1]), 0.01, stage["robot-at"]
+                )
+        self.assertEqual(1, len(set(places)), f"the robot moves: {places}")
+
+        # just after the still time, the film shows the start of the ride to L2 (the cage idle, no level yet):
+        opened, stage = self.stage_at(still_from + self.STILL_AFTER_L1 + 0.2, "idle")
+        self.assertEqual("", stage["level"])
+        step_name: str = opened.page.get_by_test_id("step-name").text_content() or ""
+        self.assertTrue(step_name.endswith("· L2"), step_name)
+
+    def test_on_its_way_up_the_cage_leaves_a_copy_in_every_faster_level(
+        self,
+    ) -> None:
+        """Inclusion, as in the textbook: on its way up, the cage leaves a copy in every faster level it passes (among
+        L1, L2, L3 and DRAM), and a page from the NVMe SSD or the hard disk also leaves one in DRAM. The copies stay, so
+        that back at the floor from each level, the copies counted so far (``data-copies``) grow by one in every level
+        faster than it: none after L1, then L1:1, then L1:2 and L2:1, and so on up to L1:5, L2:4, L3:3, DRAM:2 after the
+        hard disk. Just after the cage leaves L2, before it passes L1, L1 has no copy yet. The copies of single crates
+        lie in their level's top layer (``data-copy-layers``, 0 from the top), clear of the depth sign one layer down;
+        main memory's two pages lie under each other (layers 0 and 2, two layers high each).
+
+        Fails if the cage leaves a copy in the level it comes from or in a slower one, misses a level it passes, if the
+        SSD's or the hard disk's page leaves no copy in DRAM, if copies vanish, if a copy appears before the cage
+        passes its level, or if a copy lies below the top layer (behind the depth sign).
+        """
+        _, levels = self.read_levels()
+
+        # where the copies lie, from the top layer down:
+        layers: dict[str, str] = {
+            key: levels[key]["copy-layers"] for key in ("L1", "L2", "L3", "DRAM")
+        }
+        self.assertEqual(
+            {"L1": "0,0,0,0,0", "L2": "0,0,0,0", "L3": "0,0,0", "DRAM": "0,2"}, layers
+        )
+
+        # (level, offset after its back-from (s), the copies counted at the floor):
+        cases: list[tuple[str, float, str]] = [
+            ("L1", 1, "L1:0,L2:0,L3:0,DRAM:0"),
+            ("L2", 0.5, "L1:1,L2:0,L3:0,DRAM:0"),
+            ("L3", 0.5, "L1:2,L2:1,L3:0,DRAM:0"),
+            ("DRAM", 0.5, "L1:3,L2:2,L3:1,DRAM:0"),
+            ("NVMe SSD", 0.5, "L1:4,L2:3,L3:2,DRAM:1"),
+            ("HARD DISK", 0.5, "L1:5,L2:4,L3:3,DRAM:2"),
+        ]
+        for key, offset, copies in cases:
+            with self.subTest(level=key):
+                opened, stage = self.stage_at(
+                    float(levels[key]["back-from"]) + offset, "back"
+                )
+                self.assertEqual(key, stage["level"])
+                self.assertEqual(copies, stage["copies"])
+                self.assert_no_new_errors()
+
+        # just after the cage leaves L2, it has not passed L1 yet: no copy so far:
+        opened, stage = self.stage_at(float(levels["L2"]["up-from"]) + 0.05, "up")
+        self.assertEqual("L2", stage["level"])
+        self.assertEqual("L1:0,L2:0,L3:0,DRAM:0", stage["copies"])
+        self.assert_no_new_errors()
+
+    def test_after_the_intro_the_narration_gives_access_times_in_cycles_and_made_up_time(
+        self,
+    ) -> None:
+        """The narration names a real time only in its intro, where one cycle (0.175 ns) becomes half a second; from
+        then on, its captions give access times in cycles and in that made-up time only, never in nano-, micro- or
+        milliseconds. Next shows the captions one after the other; the second one is the intro.
+
+        Fails if a level's caption names its real access time (e.g. "Main memory: 100 nanoseconds, ...").
+        """
+        # from the start, Next to the end, each caption once:
+        opened, _ = self.stage_at(0, None)
+        page: Page = opened.page
+        text = page.get_by_test_id("nar-text")
+        captions: list[str] = []
+        clicks: int = 0
+        while page.get_by_test_id("play").get_attribute("data-state") != "ended":
+            self.assertLess(clicks, MAX_NEXT_CLICKS, "Next did not reach the end")
+            page.get_by_test_id("next").click()
+            clicks += 1
+            caption: str = " ".join((text.text_content() or "").split())
+            if not captions or captions[-1] != caption:
+                captions.append(caption)
+
+        # a real time only in the intro:
+        real_time: re.Pattern[str] = re.compile(
+            r"\b(nano|micro|milli)seconds?\b|\b(ns|µs|ms)\b"
+        )
+        self.assertRegex(captions[1], real_time, "the intro names one cycle's time")
+        for caption in captions[2:]:
+            with self.subTest(caption=caption):
+                self.assertNotRegex(caption, real_time)
+
+    def test_over_l3s_whole_trip_the_stopwatch_never_runs_back_and_the_depth_never_jumps(
+        self,
+    ) -> None:
+        """Every quarter of a second from the start of the ride down to L3 until the ride to main memory begins, the
+        trip's parts come in order (down, pickup, up, back at the floor), and at every sample the cage's depth below
+        the floor and the stopwatch's human time agree with one constant speed v (4 cycles' depth per second of human
+        time): on the way down depth = v · human; during the pickup depth = L3's stop, the stopwatch standing still; on
+        the way up depth = 2 · stop − v · human; back at the floor depth = 0 (to a nanometre per metre of the stop).
+        The human time never goes back, and from one sample to the next the depth changes by no more than the ride
+        allows: the film shows a ride down to depth D in 1 + ln(D ÷ L1's depth) seconds, in the first second at L1's
+        pace (45 cm a second), then faster in proportion to the depth, so in a quarter of a second the depth grows by
+        at most e^0.25 times, by at most 22 % of the deeper of two samples (the way up mirrors it); allowed: 23 % of
+        the deeper plus 15 cm.
+
+        Fails if the cage's speed changes anywhere on the trip, if the depth jumps where one part of the trip hands over
+        to the next (e.g. the pickup at another depth than the ride's end), if the stopwatch runs back or on during the
+        pickup, or if the parts come out of order.
+        """
+        _, levels = self.read_levels()
+
+        # every quarter of a second of L3's trip, until the ride to main memory; the trip ends where the cage waits
+        # for that ride (no level, idle):
+        # (from just after the ride starts: through the slider, the time can come out a hair before it)
+        sampled: list[dict[str, str]] = self.stages_between(
+            float(levels["L3"]["down-from"]) + 0.01,
+            float(levels["DRAM"]["down-from"]) - 0.05,
+            0.25,
+        )
+        stages: list[dict[str, str]] = [
+            stage for stage in sampled if stage["level"] == "L3"
+        ]
+        self.assertEqual(stages, sampled[: len(stages)], "L3's trip is interrupted")
+        for stage in sampled[len(stages) :]:
+            self.assertEqual(("", "idle"), (stage["level"], stage["phase"]), stage["t"])
+
+        # the parts in order:
+        phases: list[str] = [stage["phase"] for stage in stages]
+        self.assertEqual(
+            ["down", "pickup", "up", "back"], [phase for phase, _ in groupby(phases)]
+        )
+
+        # the stopwatch never goes back, the depth never jumps:
+        for before, after in zip(stages, stages[1:]):
+            where: str = f"{before['t']} s to {after['t']} s"
+            self.assertGreaterEqual(
+                float(after["human-s"]), float(before["human-s"]), where
+            )
+            d0: float = float(before["depth"]) - self.FLOOR_DEPTH
+            d1: float = float(after["depth"]) - self.FLOOR_DEPTH
+            self.assertLessEqual(
+                abs(d1 - d0), 0.23 * max(d0, d1) + 0.15, f"{where}: {d0} m to {d1} m"
+            )
+
+        # depth and human time agree with one constant speed in every part of the trip:
+        speed: float = 4 * self.SCALE
+        stop: float = float(levels["L3"]["stop"])
+        for stage in stages:
+            below: float = float(stage["depth"]) - self.FLOOR_DEPTH
+            human: float = float(stage["human-s"])
+            expected: float = {
+                "down": speed * human,
+                "pickup": stop,
+                "up": 2 * stop - speed * human,
+                "back": 0.0,
+            }[stage["phase"]]
+            self.assertAlmostEqual(
+                expected,
+                below,
+                delta=1e-9 * stop,
+                msg=f"{stage['phase']} at {stage['t']}",
+            )
+
+        # during the pickup the stopwatch stands still:
+        at_pickup: set[str] = {
+            stage["human-s"] for stage in stages if stage["phase"] == "pickup"
+        }
+        self.assertEqual(
+            1, len(at_pickup), f"the stopwatch runs during the pickup: {at_pickup}"
+        )
+
+    def test_the_part_buttons_jump_to_their_parts_and_play(self) -> None:
+        """Each of the five part buttons (caches, memory, SSD, hard disk, Earth), pressed from part 5 down to part 1,
+        starting near the film's end (so that each jumps back from a later time), jumps to the start of its part and
+        plays from there, and marks itself as the current part while the four others are not marked. The film's time
+        is read in the same step as the click, before the film has run on. Part 1 starts the film (at 0); parts 2 to 5
+        start where the step named after them begins (main memory, the SSD, the hard disk, "To the centre of the
+        Earth"), the cage waiting at the floor, after the level before and, for parts 2 to 4, before the part's ride
+        down (``down-from``); 0.01 s earlier another step shows.
+
+        Fails if a button jumps to another part or into the middle of one (e.g. past the start of its step), does not
+        jump at all, does not play, leaves another part marked, or cannot be clicked (hidden or covered).
+        """
+        _, levels = self.read_levels()
+        page: Page = self.opened.page
+        stage = page.get_by_test_id("stage")
+        play = page.get_by_test_id("play")
+        step_name = page.get_by_test_id("step-name")
+        # parts 2 to 5: (the level the cage is back from before the part, the part's level or None, its step's name):
+        later_parts: dict[int, tuple[str, str | None, str]] = {
+            2: ("L3", "DRAM", "Main memory"),
+            3: ("DRAM", "NVMe SSD", "An NVMe SSD"),
+            4: ("NVMe SSD", "HARD DISK", "A hard disk"),
+            5: ("HARD DISK", None, "To the centre of the Earth"),
+        }
+        # near the film's end, after part 5 has begun:
+        self.stage_at(float(levels["HARD DISK"]["back-from"]) + 5, None)
+        for part in range(5, 0, -1):
+            with self.subTest(part=part):
+                # the button can be clicked; it jumps (its time read at once), plays, and is the one part marked:
+                button = page.get_by_test_id(f"chapter-{part}")
+                button.click(trial=True)
+                seconds: float = float(
+                    button.evaluate(
+                        "(b, stage) => { b.click(); return stage.dataset.t; }",
+                        stage.element_handle(),
+                    )
+                )
+                expect(play).to_have_attribute("data-state", "playing")
+                play.click()
+                expect(play).to_have_attribute("data-state", "paused")
+                expect(button).to_have_attribute("aria-current", "true")
+                for other in range(1, 6):
+                    if other != part:
+                        expect(
+                            page.get_by_test_id(f"chapter-{other}")
+                        ).not_to_have_attribute("aria-current", "true")
+                if part == 1:
+                    self.assertEqual(0, seconds)
+                    continue
+
+                # after the level before, and before the part's ride:
+                before, key, title = later_parts[part]
+                self.assertGreater(seconds, float(levels[before]["back-from"]))
+                if key is not None:
+                    self.assertLess(seconds, float(levels[key]["down-from"]))
+
+                # 1 ms after the time read (data-t has three decimals: the part begins at most half a millisecond
+                # from it), the part's step shows, the cage waiting at the floor:
+                _, shown = self.stage_at(seconds + 0.001, None)
+                expect(step_name).to_have_text(re.compile(f"· {re.escape(title)}$"))
+                self.assertEqual("idle", shown["phase"], shown["t"])
+
+                # 0.01 s before, another step:
+                self.stage_at(seconds - 0.01, None)
+                expect(step_name).not_to_have_text(re.compile(f"· {re.escape(title)}$"))
+
+    def test_back_goes_to_the_stop_before_or_to_the_start(self) -> None:
+        """From the film's start, Next goes on to the first and then to the second stop; Back (the left arrow key)
+        goes from the second stop to the first, and from the first to the film's start; the film stays paused.
+
+        Fails if Back skips a stop, stays where it is, or does not go back to the start from the first stop.
+        """
+        opened, _ = self.stage_at(0, None)
+        page: Page = opened.page
+        stage = page.get_by_test_id("stage")
+
+        # Next to the first and to the second stop:
+        page.get_by_test_id("next").click()
+        first: str = stage.get_attribute("data-t") or ""
+        page.get_by_test_id("next").click()
+        second: str = stage.get_attribute("data-t") or ""
+        self.assertGreater(float(first), 0)
+        self.assertGreater(float(second), float(first))
+
+        # Back to the first stop, then to the start (with the focus on the page, not on a control):
+        page.evaluate("() => document.activeElement?.blur()")
+        page.keyboard.press("ArrowLeft")
+        expect(stage).to_have_attribute("data-t", first)
+        page.keyboard.press("ArrowLeft")
+        expect(stage).to_have_attribute("data-t", "0.000")
+        expect(page.get_by_test_id("play")).to_have_attribute("data-state", "paused")
+
+    def test_the_full_screen_button_and_the_key_f_switch_full_screen(self) -> None:
+        """The full-screen button puts the page into full screen and says so (``aria-pressed`` true); the key F
+        leaves it again (``aria-pressed`` false), and F once more enters it.
+
+        Fails if the button or the key does nothing, or if the button does not show whether the page is in full screen.
+        """
+        self.read_levels()
+        page: Page = self.opened.page
+        button = page.get_by_test_id("fullscreen")
+        in_full_screen: str = "() => document.fullscreenElement !== null"
+        try:
+            # the button enters full screen:
+            button.click()
+            expect(button).to_have_attribute("aria-pressed", "true")
+            self.assertTrue(page.evaluate(in_full_screen))
+
+            # F leaves it, and enters it again:
+            page.keyboard.press("f")
+            expect(button).to_have_attribute("aria-pressed", "false")
+            self.assertFalse(page.evaluate(in_full_screen))
+            page.keyboard.press("f")
+            expect(button).to_have_attribute("aria-pressed", "true")
+        finally:
+            # out of full screen for the next test:
+            page.evaluate(
+                "() => document.fullscreenElement && document.exitFullscreen()"
+            )
+            expect(button).to_have_attribute("aria-pressed", "false")
+
+    def test_the_register_tray_lies_in_the_room_l1_leaves_for_it(self) -> None:
+        """The register tray with its bottom, back wall and sides (``data-box`` of the registers, x0,x1,y0,y1,z0,z1 in
+        metres) lies inside the room that L1 leaves for it under the basement floor (``data-room`` of L1; its z1 is
+        infinite: the room is open at the front, at the cut), with a gap of at least 5 mm on every side: the two drawn
+        objects do not meet. The room comes from L1's layout (its crate places), the tray's walls from its box.
+
+        Fails if the tray reaches into L1's crates or its body behind it (faces inside one another, or in one plane).
+        """
+        _, levels = self.read_levels()
+        tray: list[float] = [float(v) for v in levels["REGISTERS"]["box"].split(",")]
+        room: list[float] = [float(v) for v in levels["L1"]["room"].split(",")]
+        self.assertEqual((6, 6), (len(tray), len(room)))
+        for index, axis in enumerate("xyz"):
+            with self.subTest(axis=axis):
+                self.assertGreaterEqual(
+                    tray[2 * index] - room[2 * index],
+                    0.005,
+                    f"tray {tray}, room {room}",
+                )
+                self.assertGreaterEqual(
+                    room[2 * index + 1] - tray[2 * index + 1],
+                    0.005,
+                    f"tray {tray}, room {room}",
+                )
+
+    def test_after_the_ssd_the_pallet_fades_and_the_robot_walks_back_to_its_place(
+        self,
+    ) -> None:
+        """Back at the floor from the NVMe SSD, every 0.1 s from 0.05 s to 2.55 s after ``back-from``, then 3.25 s after
+        it (in the view where the hard disk's part begins) and 0.5 s after the ride down to the hard disk begins: the
+        pallet (``data-pallet``) shows at first, fades (``data-pallet-opacity`` between 0 and 1 at some reading) and is
+        gone from 0.8 s after ``back-from`` on; the robot (``data-robot-at``) starts by the pallet, more than 2 m from
+        its place, never moves more than 0.35 m between two readings 0.1 s apart (its fastest step on this walk is
+        about 0.25 m), and stands within 1 cm of where it stood on the ride down to the SSD at the walk's last reading
+        and the two after it, ready for the next ride.
+
+        Fails if the pallet vanishes at once or stays, if the robot jumps from the pallet to its place (2.3 m in one
+        frame), or if it starts the next ride from another place.
+        """
+        _, levels = self.read_levels()
+
+        # where the robot stands on the ride down to the SSD:
+        _, stage = self.stage_at(float(levels["NVMe SSD"]["down-from"]) + 0.5, "down")
+        home: tuple[float, ...] = tuple(float(v) for v in stage["robot-at"].split(","))
+
+        # every 0.1 s of the walk back, then where the hard disk's part and its ride begin:
+        back_from: float = float(levels["NVMe SSD"]["back-from"])
+        walk: list[dict[str, str]] = self.stages_between(
+            back_from + 0.05, back_from + 2.6, 0.1
+        )
+        later: list[dict[str, str]] = [
+            self.stage_at(back_from + 3.25, None)[1],
+            self.stage_at(float(levels["HARD DISK"]["down-from"]) + 0.5, "down")[1],
+        ]
+
+        # the pallet shows at first, fades, and is gone from 0.8 s on (data-t has three decimals, hence 1 ms more):
+        self.assertEqual("true", walk[0]["pallet"])
+        self.assertTrue(
+            any(0 < float(stage["pallet-opacity"]) < 1 for stage in walk),
+            "the pallet does not fade",
+        )
+        for stage in walk + later:
+            if float(stage["t"]) >= back_from + 0.8 + 1e-3:
+                self.assertEqual("false", stage["pallet"], stage["t"])
+
+        # the robot walks from the pallet to its place, never jumping:
+        places: list[tuple[float, ...]] = [
+            tuple(float(v) for v in stage["robot-at"].split(",")) for stage in walk
+        ]
+        self.assertGreater(math.dist(places[0], home), 2, "not by the pallet at first")
+        for before, after, here, there in zip(walk, walk[1:], places, places[1:]):
+            self.assertLessEqual(
+                math.dist(here, there),
+                0.35,
+                f"the robot jumps, {before['t']} s to {after['t']} s: {here} to {there}",
+            )
+
+        # it stays at its place, also when the hard disk's part and its ride begin:
+        for stage in [walk[-1]] + later:
+            there: tuple[float, ...] = tuple(
+                float(v) for v in stage["robot-at"].split(",")
+            )
+            self.assertLessEqual(
+                math.dist(there, home), 0.01, f"{there} vs. {home} at {stage['t']}"
+            )
+
+    def test_the_stopwatch_rounds_before_it_picks_a_unit(self) -> None:
+        """On rides down, at moments where a value rounds up to the next unit or to fewer decimals, the stopwatch shows
+        it so: the human time from 59.95 s to just under 60 s reads "1 min 0 s", the depth below the surface from
+        999.995 m to just under 1,000 m reads "1.00 km", the real time (``REAL_NS_PER_CYCLE`` per ``HUMAN_S_PER_CYCLE``
+        of human time) from 999.95 ns to just under 1,000 ns reads "1.0 µs" and from 9.995 ns to just under 10 ns
+        "10.0 ns". Each moment is found by halving a span of the film's time around it.
+
+        Fails if a field picks its unit or its decimals before it rounds, and shows "60 s", "1000.00 m", "1000.0 ns" or
+        "10.00 ns".
+        """
+        _, levels = self.read_levels()
+        ns_per_human_s: float = self.REAL_NS_PER_CYCLE / self.HUMAN_S_PER_CYCLE
+
+        def moment(
+            start: float,
+            end: float,
+            read: Callable[[dict[str, str]], float],
+            low: float,
+            high: float,
+        ) -> dict[str, str]:
+            """Leaves the page at a time of the ride down between start and end at which read(stage), growing with
+            the time there, lies in [low, high), found by halving the span, and returns the stage there; fails if
+            there is none.
+            """
+            for _ in range(60):
+                middle: float = (start + end) / 2
+                _, stage = self.stage_at(middle, None)
+                value: float = read(stage)
+                if low <= value < high and stage["phase"] == "down":
+                    return stage
+                start, end = (middle, end) if value < low else (start, middle)
+            self.fail(f"no time on the ride down with a value in [{low}, {high})")
+
+        # (field, the level on whose ride down it is checked, what grows there, its window, the text expected):
+        cases: list[
+            tuple[str, str, Callable[[dict[str, str]], float], float, float, str]
+        ] = [
+            (
+                "sw-human",
+                "DRAM",
+                lambda stage: float(stage["human-s"]),
+                59.95,
+                60,
+                "1 min 0 s",
+            ),
+            (
+                "sw-depth",
+                "NVMe SSD",
+                lambda stage: float(stage["depth"]),
+                999.995,
+                1000,
+                "1.00 km",
+            ),
+            (
+                "sw-real",
+                "NVMe SSD",
+                lambda stage: ns_per_human_s * float(stage["human-s"]),
+                999.95,
+                1000,
+                "1.0 µs",
+            ),
+            (
+                "sw-real",
+                "DRAM",
+                lambda stage: ns_per_human_s * float(stage["human-s"]),
+                9.995,
+                10,
+                "10.0 ns",
+            ),
+        ]
+        for field, key, read, low, high, text in cases:
+            with self.subTest(field=field, text=text):
+                # the page left at such a moment of the ride down to the level (its pickup, where the value stands at
+                # its highest, ends the span), the field shows the text:
+                moment(
+                    float(levels[key]["down-from"]) + 0.01,
+                    float(levels[key]["pickup-from"]),
+                    read,
+                    low,
+                    high,
+                )
+                expect(self.opened.page.get_by_test_id(field)).to_have_text(text)
+
+    def test_after_a_pause_the_header_shows_the_numbers_of_that_moment(self) -> None:
+        """While the film plays a long ride fast, the header's numbers change five times a second only (else they
+        would flicker); paused, the page draws once more, so that the stopwatch's cycles match the time it stopped at:
+        ``sw-cycles`` is ``data-human-s`` ÷ 0.5 s, rounded, with thousands separated. To make the 200 ms of the
+        header's pace certain, the page's clock (``performance.now``) stands still while the film plays and pauses, so
+        its numbers are at most as new as the first frame (checked: just before the pause they lag behind the film);
+        it runs again afterwards. The ride: 6 s into the one down to the SSD, where the film runs about 150 times
+        faster than real time (the header slows down from 50 times on).
+
+        Fails if pausing leaves the header with the numbers of a moment before the pause.
+        """
+        _, levels = self.read_levels()
+        page: Page = self.opened.page
+        play = page.get_by_test_id("play")
+
+        # 6 s into the ride down to the SSD, playing, with the page's clock standing still:
+        start: float = float(levels["NVMe SSD"]["down-from"]) + 6
+        stage = page.get_by_test_id("stage")
+        self.stage_at(start, "down")
+        page.evaluate(
+            """() => { window.__now = performance.now; const t0 = performance.now();
+                performance.now = () => t0; }"""
+        )
+        try:
+            play.click()
+            expect(play).to_have_attribute("data-state", "playing")
+            page.wait_for_function(
+                "([stage, seconds]) => Number(stage.dataset.t) > seconds + 0.3",
+                arg=[stage.element_handle(), start],
+                timeout=FILM_TIMEOUT,
+            )
+
+            # while it plays, the header lags behind the film (read in one step: the cycles shown and the time):
+            shown, human_now = stage.evaluate(
+                """(stage) => [document.querySelector('[data-testid="sw-cycles"]').textContent,
+                    Number(stage.dataset.humanS)]"""
+            )
+            self.assertNotEqual(f"{round(human_now / self.HUMAN_S_PER_CYCLE):,}", shown)
+
+            # paused: after the page's next frame, the cycles shown match the time it stopped at:
+            play.click()
+            expect(play).to_have_attribute("data-state", "paused")
+            page.evaluate(
+                "() => new Promise((done) => requestAnimationFrame(() => requestAnimationFrame(done)))"
+            )
+            human: float = float(stage.get_attribute("data-human-s") or "")
+            expect(page.get_by_test_id("sw-cycles")).to_have_text(
+                f"{round(human / self.HUMAN_S_PER_CYCLE):,}"
+            )
+        finally:
+            # the page's clock runs again:
+            page.evaluate("() => { performance.now = window.__now; }")
 
 
 @unittest.skipUnless(PLAYWRIGHT_AVAILABLE, SKIP_REASON)
