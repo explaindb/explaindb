@@ -33,6 +33,15 @@ class ListQueue[ObjectType](ReadWriteQueue[ObjectType], Iterator):
         """Initializes the ListQueue."""
         super().__init__()
         self.buffer: list[ObjectType] = list[ObjectType]()
+        # index in the buffer of the element the next call of __next__ returns:
+        self.read_position: int = 0
+
+    def reset(self) -> None:
+        """See :meth:`ReadWriteQueue.reset`.
+
+        Sets the read position to 0.
+        """
+        self.read_position = 0
 
     def flush(self) -> int:
         """See :meth:`WriteQueue.flush`.
@@ -46,24 +55,36 @@ class ListQueue[ObjectType](ReadWriteQueue[ObjectType], Iterator):
         """See :meth:`WriteQueue.insert`."""
         self.buffer.append(entry)
 
-    def __iter__(self):
-        """Returns the iterator object. Required to be able to loop over the contents of the queue."""
-
-        return self.buffer.__iter__()
+    def __iter__(self) -> Iterator[ObjectType]:
+        """Restarts reading at the first element and returns the queue itself as its iterator. Required to be able to
+        loop over the contents of the queue."""
+        self.read_position = 0
+        return self
 
     def __next__(self) -> ObjectType:
-        """Returns the next entry from the queue without removing it.
+        """See :meth:`ReadQueue.__next__`."""
+        # all elements read?
+        if self.read_position >= len(self.buffer):
+            raise StopIteration
 
-        @return The next entry from the queue.
-        """
-        return self.__iter__().__next__()
+        # return the element at the read position and advance the read position:
+        element: ObjectType = self.buffer[self.read_position]
+        self.read_position += 1
+        return element
 
     def pop(self) -> ObjectType:
-        """Pops the first element from the queue.
+        """See :meth:`ReadQueue.pop`.
 
-        @return The first element from the queue.
+        If the removed element was already read, the read position moves back by one, so reading continues with the
+        same element as before.
         """
-        return self.buffer.pop(0)
+        element: ObjectType = self.buffer.pop(0)
+
+        # all elements moved one place to the front; keep the read position on the same next element:
+        if self.read_position > 0:
+            self.read_position -= 1
+
+        return element
 
     def size(self) -> int:
         """See :meth:`WriteQueue.size`."""

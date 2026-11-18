@@ -29,8 +29,11 @@ class ReadQueue[ObjectType](ABC, Iterator):
 
     @abstractmethod
     def __next__(self) -> ObjectType:
-        """Reads the next entry from the queue without removing it from the queue. Corresponds to the next() aka get()
-        and peek() method of a container."""
+        """Returns the next element of the queue and advances the read position; the element stays in the queue.
+        Calling iter() on the queue restarts reading at the first element. Raises StopIteration once all elements
+        have been read.
+
+        @return The next element of the queue."""
 
     @abstractmethod
     def pop(self) -> ObjectType:
