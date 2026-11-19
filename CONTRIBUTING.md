@@ -30,6 +30,10 @@ an export of it. After every dependency change, regenerate it (the CI job
 uv export --frozen --no-dev --no-hashes --no-header --no-annotate --format requirements.txt -o .binder/requirements.txt
 ```
 
+Declare every third-party package that code in `system/` imports in `pyproject.toml`, even if a declared
+package already pulls it in: otherwise the import breaks as soon as that package drops the dependency.
+`system/tests/repo/test_declared_imports.py` checks this.
+
 The dependency group `browser-tests` in `pyproject.toml` holds what only the browser test of the
 pages in `visualizations/` and the tool that turns them into videos need (see
 [Visualizations](#visualizations)). `uv sync` does not install it, and the export above leaves it

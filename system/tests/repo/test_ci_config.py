@@ -32,7 +32,6 @@ from collections.abc import Iterable
 from pathlib import Path
 from typing import Any
 
-# pyyaml is not a declared dependency of the project: it comes with jupyter (via jupyter-events).
 import yaml
 
 # the browser tests of visualizations/, whose number of CI jobs and job variable visualization_test must match; the
