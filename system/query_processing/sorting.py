@@ -276,9 +276,13 @@ class ExternalMergeSort[ObjectType](Iterator):
         @param queue_factory: The factory to use to create read and write queues.
         @param number_of_tuples_in_main_memory: The number of tuples that can be stored in memory. Must be at least
         fan_in + 1, which is one tuple per input run plus one for the output run.
-        @param fan_in: The fan-in of the merge sort.
+        @param fan_in: The fan-in of the merge sort. Must be at least 2.
+        @raise ValueError: if fan_in is less than 2.
 
         """
+        # a merge of fewer than two runs does not reduce the number of runs, so merge() could loop forever:
+        if fan_in < 2:
+            raise ValueError(f"fan_in must be at least 2, got {fan_in}")
         self.input_data = input_data
         self.queue_factory = queue_factory
         self.number_of_tuples_in_main_memory = number_of_tuples_in_main_memory

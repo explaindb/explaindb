@@ -190,6 +190,30 @@ class MergeSortingTest(unittest.TestCase):
                     # the output holds every person exactly once, in sorted order:
                     self.assertEqual(list(ems), sorted(persons))
 
+    def test_external_sorting_fan_in_must_be_at_least_two(self) -> None:
+        """The constructor rejects a fan_in below 2, as merging fewer than two runs at a time does not reduce the
+        number of runs."""
+
+        # a fan_in of 1, 0 or below is rejected:
+        for fan_in in [1, 0, -1]:
+            with self.subTest(fan_in=fan_in):
+                with self.assertRaisesRegex(ValueError, "fan_in must be at least 2"):
+                    ExternalMergeSort[Person](
+                        input_data=iter([]),
+                        queue_factory=ListQueueFactory[Person](),
+                        number_of_tuples_in_main_memory=100,
+                        fan_in=fan_in,
+                    )
+
+        # the smallest valid fan_in, 2, is accepted:
+        ems: ExternalMergeSort[Person] = ExternalMergeSort[Person](
+            input_data=iter([]),
+            queue_factory=ListQueueFactory[Person](),
+            number_of_tuples_in_main_memory=100,
+            fan_in=2,
+        )
+        self.assertEqual(ems.fan_in, 2)
+
 
 if __name__ == "__main__":
     # only execute a specific test class
