@@ -22,8 +22,7 @@
 
 from abc import abstractmethod, ABC
 from collections import defaultdict
-
-from attr import dataclass
+from dataclasses import dataclass
 
 
 @dataclass

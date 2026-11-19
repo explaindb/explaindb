@@ -22,9 +22,8 @@
 
 import heapq
 import logging
+from dataclasses import dataclass
 from typing import Iterable, Iterator
-
-from attr import dataclass
 
 from system.interfaces.queues import (
     QueueFactory,
