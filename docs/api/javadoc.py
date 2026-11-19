@@ -37,7 +37,11 @@ import re
 _PARAM_RE = re.compile(r"^\s*@param\s+(\w+)\s*:?\s*(.*)$")
 # A ``@return: description`` / ``@returns description`` tag; description in 1.
 # The colon is optional here too, matching the colon-less form in the corpus.
-_RETURN_RE = re.compile(r"^\s*@returns?\s*:?\s*(.*)$")
+# The word boundary after the tag name keeps a longer tag such as ``@returned``
+# or ``@returnType`` from matching; followed by a colon or by text, such a tag
+# is reported by :func:`find_residual_tags`. (``@param`` and ``@raise`` need no
+# boundary, as whitespace must follow their tag name.)
+_RETURN_RE = re.compile(r"^\s*@returns?\b\s*:?\s*(.*)$")
 # A ``@raise ExceptionType: description`` / ``@raises ...`` tag; the exception
 # type (possibly dotted, e.g. ``module.Error``) in group 1, description in 2.
 # The colon is required: without it, the first word of a description such as

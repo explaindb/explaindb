@@ -107,6 +107,33 @@ class JavadocToRestTest(unittest.TestCase):
             ],
         )
 
+    def test_longer_tag_names_not_converted(self):
+        """A tag whose name only starts with ``param``, ``return`` or ``raise`` is left as written.
+
+        Would fail if a tag pattern matched only the start of the tag name, as an
+        ``@return`` pattern without a word boundary does: ``@returned x`` would
+        become ``:returns: ed x`` and ``@returnType: int`` ``:returns: Type: int``.
+        """
+        lines = [
+            "@returned x",
+            "@returnType: int",
+            "@returnsValue: the value",
+            "@params key: the key",
+            "@raised ValueError: if the key is missing",
+        ]
+        self.assertEqual(javadoc_to_rest(lines), lines)
+
+    def test_returns_spelling_converts(self):
+        """``@returns`` converts like ``@return``, with and without a colon.
+
+        Would fail if the word boundary after the tag name were placed before the
+        optional ``s``, so that ``@returns`` no longer matched as a whole tag.
+        """
+        lines = ["@returns: the value", "@returns the value"]
+        self.assertEqual(
+            javadoc_to_rest(lines), [":returns: the value", ":returns: the value"]
+        )
+
     def test_raise_tag_converts_to_separate_raises_field(self):
         """A @raise tag after a @param becomes its own :raises: field.
 
@@ -301,6 +328,22 @@ class FindResidualTagsTest(unittest.TestCase):
             "@see: Index.put",
             "@parameter key: the key",
             "@author Jens",
+        ]
+        self.assertEqual(find_residual_tags(original), original)
+
+    def test_longer_tag_names_reported_as_residual(self):
+        """A tag whose name only starts with ``param``, ``return`` or ``raise`` is reported.
+
+        Would fail if a tag pattern matched only the start of the tag name, so
+        that ``@returned x`` or ``@returnType: int`` counted as converted and
+        rendered as a mangled :returns: field without a Sphinx warning.
+        """
+        original = [
+            "@returned x",
+            "@returnType: int",
+            "@returnsValue: the value",
+            "@params key: the key",
+            "@raised ValueError: if the key is missing",
         ]
         self.assertEqual(find_residual_tags(original), original)
 
