@@ -14,26 +14,36 @@ resilience** with a small cost model, so you can compare arrangements analytical
 ## In this repo
 
 - **Notebook:** [`RAID-Nesting-Trade-offs.ipynb`](../../../notebooks/RAID-Nesting-Trade-offs.ipynb) — enumerates
-  every way of nesting a fixed number of devices as RAID 0 arrays and compares their sequential read
-  performance, showing that a single flat stripe beats every nesting for sequential reads.
+  the nestings of 32 identical devices as RAID 0 arrays whose members of a level are alike and shows that each
+  reads exactly as fast as one flat stripe; with devices of different speed, a nesting that groups the devices
+  by speed beats the flat stripe.
 - **Implementation:** [`system/storage/RAID/cost_model.py`](../../../system/storage/RAID/cost_model.py)
-  (`Device`, `RAID_0`, `RAID_1`, … and their performance/resilience) and
+  (`Device`, `RAID_0`, `RAID_1`, … and their performance/resilience),
+  [`system/storage/RAID/nesting.py`](../../../system/storage/RAID/nesting.py) (nested RAID 0 arrays for the
+  notebook) and
   [`system/storage/RAID/block_assignment.py`](../../../system/storage/RAID/block_assignment.py).
 
 ## The idea in one picture
 
 ```
-RAID 0 over 4 devices:        seq_read(RAID 0) = min(member seq_read) × members
-   ┌──┐ ┌──┐ ┌──┐ ┌──┐         flat stripe of 4:      min × 4   ← best
-   │d0│ │d1│ │d2│ │d3│         nested (RAID 0 of 2×2): min × 2 per level
-   └──┘ └──┘ └──┘ └──┘         → nesting caps the member count and lets a
-   blocks striped round-robin    slow member throttle the whole stripe
+seq_read(RAID 0) = min(member seq_read) × members
+
+identical devices, 100 MB/s each:
+   flat stripe of 4:                      100 × 4          = 400 MB/s
+   RAID 0 of two RAID 0s of 2 devices:    min(200, 200) × 2 = 400 MB/s   ← same
+
+4 slow (100 MB/s) and 2 fast (200 MB/s) devices:
+   flat stripe of 6:                      100 × 6          = 600 MB/s
+   RAID 0 of [4 slow] and [2 fast]:       min(400, 400) × 2 = 800 MB/s   ← nesting helps
 ```
 
-so nesting *caps* the member count and lets a slow member throttle the whole stripe — which is exactly
-why the notebook finds flat striping optimal for sequential reads.
+With identical devices, nesting alike members changes nothing for sequential reads: every level multiplies by
+its member count, so the nesting reaches the same total as the flat stripe (members of unequal size would let
+the smaller one throttle the larger). With devices of different speed, the slowest device throttles a flat
+stripe; nesting can group the devices into equally fast members so that no fast device waits for a slow one.
 
 ## Try it
 
-In `RAID-Nesting-Trade-offs.ipynb`, compare the best nested arrangement of 32 devices against one flat
-RAID 0 of all 32, and trace the numbers back to the formula above.
+In `RAID-Nesting-Trade-offs.ipynb`, check that every nesting of 32 identical devices whose members of a level are
+alike reaches the 3200 MB/s of the flat stripe, then compare the three arrangements of slow and fast devices and
+trace the numbers back to the formula above.
