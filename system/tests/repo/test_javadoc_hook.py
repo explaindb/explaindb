@@ -21,12 +21,15 @@
 # Test modules use self-documenting method/class names and module-level
 # fixtures, so pylint's naming and docstring checks are relaxed here.
 # pylint: disable=invalid-name,missing-class-docstring,missing-function-docstring
-"""Tests for the Javadoc-to-reST docstring hook in docs/api/javadoc.py."""
+"""Tests for the docstring hook and the autodoc settings of the Sphinx API docs in docs/api/."""
 
 import os
 import sys
 import unittest
 from unittest import mock
+
+from pydantic import BaseModel
+from sphinx.util.docstrings import prepare_docstring
 
 # ``docs/api`` is not a package, so it is added to ``sys.path`` to import the
 # hook module directly (mirrors how the Sphinx conf.py loads it).
@@ -412,6 +415,65 @@ class ProcessDocstringHookTest(unittest.TestCase):
         with mock.patch.object(conf.logger, "warning") as warn:
             conf._process_docstring(None, "method", "m", None, None, ["@param k: v"])
         warn.assert_not_called()
+
+    def test_drops_constructor_docstring_from_a_library(self):
+        """A class's constructor docstring that comes from a library is dropped.
+
+        A pydantic model inherits ``BaseModel.__init__``, whose docstring is about
+        pydantic, not about the model. Would fail if the hook kept that docstring,
+        so that it appeared under every pydantic model in the API docs, or if it
+        dropped the model's own class docstring as well.
+        """
+
+        class Entry(BaseModel):
+            """A journal entry."""
+
+            key: str
+
+        # the constructor docstring, as autodoc passes it for the class, is dropped:
+        init_lines = prepare_docstring(BaseModel.__init__.__doc__)
+        conf._process_docstring(None, "class", "Entry", Entry, None, init_lines)
+        self.assertEqual(init_lines, [])
+
+        # the class docstring is kept:
+        class_lines = prepare_docstring(Entry.__doc__)
+        conf._process_docstring(None, "class", "Entry", Entry, None, class_lines)
+        self.assertEqual(class_lines, ["A journal entry.", ""])
+
+    def test_keeps_constructor_docstring_written_in_system(self):
+        """A constructor docstring written in system/ is kept, with its tags converted.
+
+        Would fail if the hook dropped the docstring of a constructor defined in
+        the project, which documents the parameters of the class.
+        """
+
+        # a class defined in this test file, which lives below system/:
+        class Counter:
+
+            def __init__(self, start: int) -> None:
+                """Create a counter.
+
+                @param start: the initial count
+                """
+                self.count = start
+
+        lines = prepare_docstring(Counter.__init__.__doc__)
+        conf._process_docstring(None, "class", "Counter", Counter, None, lines)
+        self.assertEqual(
+            lines, ["Create a counter.", "", ":param start: the initial count", ""]
+        )
+
+
+class AutodocConfigTest(unittest.TestCase):
+
+    def test_class_docs_include_constructor_docstring(self):
+        """The API docs show a class's docstring followed by its ``__init__`` docstring.
+
+        Would fail if ``autoclass_content`` were dropped from conf.py: autodoc's
+        default ``"class"`` leaves the ``__init__`` docstring out, and with it the
+        ``@param`` fields of every constructor.
+        """
+        self.assertEqual(conf.autoclass_content, "both")
 
 
 if __name__ == "__main__":
