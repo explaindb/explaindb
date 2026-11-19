@@ -14,9 +14,14 @@ per 0-fill word; see the regression test `test_iterating_sparse_wah_does_not_ove
 
 ## CI / tooling debt
 
-_None currently._ Both earlier items were resolved by the migration to uv: black is pinned via
-`pyproject.toml` / `uv.lock` and run with `uv run black`, and the pipenv caching limitation no longer
-applies because uv installs into the project's own `.venv/`.
+- **No static type check in CI.** No type checker (e.g. pyright or mypy) runs in the pipeline, and none is listed
+  in `pyproject.toml` or `CONTRIBUTING.md`. Type hints that contradict the code therefore go unnoticed, e.g. a
+  method annotated to return a tuple that returns `None`. Before a type check can become a CI job for `system/`,
+  the errors it reports today have to be fixed or recorded as a baseline.
+
+The two earlier items were resolved by the migration to uv: black is pinned via `pyproject.toml` / `uv.lock` and
+run with `uv run black`, and the pipenv caching limitation no longer applies because uv installs into the project's
+own `.venv/`.
 
 ## Follow-ups waiting for other changes
 
