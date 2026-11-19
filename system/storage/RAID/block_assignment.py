@@ -60,7 +60,7 @@ class RAID_Level(ABC):
         @param logical_block_ID: The logical block ID
         @param number_of_disks: The number of available disks
 
-        @return: A list of BlockPositionInformation instances containing the disk ID where to find this logical block,
+        @return: A list of PhysicalBlockPosition instances containing the disk ID where to find this logical block,
         the internal block ID on that disk, as well as a flag indicating if the block is a parity block.
         """
 
@@ -198,12 +198,14 @@ def compute_assignment(
 ) -> list[str]:
     """Computes the assignment of logical block IDs to physical block IDs for a given RAID level.
 
-    @param rows: The number of rows in the disk subsystem, i.e. the number of internal blocks per disk tom compute for
+    @param rows: The number of rows in the disk subsystem, i.e. the number of internal blocks per disk to compute for
     all disks
     @param number_of_disks: The number of disks in the disk subsystem
     @param RAID_level: The RAID level to compute the assignment for, possible values: 0, 1, 4, 5
 
-    @return: A list of strings representing the assignment of logical block IDs to physical block IDs
+    @return: One string per row with one column per disk; each column is padded with spaces to 11 characters (longer
+    entries are not cut), and trailing spaces are removed. A data block is shown as its logical block ID, a parity
+    block as ``P[a^b^...]`` listing the logical block IDs it covers.
     """
 
     assert RAID_level in [0, 1, 4, 5]
@@ -211,15 +213,18 @@ def compute_assignment(
     assert number_of_disks > 0
     assert number_of_disks >= 3 or RAID_level in [0, 1]
 
-    # matrix collecting in each cell the list of logical block IDs assigned to this physical block:
-    physical_disk_blocks = defaultdict(dict)
+    # matrix collecting in each cell the list of (logical block ID, is_parity) pairs assigned to this physical block:
+    physical_disk_blocks: defaultdict[int, dict[int, list[tuple[int, bool]]]] = (
+        defaultdict(dict)
+    )
 
     # matrix init:
     for disk in range(0, number_of_disks):
         for row in range(0, rows):
             physical_disk_blocks[disk][row] = []
 
-    # maximum logical block ID:
+    # exclusive upper bound for the logical block IDs to place: under RAID 0 exactly these IDs fill all rows; under
+    # RAID 1/4/5 they may not all fit into <rows> rows, so positions with an internal block ID >= rows are skipped below:
     logical_block_ID_max: int = rows * number_of_disks
 
     # mapping of RAID level to strategy instance:
@@ -235,17 +240,17 @@ def compute_assignment(
     # get the appropriate instance of the <RAID_level> strategy:
     strategy: RAID_Level = int_to_class_dict[RAID_level]
 
-    # call assign for each logical_block_ID:
+    # call logical_id_to_physical_positions for each logical_block_ID:
     for logical_block_ID in range(0, logical_block_ID_max):
 
         # for this logical block ID, compute the list of physical positions affected under this RAID level:
-        ret: list[PhysicalBlockPosition] = strategy.logical_id_to_physical_positions(
-            logical_block_ID, number_of_disks
+        positions: list[PhysicalBlockPosition] = (
+            strategy.logical_id_to_physical_positions(logical_block_ID, number_of_disks)
         )
 
         # assign the results to the matrix:
         entry: PhysicalBlockPosition
-        for entry in ret:
+        for entry in positions:
             if entry.internal_block_ID >= rows:
                 break
             # append to cell
@@ -261,7 +266,7 @@ def compute_assignment(
         ret_row = ""
         disk: int
         for disk in range(0, number_of_disks):
-            entry_list: list[tuple] = physical_disk_blocks[disk][row]
+            entry_list: list[tuple[int, bool]] = physical_disk_blocks[disk][row]
             if len(entry_list) == 1 and entry_list[0][1] is False:
                 ret_row += str(entry_list[0][0]).ljust(11)
             else:
