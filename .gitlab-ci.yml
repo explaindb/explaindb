@@ -777,7 +777,7 @@ ipynb_test:
 # from PyPI, Chromium from Playwright's servers and the system libraries
 # Chromium needs from the Debian mirrors (about half a minute).
 # The tests take about 6 minutes in one job, as WebGL is drawn without a GPU,
-# so three jobs share the pages (see docs/changes/038-split-visualization-test):
+# so three jobs share the pages (see docs/changes/047-split-visualization-test):
 # each runs the whole module on its share, which it names in VISUALIZATION_JOB
 # ("i/n"; pages_of_job in the test spreads the pages with sound, whose tests
 # take longest, evenly over the jobs first). A new page needs no change here.

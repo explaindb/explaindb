@@ -274,7 +274,7 @@ module it imports for the B-tree page (`system/tests/repo/b_tree_page_trees.py`)
 `pyproject.toml` or `uv.lock`. It runs in three jobs,
 each on its share of the pages (the pages with sound, whose tests take longest, are spread evenly
 over the jobs first; see
-[`docs/changes/038-split-visualization-test`](docs/changes/038-split-visualization-test/DECISION.md)).
+[`docs/changes/047-split-visualization-test`](docs/changes/047-split-visualization-test/DECISION.md)).
 A new page, with or without sound, is assigned to a job without a change to the CI configuration.
 A local run tests every page. A test class for one page names it in `PAGE`,
 so that it runs only in that page's job (`open_page` refuses another page).
