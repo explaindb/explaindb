@@ -22,10 +22,11 @@
 
 from __future__ import annotations
 from abc import ABC, abstractmethod
-from collections.abc import Sequence
+from collections.abc import Iterator, Sequence, Set
 from enum import Enum
+from itertools import combinations
 from statistics import mean
-from typing import Iterator
+from typing import NamedTuple
 
 
 class ResilienceScenario(Enum):
@@ -118,6 +119,31 @@ class SubSystem(ABC):
         if resilience_scenario is not None:
             yield rec_depth, self, *resilience_scenario
 
+    @abstractmethod
+    def devices(self) -> Iterator[Device]:
+        """Returns the devices at the bottom of this subsystem, from left to right.
+
+        @return: An iterator over the devices of this subsystem in the order of its members.
+        """
+
+    @abstractmethod
+    def survives(self, failed_devices: Set[Device]) -> bool:
+        """Returns whether all data of this subsystem can still be read when exactly the given devices have failed
+        and all other devices still work.
+
+        Devices are told apart by identity: two Device objects with the same performance characteristics are two
+        different devices. Failed devices that are not part of this subsystem are ignored.
+
+        The model treats an array member that loses any data as failed as a whole, so an array never combines the
+        surviving parts of two of its members. This is how a nested array is usually treated, e.g. a RAID 1 built
+        over RAID 0 sets: once one device of a RAID 0 set fails, the whole set counts as failed. For example, a
+        RAID 0+1 array with the stripes (a, b) and (c, d) counts the failure of a and d as data loss, although
+        every block still exists once (in b and c).
+
+        @param failed_devices: The devices that have failed.
+        @return: True if all data of this subsystem can still be read, False otherwise.
+        """
+
     def __str__(self):
         """Render as the concrete subsystem's class name."""
         return f"{self.__class__.__name__}"
@@ -152,6 +178,15 @@ class SubSystemArray(SubSystem, ABC):
         subsystem: SubSystem
         for subsystem in self.subsystems:
             yield from subsystem.get_resilience_scenarios(rec_depth=rec_depth + 1)
+
+    def devices(self) -> Iterator[Device]:
+        """See :meth:`SubSystem.devices`.
+
+        Yields the devices of all member subsystems, member by member in the order of the members.
+        """
+        subsystem: SubSystem
+        for subsystem in self.subsystems:
+            yield from subsystem.devices()
 
 
 class Device(SubSystem):
@@ -209,6 +244,20 @@ class Device(SubSystem):
     ) -> tuple[ResilienceScenario, Iterator[SubSystem] | None] | None:
         """A device is not resilient against any failure."""
         return None
+
+    def devices(self) -> Iterator[Device]:
+        """See :meth:`SubSystem.devices`.
+
+        A device yields only itself.
+        """
+        yield self
+
+    def survives(self, failed_devices: Set[Device]) -> bool:
+        """See :meth:`SubSystem.survives`.
+
+        A device survives unless it is one of the failed devices.
+        """
+        return self not in failed_devices
 
 
 class RAID_0(SubSystemArray):
@@ -268,6 +317,13 @@ class RAID_0(SubSystemArray):
         """RAID 0 is not resilient against any failure."""
         return None
 
+    def survives(self, failed_devices: Set[Device]) -> bool:
+        """See :meth:`SubSystem.survives`.
+
+        RAID 0 has no redundancy, so it survives only if all its member subsystems survive.
+        """
+        return all(subsystem.survives(failed_devices) for subsystem in self.subsystems)
+
 
 class RAID_1(SubSystemArray):
     """RAID 1: Mirroring"""
@@ -317,6 +373,14 @@ class RAID_1(SubSystemArray):
     ) -> tuple[ResilienceScenario, Iterator[SubSystem] | None] | None:
         """RAID 1 is resilient against an error where all but one subsystem fails."""
         return ResilienceScenario.ALL_BUT_ONE_SUBSYSTEM_MAY_FAIL, iter(self.subsystems)
+
+    def survives(self, failed_devices: Set[Device]) -> bool:
+        """See :meth:`SubSystem.survives`.
+
+        RAID 1 survives if at least one member subsystem survives, since every member holds a full copy of the
+        data.
+        """
+        return any(subsystem.survives(failed_devices) for subsystem in self.subsystems)
 
 
 class RAID_5(SubSystemArray):
@@ -423,3 +487,70 @@ class RAID_5(SubSystemArray):
     ) -> tuple[ResilienceScenario, Iterator[SubSystem] | None] | None:
         """RAID 5 is resilient against a single subsystem failure."""
         return ResilienceScenario.ANY_SINGLE_SUBSYSTEM_MAY_FAIL, iter(self.subsystems)
+
+    def survives(self, failed_devices: Set[Device]) -> bool:
+        """See :meth:`SubSystem.survives`.
+
+        RAID 5 survives if at most one member subsystem does not survive, since the parity can rebuild the data
+        of one lost member.
+        """
+        lost_members: int = sum(
+            1 for subsystem in self.subsystems if not subsystem.survives(failed_devices)
+        )
+        return lost_members <= 1
+
+
+class FailureCount(NamedTuple):
+    """Of all ways of losing k devices, how many a subsystem survives (``survived``) and how many there are
+    (``total``), see :func:`count_survived_failures`."""
+
+    survived: int
+    total: int
+
+
+def count_survived_failures(
+    subsystem: SubSystem, number_of_failed_devices: int
+) -> FailureCount:
+    """Counts in how many of all possible ways of losing k of its devices the subsystem can still read all its data.
+
+    A subsystem with n devices can lose k of them in C(n, k) different ways; C(n, k), read "n choose k", is
+    n! / (k! (n - k)!). For example, the 4 devices a, b, c, d can lose 2 of them in C(4, 2) = 6 ways: {a, b},
+    {a, c}, {a, d}, {b, c}, {b, d} and {c, d}. This function tries each way and asks :meth:`SubSystem.survives`
+    whether all data can still be read with exactly these devices failed, so the result follows the assumptions
+    stated there. Which devices fail matters, as it decides which arrays lose members: RAID 1+0 over the mirrored
+    pairs (a, b) and (c, d) survives every way except {a, b} and {c, d}, i.e. 4 of 6; RAID 0+1 over the stripes
+    (a, b) and (c, d) survives only {a, b} and {c, d}, i.e. 2 of 6. As every way is tried, the run time grows with
+    C(n, k).
+
+    @param subsystem: The subsystem whose device failures are counted.
+    @param number_of_failed_devices: k, how many devices fail at the same time.
+    @return: The number of ways the subsystem survives (``survived``) and the number of all ways (``total``). For
+        0 failed devices this is FailureCount(1, 1): the single way without any failure, which every subsystem
+        survives.
+    @raise ValueError: If the subsystem contains the same Device object more than once, e.g. because an array
+        was built with ``[device] * n`` or the same inner array was used as several members; if
+        number_of_failed_devices is negative or larger than the number of devices of the subsystem.
+    """
+
+    # check the input: every device is a distinct object, and the number of failed devices fits:
+    devices: list[Device] = list(subsystem.devices())
+    if len(set(devices)) != len(devices):
+        raise ValueError(
+            "The subsystem contains the same Device object more than once; build every array from distinct "
+            "Device objects, not with [device] * n or by using the same inner array as several members."
+        )
+    if not 0 <= number_of_failed_devices <= len(devices):
+        raise ValueError(
+            f"number_of_failed_devices must be between 0 and the number of devices ({len(devices)}), "
+            f"got {number_of_failed_devices}."
+        )
+
+    # try every combination of failed devices and count the ones the subsystem survives:
+    survived: int = 0
+    tried: int = 0
+    failed_devices: tuple[Device, ...]
+    for failed_devices in combinations(devices, number_of_failed_devices):
+        tried += 1
+        if subsystem.survives(set(failed_devices)):
+            survived += 1
+    return FailureCount(survived, tried)

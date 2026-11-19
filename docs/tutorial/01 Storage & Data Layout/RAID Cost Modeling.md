@@ -18,7 +18,8 @@ resilience** with a small cost model, so you can compare arrangements analytical
   reads exactly as fast as one flat stripe; with devices of different speed, a nesting that groups the devices
   by speed beats the flat stripe.
 - **Implementation:** [`system/storage/RAID/cost_model.py`](../../../system/storage/RAID/cost_model.py)
-  (`Device`, `RAID_0`, `RAID_1`, … and their performance/resilience),
+  (`Device`, `RAID_0`, `RAID_1`, … and their performance/resilience; `count_survived_failures` counts which
+  combinations of failed devices an array survives, e.g. RAID 0+1 vs. RAID 1+0),
   [`system/storage/RAID/nesting.py`](../../../system/storage/RAID/nesting.py) (nested RAID 0 arrays for the
   notebook) and
   [`system/storage/RAID/block_assignment.py`](../../../system/storage/RAID/block_assignment.py).
