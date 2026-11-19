@@ -157,6 +157,31 @@ class QueueTest(unittest.TestCase):
             # reading starts at the new first element:
             self.assertEqual(next(queue), 1)
 
+    def test_set_memory_limit_of_zero_or_less_raises_value_error(self) -> None:
+        """set_memory_limit() refuses a limit of 0 or less with a ValueError, and the queue keeps returning all its
+        elements."""
+        queue_factory: QueueFactory[int]
+        memory_limit: int
+        for queue_factory in [ListQueueFactory[int](), ExternalQueueFactory[int](2)]:
+            for memory_limit in [0, -1]:
+                with self.subTest(
+                    queue_factory=type(queue_factory).__name__,
+                    memory_limit=memory_limit,
+                ):
+                    # insert five elements; an external queue with room for two elements writes some of them to its
+                    # file:
+                    queue: ReadWriteQueue[int] = queue_factory.get_queue_instance()
+                    self.addCleanup(queue.close)
+                    for element in range(5):
+                        queue.insert(element)
+
+                    # the limit is refused:
+                    with self.assertRaises(ValueError):
+                        queue.set_memory_limit(memory_limit)
+
+                    # the queue keeps its limit, so a read returns all five elements:
+                    self.assertEqual(list(queue), [0, 1, 2, 3, 4])
+
 
 if __name__ == "__main__":
     # run all tests of this module:

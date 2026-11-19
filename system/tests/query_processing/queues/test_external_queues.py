@@ -196,6 +196,21 @@ class ExternalQueueTest(unittest.TestCase):
         # a new whole read returns all elements from the first one on:
         self.assertEqual(list(queue), [0, 1, 2, 3])
 
+    def test_memory_limit_of_one_returns_all_elements(self) -> None:
+        """With a memory limit of 1 set by set_memory_limit(), the queue keeps one element in memory, and a read
+        returns all elements in insertion order."""
+        queue: ExternalQueue[int] = self._create_queue()
+
+        # 1 is the smallest allowed limit; with it, 0..2 go to the file and 3 stays in memory:
+        queue.set_memory_limit(1)
+        _insert_all(queue, range(4))
+
+        # a flush writes just that one element (with room for two elements, it would write 2 and 3):
+        self.assertEqual(queue.flush(), 1)
+
+        # a whole read fills the read buffer one element at a time and returns all elements:
+        self.assertEqual(list(queue), [0, 1, 2, 3])
+
 
 if __name__ == "__main__":
     unittest.main()

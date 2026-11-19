@@ -50,6 +50,7 @@ class ReadQueue[ObjectType](ABC, Iterator):
         queues that are disk-based and use a buffer in memory to speed up access; an in-memory queue ignores it.
 
         @param memory_limit The number of objects the queue may keep in memory; must be greater than 0.
+        @raise ValueError: if memory_limit is 0 or less
         """
 
 
@@ -84,6 +85,7 @@ class WriteQueue[ObjectType](ABC):
         queues that are disk-based and use a buffer in memory to speed up access; an in-memory queue ignores it.
 
         @param memory_limit The number of objects the queue may keep in memory; must be greater than 0.
+        @raise ValueError: if memory_limit is 0 or less
         """
 
 
@@ -104,6 +106,11 @@ class ReadWriteQueue[ObjectType](ReadQueue[ObjectType], WriteQueue[ObjectType], 
 
     def set_memory_limit(self, memory_limit: int) -> None:
         """See :meth:`WriteQueue.set_memory_limit`."""
+        # refuse a limit that would leave the queue no room in memory:
+        if memory_limit <= 0:
+            raise ValueError(
+                f"The memory limit must be greater than 0, got {memory_limit}."
+            )
         self.memory_limit: int = memory_limit
 
 
