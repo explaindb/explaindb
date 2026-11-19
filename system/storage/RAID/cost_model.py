@@ -64,12 +64,16 @@ class SubSystem(ABC):
     @abstractmethod
     def get_read_IO_performance(self) -> int:
         """Returns the read-IOPs (random read I/O operations per second) of the subsystem. Assumes uniform distribution
-        of read requests to the different subsystems."""
+        of read requests over the data, i.e. every block is equally likely to be read; an array that splits the data
+        into equal shares, one per subsystem (as in RAID 0 and RAID 5), thus sends every subsystem the same share of
+        the reads."""
 
     @abstractmethod
     def get_write_IO_performance(self) -> int:
         """Returns the write-IOPs (random write I/O operations per second) of the subsystem. Assumes uniform
-        distribution of write requests to the different subsystems."""
+        distribution of write requests over the data, i.e. every block is equally likely to be written; an array that
+        splits the data into equal shares, one per subsystem (as in RAID 0 and RAID 5), thus sends every subsystem the
+        same share of the writes."""
 
     @abstractmethod
     def get_storage_blow_up(self) -> float:
@@ -226,16 +230,28 @@ class RAID_0(SubSystemArray):
         ) * len(self.subsystems)
 
     def get_read_IO_performance(self) -> int:
-        """Read IOPs is the sum of all read IOPs of the subsystems. Assumes uniform distribution of read requests to the
-        different subsystems."""
-        return sum(subsystem.get_read_IO_performance() for subsystem in self.subsystems)
+        """See :meth:`SubSystem.get_read_IO_performance`.
+
+        Read IOPs is the read IOPs of the slowest subsystem (the minimum) times the number of subsystems: striping puts
+        the same share of the data on every subsystem, so every subsystem gets the same share of the reads, and a read
+        can only go to the subsystem that holds its block. The array is thus saturated as soon as its slowest subsystem
+        is, as for sequential reads.
+        """
+        return min(
+            subsystem.get_read_IO_performance() for subsystem in self.subsystems
+        ) * len(self.subsystems)
 
     def get_write_IO_performance(self) -> int:
-        """Write IOPs is the sum of all write IOPs of the subsystems. Assumes uniform distribution of write requests to
-        the different subsystems."""
-        return sum(
+        """See :meth:`SubSystem.get_write_IO_performance`.
+
+        Write IOPs is the write IOPs of the slowest subsystem (the minimum) times the number of subsystems: striping
+        puts the same share of the data on every subsystem, so every subsystem gets the same share of the writes, and a
+        write can only go to the subsystem that holds its block. The array is thus saturated as soon as its slowest
+        subsystem is, as for sequential writes.
+        """
+        return min(
             subsystem.get_write_IO_performance() for subsystem in self.subsystems
-        )
+        ) * len(self.subsystems)
 
     def get_storage_blow_up(self) -> float:
         """See :meth:`SubSystem.get_storage_blow_up`.
@@ -274,7 +290,12 @@ class RAID_1(SubSystemArray):
         )
 
     def get_read_IO_performance(self) -> int:
-        """Returns the sum of the read IOPs of all subsystems."""
+        """See :meth:`SubSystem.get_read_IO_performance`.
+
+        Read IOPs is the sum of the read IOPs of all subsystems: every subsystem holds all the data, so a read can go
+        to any of them, and faster subsystems can take more reads. (RAID 0 and RAID 5 must send a read to the one
+        subsystem that holds its block and are therefore limited by their slowest subsystem.)
+        """
 
         return sum(subsystem.get_read_IO_performance() for subsystem in self.subsystems)
 
@@ -310,16 +331,24 @@ class RAID_5(SubSystemArray):
         assert len(subsystems) >= 3, "RAID 5 needs at least 3 subsystems."
 
     def get_sequential_read_performance(self) -> int:
-        """Read performance is the read performance of the slowest subsystem (the minimum) times the number of
-        subsystems minus 1 (one subsystem's worth of throughput is spent on parity)."""
+        """See :meth:`SubSystem.get_sequential_read_performance`.
+
+        Read performance is the read performance of the slowest subsystem (the minimum) times the number of
+        subsystems minus 1: when streaming, every subsystem also passes over its parity blocks, so of the n * min
+        bandwidth only (n - 1) / n is data, i.e. min * (n - 1). (Random reads never touch the parity and therefore use
+        all n subsystems, see :meth:`get_read_IO_performance`.)
+        """
         min_read_performance: int = min(
             subsystem.get_sequential_read_performance() for subsystem in self.subsystems
         )
         return min_read_performance * (len(self.subsystems) - 1)
 
     def get_sequential_write_performance(self) -> int:
-        """Write performance is the write performance of the slowest subsystem (the minimum) times the number
-        of subsystems minus 1 (one subsystem's worth of throughput is spent on parity).
+        """See :meth:`SubSystem.get_sequential_write_performance`.
+
+        Write performance is the write performance of the slowest subsystem (the minimum) times the number of
+        subsystems minus 1: when streaming, every subsystem also writes its share of the parity blocks, so of the
+        n * min bandwidth only (n - 1) / n carries data, i.e. min * (n - 1).
         """
         min_write_performance: int = min(
             subsystem.get_sequential_write_performance()
@@ -330,36 +359,52 @@ class RAID_5(SubSystemArray):
     def get_read_IO_performance(self) -> int:
         """See :meth:`SubSystem.get_read_IO_performance`.
 
-        Read IOPs is the sum of the read IOPs of all subsystems: a random read touches only the subsystem that holds
-        the block, and as the parity rotates over all subsystems, every subsystem holds data and serves reads. (RAID 4
-        would lose one subsystem's worth here, as its dedicated parity subsystem never serves reads.)
+        Read IOPs is the read IOPs of the slowest subsystem (the minimum) times the number of subsystems: a random
+        read touches only the subsystem that holds the block, and as the parity rotates over all subsystems, every
+        subsystem holds the same share of the data and serves the same share of the reads, so the slowest subsystem
+        limits the array, as in RAID 0. (RAID 4 would lose one subsystem's worth here, as its dedicated parity
+        subsystem never serves reads.)
         """
-        return sum(subsystem.get_read_IO_performance() for subsystem in self.subsystems)
+        return min(
+            subsystem.get_read_IO_performance() for subsystem in self.subsystems
+        ) * len(self.subsystems)
 
     def get_write_IO_performance(self) -> int:
         """See :meth:`SubSystem.get_write_IO_performance`.
 
         Assumes that every write is a small write of a single block, done as a read-modify-write: read the old data
-        block and the old parity block, then write the new data block and the new parity block. One small write thus
-        costs 2 reads at the subsystems' mean read IOPs R and 2 writes at their mean write IOPs W, i.e. 2 / R + 2 / W
-        seconds of subsystem time, spread evenly over all n subsystems: write IOPs is round(n / (2 / R + 2 / W)).
-        With R = W this is the textbook n * W / 4. If R or W is 0, write IOPs is 0.
+        block and the old parity block, then write the new data block and the new parity block. As the parity rotates
+        and the blocks are chosen uniformly at random, every subsystem holds the data block of 1 / n of the small
+        writes and the parity block of another 1 / n, and each costs it one read and one write: subsystem i with read
+        IOPs R_i and write IOPs W_i is busy (2 / R_i + 2 / W_i) / n seconds per small write on average. The array is
+        saturated as soon as its busiest subsystem is, so write IOPs is
+        round(min over all i of n / (2 / R_i + 2 / W_i)). With R_i = W_i = W for all i this is the textbook n * W / 4.
+        If a subsystem has 0 read or 0 write IOPs, write IOPs is 0.
         """
-        # R and W, the mean read and write IOPs of the subsystems:
-        mean_read_IOPs: float = mean(
+        # R_i and W_i, the read and write IOPs of every subsystem i (asked once, as a nested array computes them anew
+        # on every call):
+        read_IOPs: list[int] = [
             subsystem.get_read_IO_performance() for subsystem in self.subsystems
-        )
-        mean_write_IOPs: float = mean(
+        ]
+        write_IOPs: list[int] = [
             subsystem.get_write_IO_performance() for subsystem in self.subsystems
-        )
+        ]
 
-        # subsystems that cannot read or cannot write serve no read-modify-write:
-        if mean_read_IOPs == 0 or mean_write_IOPs == 0:
+        # a subsystem that cannot read or cannot write serves no read-modify-write, so the array serves none:
+        if 0 in read_IOPs or 0 in write_IOPs:
             return 0
 
-        # every small write costs 2 / R + 2 / W seconds of subsystem time; the n subsystems work in parallel:
-        seconds_per_small_write: float = 2 / mean_read_IOPs + 2 / mean_write_IOPs
-        return round(len(self.subsystems) / seconds_per_small_write)
+        # subsystem i alone keeps up with n / (2 / R_i + 2 / W_i) small writes per second; the busiest subsystem, i.e.
+        # the one with the fewest, limits the array:
+        n: int = len(self.subsystems)
+        return round(
+            min(
+                n / (2 / subsystem_read_IOPs + 2 / subsystem_write_IOPs)
+                for subsystem_read_IOPs, subsystem_write_IOPs in zip(
+                    read_IOPs, write_IOPs
+                )
+            )
+        )
 
     def get_storage_blow_up(self) -> float:
         """See :meth:`SubSystem.get_storage_blow_up`.

@@ -113,7 +113,7 @@ class RAIDAssignmentTest(AbstractUnitTest):
         )
 
 
-class RAIDPerformanceTest(AbstractUnitTest):
+class RAIDPerformanceTest(AbstractUnitTest):  # pylint: disable=too-many-public-methods
     """Unless a test needs special values, the tests build their arrays from devices whose four performance values
     all differ (sequential read and write speed, read and write IOPS), so a RAID formula that mixes up reads and
     writes yields a wrong value."""
@@ -132,8 +132,8 @@ class RAIDPerformanceTest(AbstractUnitTest):
         self.assertEqual(dev.get_storage_blow_up(), 1)
 
     def test_RAID_0(self) -> None:
-        """RAID 0 multiplies the sequential speeds of its devices by their number and adds up their IOPS, for reads
-        and writes alike, and needs no extra storage."""
+        """RAID 0 multiplies the sequential speeds and the IOPS of its devices by their number, for reads and writes
+        alike, and needs no extra storage."""
 
         # stripe the data over six devices:
         dev: Device = Device(100, 50, 1000, 400)
@@ -188,18 +188,22 @@ class RAIDPerformanceTest(AbstractUnitTest):
         )
 
     def test_RAID_0_with_misconfigured_heterogeneous_devices(self) -> None:
-        """RAID 0 over a slow and a fast device streams at only twice the speed of the slow device."""
+        """RAID 0 over a slow and a fast device streams and serves random reads and writes at only twice the speed of
+        the slow device: the slow device throttles random I/O too."""
 
         # create an unbalanced RAID 0 array with different devices (the second one is twice as fast in every respect):
         dev_type_1: Device = Device(100, 50, 1000, 400)
         dev_type_2: Device = Device(200, 100, 2000, 800)
         array: SubSystem = RAID_0([dev_type_1, dev_type_2])
 
-        # the slow device limits the sequential speeds; the IOPS add up:
+        # the slow device limits the sequential speeds, 2 * 100 = 200 and 2 * 50 = 100 MB/s:
         self.assertEqual(array.get_sequential_read_performance(), 200)
         self.assertEqual(array.get_sequential_write_performance(), 100)
-        self.assertEqual(array.get_read_IO_performance(), 3000)
-        self.assertEqual(array.get_write_IO_performance(), 1200)
+
+        # each device holds half of the blocks and gets half of the random requests, so the slow device limits the
+        # IOPS too, 2 * 1000 = 2000 read and 2 * 400 = 800 write IOPS:
+        self.assertEqual(array.get_read_IO_performance(), 2000)
+        self.assertEqual(array.get_write_IO_performance(), 800)
 
     def test_RAID_0_with_well_configured_heterogeneous_devices(self) -> None:
         """Grouping four slow and two fast devices into two RAID 0 arrays of equal speed lets a RAID 0 array on top
@@ -212,7 +216,8 @@ class RAIDPerformanceTest(AbstractUnitTest):
         sub_array_2: SubSystem = RAID_0([dev_type_2] * 2)
         array: SubSystem = RAID_0([sub_array_1, sub_array_2])
 
-        # both sub-arrays read at 400 MB/s and write at 200 MB/s, so the top array doubles both:
+        # both sub-arrays read at 400 MB/s and write at 200 MB/s, and both serve 4 * 1000 = 2 * 2000 = 4000 read and
+        # 4 * 400 = 2 * 800 = 1600 write IOPS, so the top array doubles all four:
         self.assertEqual(array.get_sequential_read_performance(), 800)
         self.assertEqual(array.get_sequential_write_performance(), 400)
         self.assertEqual(array.get_read_IO_performance(), 8000)
@@ -248,6 +253,26 @@ class RAIDPerformanceTest(AbstractUnitTest):
         self.assertEqual(array.get_sequential_write_performance(), 50)
         self.assertEqual(array.get_read_IO_performance(), 8000)
         self.assertEqual(array.get_write_IO_performance(), 400)
+
+    def test_RAID_1_serves_more_random_reads_than_RAID_0_over_mixed_devices(
+        self,
+    ) -> None:
+        """Over a slow and a fast device, RAID 1 serves more random reads than RAID 0: every RAID 1 device holds all
+        the data, so the fast device can take more reads, whereas RAID 0 must send each read to the device that
+        holds its block, so the slow device limits it."""
+
+        # mirror and stripe the same fast and slow device:
+        dev_type_1: Device = Device(100, 50, 1000, 400)
+        dev_type_2: Device = Device(200, 100, 2000, 800)
+        raid_1: SubSystem = RAID_1([dev_type_2, dev_type_1])
+        raid_0: SubSystem = RAID_0([dev_type_2, dev_type_1])
+
+        # RAID 1 adds up the read IOPS, 1000 + 2000 = 3000, RAID 0 serves 2 * 1000 = 2000:
+        self.assertEqual(raid_1.get_read_IO_performance(), 3000)
+        self.assertEqual(raid_0.get_read_IO_performance(), 2000)
+        self.assertGreater(
+            raid_1.get_read_IO_performance(), raid_0.get_read_IO_performance()
+        )
 
     def test_RAID_5(self) -> None:
         """RAID 5 over n devices streams at the speed of n - 1 devices, as one device's worth goes to parity, serves
@@ -312,24 +337,47 @@ class RAIDPerformanceTest(AbstractUnitTest):
                 self.assertEqual(array.get_write_IO_performance(), expected_write_IOPs)
 
     def test_RAID_5_with_mixed_devices(self) -> None:
-        """RAID 5 over devices of different speeds adds up their read IOPS exactly and computes its small writes
-        from the mean read and the mean write IOPS of its devices."""
+        """RAID 5 over one fast device and two slow devices, half as fast in every respect, is limited by the slow
+        devices, for random reads and for small writes, as every device holds the same share of the data and gets the
+        same share of the requests."""
 
-        # stripe the data with parity over two slow devices and one twice as fast device:
+        # stripe the data with parity over one fast device and two slow devices:
         array: SubSystem = RAID_5(
             [
-                Device(100, 50, 1000, 400),
-                Device(100, 50, 1000, 400),
                 Device(200, 100, 2000, 800),
+                Device(100, 50, 1000, 400),
+                Device(100, 50, 1000, 400),
             ]
         )
 
-        # reads add up to 1000 + 1000 + 2000 = 4000 (rounding the mean 1333.33 first would give 3 * 1333 = 3999):
-        self.assertEqual(array.get_read_IO_performance(), 4000)
+        # each device gets a third of the reads, so the slow devices limit the array to 3 * 1000 = 3000 read IOPS
+        # (adding up the read IOPS would give 1000 + 1000 + 2000 = 4000):
+        self.assertEqual(array.get_read_IO_performance(), 3000)
 
-        # the means are R = 4000 / 3 and W = 1600 / 3, so 3 / (2 / R + 2 / W) = 3 / (0.0015 + 0.00375) = 571.43,
-        # rounded to 571 (the slowest device alone would give 429, the fastest 857):
-        self.assertEqual(array.get_write_IO_performance(), 571)
+        # alone, a slow device keeps up with 3 / (2 / 1000 + 2 / 400) = 428.57 small writes per second, the fast one
+        # with 3 / (2 / 2000 + 2 / 800) = 857.14; the slow devices limit the array to 428.57, rounded to 429:
+        self.assertEqual(array.get_write_IO_performance(), 429)
+
+    def test_RAID_5_write_IOPS_are_limited_by_the_busiest_device(self) -> None:
+        """RAID 5 over two devices that are slower at random reads and one device that is slower at random writes
+        serves as many small writes per second as the device that is busiest per small write allows.
+        """
+
+        # stripe the data with parity over two devices with 1000 read and 800 write IOPS and one device with 2000
+        # read and 400 write IOPS:
+        array: SubSystem = RAID_5(
+            [
+                Device(100, 50, 1000, 800),
+                Device(100, 50, 1000, 800),
+                Device(200, 100, 2000, 400),
+            ]
+        )
+
+        # alone, each of the first two devices keeps up with 3 / (2 / 1000 + 2 / 800) = 666.67 small writes per
+        # second, the third with 3 / (2 / 2000 + 2 / 400) = 500; the third device limits the array to 500 (the slowest
+        # read and the slowest write IOPS together would give 3 / (2 / 1000 + 2 / 400) = 428.57 -> 429, the mean read
+        # and write IOPS 666.67 -> 667):
+        self.assertEqual(array.get_write_IO_performance(), 500)
 
     def test_RAID_5_write_IOPS_with_equal_read_and_write_IOPS(self) -> None:
         """With W read and W write IOPS per device, RAID 5 over n devices serves the textbook n * W / 4 small writes
@@ -360,17 +408,21 @@ class RAIDPerformanceTest(AbstractUnitTest):
         )
 
     def test_RAID_5_write_IOPS_of_devices_without_IOPS(self) -> None:
-        """RAID 5 over devices that serve no random reads, or no random writes, serves no small write and reports 0
-        write IOPS."""
+        """RAID 5 with one device that serves no random reads, or no random writes, serves no small write and reports
+        0 write IOPS."""
 
-        # devices without read IOPS, then devices without write IOPS:
+        # a device without read IOPS, then a device without write IOPS:
         read_IOPs: int
         write_IOPs: int
         for read_IOPs, write_IOPs in [(0, 400), (1000, 0)]:
             with self.subTest(read_IOPs=read_IOPs, write_IOPs=write_IOPs):
-                # stripe the data with parity over three distinct such devices:
+                # stripe the data with parity over two ordinary devices and one such device:
                 array: SubSystem = RAID_5(
-                    [Device(100, 50, read_IOPs, write_IOPs) for _ in range(3)]
+                    [
+                        Device(100, 50, 1000, 400),
+                        Device(100, 50, 1000, 400),
+                        Device(100, 50, read_IOPs, write_IOPs),
+                    ]
                 )
 
                 # a small write needs both reads and writes, so the array serves none:
@@ -715,8 +767,9 @@ class RAIDPerformanceTest(AbstractUnitTest):
             * (number_of_subsystems - 1),  # RAID 5
         )
 
-        # read IOPS: every level adds up the read IOPS of its subsystems, RAID 5 included, as its rotating parity
-        # puts data on every subsystem; this gives 1000 * 3^7 = 2187000:
+        # read IOPS: every level serves n times the read IOPS of its identical subsystems (RAID 0 and RAID 5 n times
+        # the slowest, RAID 1 their sum; RAID 5 uses all n, as its rotating parity puts data on every subsystem); this
+        # gives 1000 * 3^7 = 2187000:
         self.assertEqual(
             array.get_read_IO_performance(),
             1000
@@ -729,10 +782,10 @@ class RAIDPerformanceTest(AbstractUnitTest):
             * number_of_subsystems,  # RAID 5
         )
 
-        # write IOPS, layer by layer from the innermost: RAID 0 adds up the write IOPS of its subsystems, RAID 1
-        # takes their minimum, and RAID 5 serves round(3 / (2 / R + 2 / W)) small writes per second, where R and W
-        # are the read and write IOPS of its subsystems (R is the read IOPS of the layer below, see above: 1000,
-        # 1000 * 3^3 = 27000 and 1000 * 3^6 = 729000):
+        # write IOPS, layer by layer from the innermost: RAID 0 multiplies the slowest write IOPS of its subsystems
+        # by 3, RAID 1 takes their minimum, and RAID 5 serves round(3 / (2 / R + 2 / W)) small writes per second,
+        # where R and W are the read and write IOPS of its identical subsystems (R is the read IOPS of the layer
+        # below, see above: 1000, 1000 * 3^3 = 27000 and 1000 * 3^6 = 729000):
         #   RAID 5:  3 / (2 / 1000 + 2 / 400)     =   428.57 ->   429
         #   RAID 0:  3 * 429                                  =  1287
         #   RAID 0:  3 * 1287                                 =  3861
