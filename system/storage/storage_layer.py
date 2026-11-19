@@ -146,9 +146,9 @@ class StorageLayer[Address, StorageUnit](KeyValueStore[Address, StorageUnit]):
         self.storage[address] = storage_unit
 
     def fix(self, address: Address):
-        """Fix the key in this storage layer, i.e. this mapping is never evicted. If the key that
-        :meth:`choose_eviction_candidate` picks is fixed, eviction raises ``ValueError`` instead of picking
-        another key. The key need not be stored here, and :meth:`delete` does not unfix it.
+        """Fix the key in this storage layer, i.e. this mapping is never evicted: :meth:`choose_eviction_candidate`
+        skips fixed keys. The key need not be stored here; deleting it from this layer (:meth:`delete`) also unfixes
+        it.
         """
 
         self.fixed.add(address)
@@ -160,14 +160,24 @@ class StorageLayer[Address, StorageUnit](KeyValueStore[Address, StorageUnit]):
         self.fixed.remove(address)
 
     def choose_eviction_candidate(self) -> Address:
-        """Choose a key to evict from this storage layer. This implementation always picks the largest key, so
-        that tests are deterministic (which is stupid and just done here for educational purposes: a real
-        implementation would have a more sophisticated eviction policy like LRU, LFU, etc.). Fixed keys are not
-        skipped.
+        """Choose a key to evict from this storage layer. This implementation always picks the largest key that is
+        not fixed, so that tests are deterministic (which is stupid and just done here for educational purposes: a
+        real implementation would have a more sophisticated eviction policy like LRU, LFU, etc.).
+
+        @return: the largest key stored in this layer that is not fixed.
+        @raise ValueError: if no key can be evicted, i.e. this layer is empty or every key stored here is fixed.
         """
         # TODO: implement a real eviction policy here
         # TODO: refactor to use strategy pattern
-        return max(self.storage.keys())  # max key to have stability in tests
+        # only keys that are not fixed may be evicted:
+        candidates: list[Address] = [
+            key for key in self.storage if key not in self.fixed
+        ]
+        if not candidates:
+            raise ValueError(
+                f"No key in {self._name} can be evicted: it is empty or all its keys are fixed"
+            )
+        return max(candidates)  # max key to have stability in tests
 
     def evict(self) -> int:
         """Evict the entry chosen by :meth:`choose_eviction_candidate` to make room for new data. Without an
@@ -175,18 +185,14 @@ class StorageLayer[Address, StorageUnit](KeyValueStore[Address, StorageUnit]):
         here, as the layer below holds the whole page.
 
         @return: 1 if an entry was evicted, 0 if there is no layer below (nothing is evicted then).
-        @raise ValueError: if the chosen key is fixed, if this layer is empty, or if writing the entry to the
-            layer below fails (the entry then stays in this layer).
+        @raise ValueError: if no key can be evicted (this layer is empty or every key stored here is fixed), or if
+            writing the entry to the layer below fails (the entry then stays in this layer).
         """
         # evict only if there is a layer below:
         if self.layer_below is not None:
-            # evict a key:
+            # choose the key to evict (never a fixed one):
             key_to_evict: Address = self.choose_eviction_candidate()
 
-            if key_to_evict in self.fixed:
-                raise ValueError(
-                    f"Cannot evict key {key_to_evict} as it is fixed in {self._name}"
-                )
             if self.address_conversion_strategy is not None:
                 # Under a conversion strategy this layer only caches sub-units of
                 # the pages held by the layer below (a read cache): the layer
@@ -215,10 +221,13 @@ class StorageLayer[Address, StorageUnit](KeyValueStore[Address, StorageUnit]):
     def delete(self, key: Address, value: StorageUnit | None = None) -> None:
         """See :meth:`Index.delete`.
 
-        Removes the mapping from this layer's own storage only; the ``value``
-        argument is ignored. Raises ``KeyError`` if the key is not present here.
+        Removes the mapping from this layer's own storage only and unfixes the key
+        (see :meth:`fix`); the ``value`` argument is ignored. Raises ``KeyError``
+        if the key is not present here.
         """
         del self.storage[key]
+        # a deleted key is no longer fixed, so it can be evicted once it is put again:
+        self.fixed.discard(key)
 
     def flush(self, key: Address | None = None) -> None:
         """See :meth:`Index.flush`.

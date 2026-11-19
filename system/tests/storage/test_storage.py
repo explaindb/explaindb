@@ -39,7 +39,8 @@ class StorageLayerTest(AbstractUnitTest):
 
     def test_storage_layer_basics(self) -> None:
         """A full layer evicts its largest key to the layer below, a miss copies the entry up from the layer
-        below, and putting a new key fails if the eviction candidate is fixed."""
+        below, and eviction skips fixed keys: it evicts the largest key that is not fixed.
+        """
 
         # simple storage hierarchy with only two layers:
         sl_ssd: StorageLayer[str, str] = StorageLayer[str, str](
@@ -69,10 +70,86 @@ class StorageLayerTest(AbstractUnitTest):
             list(sl_ssd.storage.keys()), ["4", "5", "6", "7", "8", "9"]
         )
 
-        # test fix: "5" is the largest key and hence the eviction candidate, so the next put cannot make room:
+        # test fix: "5" is the largest key but fixed, so the next put evicts "3", the largest key that is not
+        # fixed, to the SSD:
         sl_DRAM.fix("5")
-        with self.assertRaises(ValueError):
-            sl_DRAM.put("42", "42")
+        sl_DRAM.put("42", "42")
+        self.assertListEqual(list(sl_DRAM.storage.keys()), ["0", "1", "2", "5", "42"])
+        self.assertListEqual(
+            list(sl_ssd.storage.keys()), ["4", "5", "6", "7", "8", "9", "3"]
+        )
+
+    def test_storage_layer_eviction_fails_if_all_keys_are_fixed(self) -> None:
+        """If every key of a full layer is fixed, there is no eviction candidate: evicting or putting a new key
+        raises ValueError and changes neither layer, while overwriting a stored key still works.
+        """
+
+        # a full DRAM layer whose two keys are both fixed:
+        sl_ssd: StorageLayer[str, str] = StorageLayer[str, str](
+            max_capacity=100, name="SSD"
+        )
+        sl_DRAM: StorageLayer[str, str] = StorageLayer[str, str](
+            max_capacity=2, name="DRAM", layer_below=sl_ssd
+        )
+        sl_DRAM.put("a", "a")
+        sl_DRAM.put("b", "b")
+        sl_DRAM.fix("a")
+        sl_DRAM.fix("b")
+
+        # there is no key to evict, so neither choosing a candidate nor evicting works:
+        with self.assertRaisesRegex(ValueError, "can be evicted"):
+            sl_DRAM.choose_eviction_candidate()
+        with self.assertRaisesRegex(ValueError, "can be evicted"):
+            sl_DRAM.evict()
+
+        # so a put of a new key fails, and both layers keep their contents:
+        with self.assertRaisesRegex(ValueError, "can be evicted"):
+            sl_DRAM.put("c", "c")
+        self.assertListEqual(list(sl_DRAM.storage.keys()), ["a", "b"])
+        self.assertEqual(sl_ssd.size(), 0)
+
+        # overwriting a stored key needs no eviction and succeeds:
+        sl_DRAM.put("a", "A")
+        self.assertEqual(sl_DRAM.get("a"), "A")
+        self.assertListEqual(list(sl_DRAM.storage.keys()), ["a", "b"])
+        self.assertEqual(sl_ssd.size(), 0)
+
+    def test_storage_layer_empty_layer_has_no_eviction_candidate(self) -> None:
+        """An empty layer has no key to evict: choosing an eviction candidate raises ValueError."""
+
+        # an empty DRAM layer above an empty SSD:
+        sl_ssd: StorageLayer[str, str] = StorageLayer[str, str](
+            max_capacity=100, name="SSD"
+        )
+        sl_DRAM: StorageLayer[str, str] = StorageLayer[str, str](
+            max_capacity=2, name="DRAM", layer_below=sl_ssd
+        )
+        with self.assertRaisesRegex(ValueError, "can be evicted"):
+            sl_DRAM.choose_eviction_candidate()
+
+    def test_storage_layer_delete_unfixes_key(self) -> None:
+        """Deleting a fixed key unfixes it: when the key is put again later, it can be evicted."""
+
+        # a full DRAM layer with two entries, of which "b" is fixed:
+        sl_ssd: StorageLayer[str, str] = StorageLayer[str, str](
+            max_capacity=100, name="SSD"
+        )
+        sl_DRAM: StorageLayer[str, str] = StorageLayer[str, str](
+            max_capacity=2, name="DRAM", layer_below=sl_ssd
+        )
+        sl_DRAM.put("a", "a")
+        sl_DRAM.put("b", "b")
+        sl_DRAM.fix("b")
+
+        # deleting "b" also unfixes it:
+        sl_DRAM.delete("b")
+        self.assertNotIn("b", sl_DRAM.fixed)
+
+        # put "b" again and then a new key "c": "b" is the largest key and no longer fixed, so it is evicted:
+        sl_DRAM.put("b", "b")
+        sl_DRAM.put("c", "c")
+        self.assertListEqual(list(sl_DRAM.storage.keys()), ["a", "c"])
+        self.assertListEqual(list(sl_ssd.storage.keys()), ["b"])
 
     def test_storage_layer_capacity_must_be_at_least_one(self) -> None:
         """The constructor rejects a max_capacity below 1, as such a layer could never store anything."""
@@ -230,8 +307,8 @@ class StorageLayerTest(AbstractUnitTest):
         self.assertEqual(sl_DRAM.get("a"), "A")
         self.assertEqual(sl_DRAM.size(), 2)
 
-    def test_storage_layer_overwrite_of_fixed_eviction_candidate(self) -> None:
-        """Overwriting a fixed key in a full layer succeeds even though that key is the eviction candidate."""
+    def test_storage_layer_overwrite_of_fixed_key_in_full_layer(self) -> None:
+        """Overwriting a fixed key in a full layer succeeds and evicts nothing."""
 
         # a full DRAM layer with two entries above an empty SSD:
         sl_ssd: StorageLayer[str, str] = StorageLayer[str, str](
@@ -243,10 +320,11 @@ class StorageLayerTest(AbstractUnitTest):
         sl_DRAM.put("a", "a")
         sl_DRAM.put("b", "b")
 
-        # fix "b", the largest key and hence the eviction candidate:
+        # fix "b", the largest key:
         sl_DRAM.fix("b")
 
         # overwrite "b": the new value is stored in DRAM, and nothing reaches the SSD:
         sl_DRAM.put("b", "B")
         self.assertEqual(sl_DRAM.get("b"), "B")
+        self.assertListEqual(list(sl_DRAM.storage.keys()), ["a", "b"])
         self.assertEqual(sl_ssd.size(), 0)
