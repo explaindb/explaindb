@@ -22,6 +22,7 @@
 
 from __future__ import annotations
 from abc import ABC, abstractmethod
+from collections.abc import Sequence
 from enum import Enum
 from statistics import mean
 from typing import Iterator
@@ -74,7 +75,7 @@ class SubSystem(ABC):
     def get_storage_blow_up(self) -> float:
         """Returns the storage blow-up in terms of the extra storage space introduced by the subsystem. This means,
         if we return 1.1 this means we add 10% more storage space to the original storage space, 1.0 means no extra
-        storage space is added.
+        storage space is added. A value below 1.0 means space is saved, e.g. by compression.
         """
 
     @abstractmethod
@@ -82,18 +83,27 @@ class SubSystem(ABC):
         self,
     ) -> tuple[ResilienceScenario, Iterator[SubSystem] | None] | None:
         """Returns the scenario this SubSystem is resilient against, i.e. this scenario may happen, still
-        this subsystem instance can recover all data."""
+        this subsystem instance can recover all data.
+
+        @return: None if this subsystem is not resilient against any failure, otherwise a tuple of
+            0. the resilience scenario and
+            1. an iterator over the member subsystems that may fail, or None.
+        """
 
     def get_resilience_scenarios(
         self, rec_depth: int = 0
     ) -> Iterator[
         tuple[int, SubSystem, ResilienceScenario, Iterator[SubSystem] | None]
     ]:
-        """Returns an Iterator over all resilience scenarios recursively.
-        Each tuple contains:
-        0. the subsystem instance,
-        1. the resilience scenario for that instance, and
-        2. an iterator over the children subsystems that may fail or None.
+        """Returns an Iterator over the resilience scenarios of this subsystem and, recursively, of all subsystems
+        nested in it. A subsystem that is not resilient against any failure contributes no tuple.
+
+        @param rec_depth: The recursion depth of this subsystem, 0 for the outermost subsystem.
+        @return: An iterator over tuples, each containing:
+            0. the recursion depth of the subsystem,
+            1. the subsystem instance,
+            2. the resilience scenario for that instance, and
+            3. an iterator over the member subsystems that may fail, or None.
         """
 
         # return the resilience scenario of this subsystem:
@@ -112,24 +122,23 @@ class SubSystem(ABC):
 class SubSystemArray(SubSystem, ABC):
     """A cost model for an abstract subsystem keeping a list of references to nested subsystems."""
 
-    def __init__(self, subsystems: list[SubSystem]):
+    def __init__(self, subsystems: Sequence[SubSystem]):
         """Create the array over the given nested subsystems.
 
         @param subsystems: The subsystems aggregated by this array.
         """
         super().__init__()
-        self.subsystems: list[SubSystem] = subsystems
+        self.subsystems: Sequence[SubSystem] = subsystems
 
     def get_resilience_scenarios(
         self, rec_depth: int = 0
     ) -> Iterator[
         tuple[int, SubSystem, ResilienceScenario, Iterator[SubSystem] | None]
     ]:
-        """Returns an Iterator over all resilience scenarios of the subsystems in this subsystem recursively.
-        Each tuple contains:
-        0. the subsystem instance,
-        1. the resilience scenario for that instance, and
-        2. an iterator over the children subsystems that may fail or None.
+        """See :meth:`SubSystem.get_resilience_scenarios`.
+
+        Yields the scenario of this array first, then the scenarios of each member subsystem, which is called
+        recursively with ``rec_depth + 1``, so the depth grows by one per nesting level.
         """
 
         # return the resilience scenario of this subsystem:
@@ -185,9 +194,9 @@ class Device(SubSystem):
         return self.write_IO_performance
 
     def get_storage_blow_up(self) -> float:
-        """Returns the storage blow-up in terms of the extra storage space introduced by the subsystem. This means,
-        if we return 1.1 this means we add 10% more storage space to the original storage space, 1.0 means no extra
-        storage space is added. A value < 1.0 means we reduce the storage space, i.e. by using compression.
+        """See :meth:`SubSystem.get_storage_blow_up`.
+
+        Returns the blow-up factor the device was configured with.
         """
         return self.storage_blow_up
 
@@ -229,9 +238,9 @@ class RAID_0(SubSystemArray):
         )
 
     def get_storage_blow_up(self) -> float:
-        """Returns the storage blow-up in terms of the extra storage space introduced by the subsystem. This means,
-        if we return 1.1 this means we add 10% more storage space to the original storage space, 1.0 means no extra
-        storage space is added. A value < 1.0 means we reduce the storage space, i.e. by using compression.
+        """See :meth:`SubSystem.get_storage_blow_up`.
+
+        Returns the mean of the blow-ups of the subsystems, since striping splits the data evenly across them.
         """
         return 1.0 * mean(
             subsystem.get_storage_blow_up() for subsystem in self.subsystems
@@ -239,8 +248,9 @@ class RAID_0(SubSystemArray):
 
     def get_resilience_scenario(
         self,
-    ) -> tuple[ResilienceScenario, Iterator[SubSystem] | None]:
+    ) -> tuple[ResilienceScenario, Iterator[SubSystem] | None] | None:
         """RAID 0 is not resilient against any failure."""
+        return None
 
 
 class RAID_1(SubSystemArray):
@@ -275,9 +285,9 @@ class RAID_1(SubSystemArray):
         )
 
     def get_storage_blow_up(self) -> float:
-        """Returns the storage blow-up in terms of the extra storage space introduced by the subsystem. This means,
-        if we return 1.1 this means we add 10% more storage space to the original storage space, 1.0 means no extra
-        storage space is added. A value < 1.0 means we reduce the storage space, i.e. by using compression.
+        """See :meth:`SubSystem.get_storage_blow_up`.
+
+        Returns the sum of the blow-ups of the subsystems, since every subsystem stores a full copy of the data.
         """
         return sum(subsystem.get_storage_blow_up() for subsystem in self.subsystems)
 
@@ -291,7 +301,7 @@ class RAID_1(SubSystemArray):
 class RAID_5(SubSystemArray):
     """RAID 5: Striping with distributed (round-robin) parity"""
 
-    def __init__(self, subsystems: list[SubSystem]):
+    def __init__(self, subsystems: Sequence[SubSystem]):
         """See :meth:`SubSystemArray.__init__`.
 
         RAID 5 additionally requires at least three subsystems and asserts this.
@@ -345,9 +355,10 @@ class RAID_5(SubSystemArray):
         return mean_write_IOPs * (len(self.subsystems) - 1)
 
     def get_storage_blow_up(self) -> float:
-        """Returns the storage blow-up in terms of the extra storage space introduced by the subsystem. This means,
-        if we return 1.1 this means we add 10% more storage space to the original storage space, 1.0 means no extra
-        storage space is added. A value < 1.0 means we reduce the storage space, i.e. by using compression.
+        """See :meth:`SubSystem.get_storage_blow_up`.
+
+        Returns the mean of the blow-ups of the subsystems times n / (n - 1) for n subsystems, since one
+        subsystem's worth of space holds parity.
         """
         mean_storage_blow_up: float = mean(
             subsystem.get_storage_blow_up() for subsystem in self.subsystems
