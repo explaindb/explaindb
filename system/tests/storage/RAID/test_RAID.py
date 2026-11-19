@@ -114,9 +114,9 @@ class RAIDAssignmentTest(AbstractUnitTest):
 
 
 class RAIDPerformanceTest(AbstractUnitTest):
-    """The tests build their arrays from devices whose four performance values all differ (sequential read and
-    write speed, read and write IOPS), so a RAID formula that mixes up reads and writes yields a wrong
-    value."""
+    """Unless a test needs special values, the tests build their arrays from devices whose four performance values
+    all differ (sequential read and write speed, read and write IOPS), so a RAID formula that mixes up reads and
+    writes yields a wrong value."""
 
     def test_Device(self) -> None:
         """A device reports the performance values it was created with and needs no extra storage."""
@@ -250,8 +250,9 @@ class RAIDPerformanceTest(AbstractUnitTest):
         self.assertEqual(array.get_write_IO_performance(), 400)
 
     def test_RAID_5(self) -> None:
-        """RAID 5 over n devices reads and writes at the speed of n - 1 devices, as one device's worth goes to
-        parity, stores n / (n - 1) times the data, and survives the failure of any single device.
+        """RAID 5 over n devices streams at the speed of n - 1 devices, as one device's worth goes to parity, serves
+        random reads with all n devices, pays two reads and two writes per small write, stores n / (n - 1) times
+        the data, and survives the failure of any single device.
         """
 
         # stripe the data with parity over six devices:
@@ -259,19 +260,20 @@ class RAIDPerformanceTest(AbstractUnitTest):
         number_of_subsystems: int = 6
         array: SubSystem = RAID_5([dev] * number_of_subsystems)
 
-        # five devices' worth of performance remains for the data, for reads and for writes:
+        # five devices' worth of sequential speed remains for the data, for reads and for writes:
         self.assertEqual(
             array.get_sequential_read_performance(), (number_of_subsystems - 1) * 100
         )
         self.assertEqual(
             array.get_sequential_write_performance(), (number_of_subsystems - 1) * 50
         )
-        self.assertEqual(
-            array.get_read_IO_performance(), (number_of_subsystems - 1) * 1000
-        )
-        self.assertEqual(
-            array.get_write_IO_performance(), (number_of_subsystems - 1) * 400
-        )
+
+        # a random read touches one device, and every device holds data, so all six devices serve reads:
+        self.assertEqual(array.get_read_IO_performance(), number_of_subsystems * 1000)
+
+        # a small write reads the old data and parity and writes both anew, which costs 2 / 1000 + 2 / 400 = 0.007
+        # device-seconds; six devices serve 6 / 0.007 = 857.14 such writes per second, rounded to 857:
+        self.assertEqual(array.get_write_IO_performance(), 857)
 
         # one parity block per five data blocks:
         self.assertEqual(
@@ -292,6 +294,87 @@ class RAIDPerformanceTest(AbstractUnitTest):
         self.assertEqual(
             resilience_subsystems, list[Device]([dev] * number_of_subsystems)
         )
+
+    def test_RAID_5_write_IOPS_are_rounded(self) -> None:
+        """RAID 5 rounds its write IOPS to the nearest integer instead of cutting off the fraction or always
+        rounding up."""
+
+        # 3 / (2 / 1000 + 2 / 400) = 3 / 0.007 = 428.57 rounds up to 429 (cutting off the fraction would give 428),
+        # 4 / 0.007 = 571.43 rounds down to 571 (always rounding up would give 572):
+        number_of_subsystems: int
+        expected_write_IOPs: int
+        for number_of_subsystems, expected_write_IOPs in [(3, 429), (4, 571)]:
+            with self.subTest(number_of_subsystems=number_of_subsystems):
+                # stripe the data with parity over distinct devices:
+                array: SubSystem = RAID_5(
+                    [Device(100, 50, 1000, 400) for _ in range(number_of_subsystems)]
+                )
+                self.assertEqual(array.get_write_IO_performance(), expected_write_IOPs)
+
+    def test_RAID_5_with_mixed_devices(self) -> None:
+        """RAID 5 over devices of different speeds adds up their read IOPS exactly and computes its small writes
+        from the mean read and the mean write IOPS of its devices."""
+
+        # stripe the data with parity over two slow devices and one twice as fast device:
+        array: SubSystem = RAID_5(
+            [
+                Device(100, 50, 1000, 400),
+                Device(100, 50, 1000, 400),
+                Device(200, 100, 2000, 800),
+            ]
+        )
+
+        # reads add up to 1000 + 1000 + 2000 = 4000 (rounding the mean 1333.33 first would give 3 * 1333 = 3999):
+        self.assertEqual(array.get_read_IO_performance(), 4000)
+
+        # the means are R = 4000 / 3 and W = 1600 / 3, so 3 / (2 / R + 2 / W) = 3 / (0.0015 + 0.00375) = 571.43,
+        # rounded to 571 (the slowest device alone would give 429, the fastest 857):
+        self.assertEqual(array.get_write_IO_performance(), 571)
+
+    def test_RAID_5_write_IOPS_with_equal_read_and_write_IOPS(self) -> None:
+        """With W read and W write IOPS per device, RAID 5 over n devices serves the textbook n * W / 4 small writes
+        per second, as every small write costs four device I/Os."""
+
+        # stripe the data with parity over six distinct devices with 400 read and 400 write IOPS each:
+        array: SubSystem = RAID_5([Device(100, 50, 400, 400) for _ in range(6)])
+
+        # 6 / (2 / 400 + 2 / 400) = 6 * 400 / 4 = 600:
+        self.assertEqual(array.get_write_IO_performance(), 600)
+
+    def test_RAID_5_serves_fewer_write_IOPS_than_RAID_10(self) -> None:
+        """On six devices, RAID 5 serves fewer small writes per second than RAID 1+0: a RAID 5 write costs two reads
+        and two writes, a RAID 1+0 write one write on each of the two devices of a mirrored pair, which work in
+        parallel."""
+
+        # RAID 5 over six distinct devices, and RAID 1+0 over three mirrored pairs of distinct devices:
+        raid_5: SubSystem = RAID_5([Device(100, 50, 1000, 400) for _ in range(6)])
+        raid_10: SubSystem = RAID_0(
+            [RAID_1([Device(100, 50, 1000, 400) for _ in range(2)]) for _ in range(3)]
+        )
+
+        # RAID 5 serves 6 / (2 / 1000 + 2 / 400) = 857.14 -> 857 writes per second, RAID 1+0 three pairs * 400 = 1200:
+        self.assertEqual(raid_5.get_write_IO_performance(), 857)
+        self.assertEqual(raid_10.get_write_IO_performance(), 1200)
+        self.assertLess(
+            raid_5.get_write_IO_performance(), raid_10.get_write_IO_performance()
+        )
+
+    def test_RAID_5_write_IOPS_of_devices_without_IOPS(self) -> None:
+        """RAID 5 over devices that serve no random reads, or no random writes, serves no small write and reports 0
+        write IOPS."""
+
+        # devices without read IOPS, then devices without write IOPS:
+        read_IOPs: int
+        write_IOPs: int
+        for read_IOPs, write_IOPs in [(0, 400), (1000, 0)]:
+            with self.subTest(read_IOPs=read_IOPs, write_IOPs=write_IOPs):
+                # stripe the data with parity over three distinct such devices:
+                array: SubSystem = RAID_5(
+                    [Device(100, 50, read_IOPs, write_IOPs) for _ in range(3)]
+                )
+
+                # a small write needs both reads and writes, so the array serves none:
+                self.assertEqual(array.get_write_IO_performance(), 0)
 
     def test_RAID_01(self) -> None:
         """RAID 0+1 reads with all its devices but writes only as fast as one of its RAID 0 arrays, and stores one
@@ -466,8 +549,9 @@ class RAIDPerformanceTest(AbstractUnitTest):
             )
 
     def test_RAID_55(self) -> None:
-        """RAID 5+5 loses one subsystem's worth of performance on each of its two layers, for reads and for
-        writes."""
+        """RAID 5+5 loses one subsystem's worth of sequential speed on each of its two layers, serves random reads
+        with all its devices, and applies the small-write formula of RAID 5 on each layer, rounded per layer.
+        """
 
         # RAID 5+5: RAID 5 arrays in a RAID 5 subsystem (i.e. bottom layer is RAID 5)
         dev: Device = Device(100, 50, 1000, 400)
@@ -476,9 +560,10 @@ class RAIDPerformanceTest(AbstractUnitTest):
             # combine three RAID 5 arrays of 2 * scale_factor devices each with RAID 5:
             disks_inner: int = 2 * scale_factor
             disks_outer: int = 3
-            array: SubSystem = RAID_5([RAID_5([dev] * disks_inner)] * disks_outer)
+            inner_array: SubSystem = RAID_5([dev] * disks_inner)
+            array: SubSystem = RAID_5([inner_array] * disks_outer)
 
-            # each layer keeps the performance of all but one of its subsystems for the data:
+            # each layer keeps the sequential speed of all but one of its subsystems for the data:
             self.assertEqual(
                 array.get_sequential_read_performance(),
                 (disks_inner - 1) * (disks_outer - 1) * 100,
@@ -487,14 +572,19 @@ class RAIDPerformanceTest(AbstractUnitTest):
                 array.get_sequential_write_performance(),
                 (disks_inner - 1) * (disks_outer - 1) * 50,
             )
+
+            # an inner RAID 5 reads with all its devices; with scale_factor 2, its four devices serve
+            # 4 / (2 / 1000 + 2 / 400) = 571.43 small writes per second, rounded to 571:
+            self.assertEqual(inner_array.get_read_IO_performance(), disks_inner * 1000)
+            self.assertEqual(inner_array.get_write_IO_performance(), 571)
+
+            # the outer RAID 5 reads with all inner arrays; its three inner arrays serve 3 / (2 / 4000 + 2 / 571)
+            # = 749.508 small writes per second, just above 749.5, so it rounds to 750 (with the unrounded inner
+            # value 571.43, the result would be exactly 750):
             self.assertEqual(
-                array.get_read_IO_performance(),
-                (disks_inner - 1) * (disks_outer - 1) * 1000,
+                array.get_read_IO_performance(), disks_inner * disks_outer * 1000
             )
-            self.assertEqual(
-                array.get_write_IO_performance(),
-                (disks_inner - 1) * (disks_outer - 1) * 400,
-            )
+            self.assertEqual(array.get_write_IO_performance(), 750)
 
             # each layer adds its own parity:
             self.assertEqual(
@@ -625,31 +715,32 @@ class RAIDPerformanceTest(AbstractUnitTest):
             * (number_of_subsystems - 1),  # RAID 5
         )
 
-        # read IOPS: the same factors as for sequential reads:
+        # read IOPS: every level adds up the read IOPS of its subsystems, RAID 5 included, as its rotating parity
+        # puts data on every subsystem; this gives 1000 * 3^7 = 2187000:
         self.assertEqual(
             array.get_read_IO_performance(),
             1000
-            * (number_of_subsystems - 1)  # RAID 5 (starting from innermost)
+            * number_of_subsystems  # RAID 5 (starting from innermost)
             * number_of_subsystems  # RAID 0
             * number_of_subsystems  # RAID 0
-            * (number_of_subsystems - 1)  # RAID 5
+            * number_of_subsystems  # RAID 5
             * number_of_subsystems  # RAID 1
             * number_of_subsystems  # RAID 0
-            * (number_of_subsystems - 1),  # RAID 5
+            * number_of_subsystems,  # RAID 5
         )
 
-        # write IOPS: the same factors as for sequential writes:
-        self.assertEqual(
-            array.get_write_IO_performance(),
-            400
-            * (number_of_subsystems - 1)  # RAID 5 (starting from innermost)
-            * number_of_subsystems  # RAID 0
-            * number_of_subsystems  # RAID 0
-            * (number_of_subsystems - 1)  # RAID 5
-            * 1  # RAID 1
-            * number_of_subsystems  # RAID 0
-            * (number_of_subsystems - 1),  # RAID 5
-        )
+        # write IOPS, layer by layer from the innermost: RAID 0 adds up the write IOPS of its subsystems, RAID 1
+        # takes their minimum, and RAID 5 serves round(3 / (2 / R + 2 / W)) small writes per second, where R and W
+        # are the read and write IOPS of its subsystems (R is the read IOPS of the layer below, see above: 1000,
+        # 1000 * 3^3 = 27000 and 1000 * 3^6 = 729000):
+        #   RAID 5:  3 / (2 / 1000 + 2 / 400)     =   428.57 ->   429
+        #   RAID 0:  3 * 429                                  =  1287
+        #   RAID 0:  3 * 1287                                 =  3861
+        #   RAID 5:  3 / (2 / 27000 + 2 / 3861)   =  5066.93 ->  5067
+        #   RAID 1:  min(5067, 5067, 5067)                    =  5067
+        #   RAID 0:  3 * 5067                                 = 15201
+        #   RAID 5:  3 / (2 / 729000 + 2 / 15201) = 22335.76 -> 22336
+        self.assertEqual(array.get_write_IO_performance(), 22336)
 
         # Output resilience scenarios for debugging purposes:
         # RAIDPerformanceTest._print_resilient_info(array)

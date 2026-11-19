@@ -328,31 +328,38 @@ class RAID_5(SubSystemArray):
         return min_write_performance * (len(self.subsystems) - 1)
 
     def get_read_IO_performance(self) -> int:
-        """Read IOPs is the average read IOPs of the subsystems times (the number of subsystems minus 1)."""
-        mean_read_IOPs: int = int(
-            round(
-                mean(
-                    subsystem.get_read_IO_performance() for subsystem in self.subsystems
-                ),
-                0,
-            )
-        )
+        """See :meth:`SubSystem.get_read_IO_performance`.
 
-        return mean_read_IOPs * (len(self.subsystems) - 1)
+        Read IOPs is the sum of the read IOPs of all subsystems: a random read touches only the subsystem that holds
+        the block, and as the parity rotates over all subsystems, every subsystem holds data and serves reads. (RAID 4
+        would lose one subsystem's worth here, as its dedicated parity subsystem never serves reads.)
+        """
+        return sum(subsystem.get_read_IO_performance() for subsystem in self.subsystems)
 
     def get_write_IO_performance(self) -> int:
-        """Write IOPs is the average write IOPs of the subsystems times (the number of subsystems minus 1)."""
-        mean_write_IOPs: int = int(
-            round(
-                mean(
-                    subsystem.get_write_IO_performance()
-                    for subsystem in self.subsystems
-                ),
-                0,
-            )
+        """See :meth:`SubSystem.get_write_IO_performance`.
+
+        Assumes that every write is a small write of a single block, done as a read-modify-write: read the old data
+        block and the old parity block, then write the new data block and the new parity block. One small write thus
+        costs 2 reads at the subsystems' mean read IOPs R and 2 writes at their mean write IOPs W, i.e. 2 / R + 2 / W
+        seconds of subsystem time, spread evenly over all n subsystems: write IOPs is round(n / (2 / R + 2 / W)).
+        With R = W this is the textbook n * W / 4. If R or W is 0, write IOPs is 0.
+        """
+        # R and W, the mean read and write IOPs of the subsystems:
+        mean_read_IOPs: float = mean(
+            subsystem.get_read_IO_performance() for subsystem in self.subsystems
+        )
+        mean_write_IOPs: float = mean(
+            subsystem.get_write_IO_performance() for subsystem in self.subsystems
         )
 
-        return mean_write_IOPs * (len(self.subsystems) - 1)
+        # subsystems that cannot read or cannot write serve no read-modify-write:
+        if mean_read_IOPs == 0 or mean_write_IOPs == 0:
+            return 0
+
+        # every small write costs 2 / R + 2 / W seconds of subsystem time; the n subsystems work in parallel:
+        seconds_per_small_write: float = 2 / mean_read_IOPs + 2 / mean_write_IOPs
+        return round(len(self.subsystems) / seconds_per_small_write)
 
     def get_storage_blow_up(self) -> float:
         """See :meth:`SubSystem.get_storage_blow_up`.
