@@ -596,7 +596,10 @@ the interface documentation.
 
 - **Interfaces and abstract base classes** carry the full contract. Use Javadoc
   style with `@param` and `@return`, as in
-  [`system/interfaces/indexing/Index.py`](system/interfaces/indexing/Index.py).
+  [`system/interfaces/indexing/Index.py`](system/interfaces/indexing/Index.py), and
+  `@raise ExceptionType: ...` for each exception the method raises. The API
+  documentation converts only these three tags; any other tag followed by a colon
+  or text, e.g. `@throws X: ...`, fails its build.
 - The docstring on the abstract method is the single source of truth for what
   the method promises.
 
@@ -645,7 +648,7 @@ the interface documentation.
 
 | Kind | Docstring |
 | --- | --- |
-| Interface / abstract method | Full contract (`@param` / `@return`) |
+| Interface / abstract method | Full contract (`@param` / `@return` / `@raise`) |
 | Override, no behaviour change | `See :meth:`...`` reference only |
 | Override with a delta | Reference + what is special / changed |
 | Non-trivial dunder | Short description of the logic |

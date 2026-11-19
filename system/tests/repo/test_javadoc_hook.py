@@ -107,6 +107,63 @@ class JavadocToRestTest(unittest.TestCase):
             ],
         )
 
+    def test_raise_tag_converts_to_separate_raises_field(self):
+        """A @raise tag after a @param becomes its own :raises: field.
+
+        Would fail if @raise were not converted: the line would then be folded
+        into the preceding :param: body and render glued to its end.
+        """
+        lines = [
+            "@param max_capacity: the number of entries this layer can hold",
+            "@raise ValueError: if max_capacity is less than 1.",
+        ]
+        self.assertEqual(
+            javadoc_to_rest(lines),
+            [
+                ":param max_capacity: the number of entries this layer can hold",
+                ":raises ValueError: if max_capacity is less than 1.",
+            ],
+        )
+
+    def test_raises_spelling_and_dotted_exception_type_convert(self):
+        """``@raises`` converts like ``@raise``, and a dotted type stays whole.
+
+        Would fail if the ``@raises`` spelling were not recognised, or if the
+        exception type stopped at the first dot, turning ``errors.StorageError``
+        into the type ``errors`` followed by ``.StorageError`` in the text.
+        """
+        lines = [
+            "@raises KeyError: if the key is missing",
+            "@raise system.errors.StorageError: if the layer is full",
+        ]
+        self.assertEqual(
+            javadoc_to_rest(lines),
+            [
+                ":raises KeyError: if the key is missing",
+                ":raises system.errors.StorageError: if the layer is full",
+            ],
+        )
+
+    def test_multiline_raise_folds_continuation(self):
+        """A wrapped @raise description folds onto its single :raises: line.
+
+        Would fail if continuation lines were not folded into the :raises: field
+        but left as an unindented paragraph after it.
+        """
+        lines = [
+            "@raise ValueError: if the chosen key is fixed, or if this layer",
+            "is empty.",
+            "@return: the evicted entry",
+        ]
+        self.assertEqual(
+            javadoc_to_rest(lines),
+            [
+                ":raises ValueError: if the chosen key is fixed, or if this layer "
+                "is empty.",
+                ":returns: the evicted entry",
+            ],
+        )
+
     def test_native_rest_return_folds_and_is_verbatim(self):
         """A native :return: field folds its continuation and is not rewritten.
 
@@ -216,14 +273,64 @@ class FindResidualTagsTest(unittest.TestCase):
         # ...but scanning the original still surfaces it.
         self.assertEqual(find_residual_tags(original), ["@param"])
 
+    def test_raise_without_type_or_colon_reported_as_residual(self):
+        """A @raise tag without an exception type or without a colon is reported.
+
+        Would fail if a bare ``@raise`` or ``@raise: text`` slipped through, so
+        that it was folded into the preceding field without a Sphinx warning, or
+        if the colon became optional, so that ``@raise if ...`` rendered with
+        ``if`` as its exception type.
+        """
+        original = [
+            "@raise",
+            "@raise: if the key is missing",
+            "@raise if the key is missing",
+            "@raise ValueError if the key is missing",
+        ]
+        self.assertEqual(find_residual_tags(original), original)
+
+    def test_unknown_tags_reported_as_residual(self):
+        """Javadoc tags the hook does not convert at all are reported.
+
+        Would fail if the residual check knew only ``@param`` / ``@return`` /
+        ``@raise``, so that a tag such as ``@throws`` rendered glued to the end
+        of the preceding field without a Sphinx warning.
+        """
+        original = [
+            "@throws ValueError: if the key is missing",
+            "@see: Index.put",
+            "@parameter key: the key",
+            "@author Jens",
+        ]
+        self.assertEqual(find_residual_tags(original), original)
+
+    def test_decorator_lines_not_reported(self):
+        """Lines that look like decorators, e.g. in a code example, are not reported.
+
+        Would fail if the residual check flagged any line that starts with ``@``,
+        so a docstring showing decorator usage broke the ``-W`` build.
+        """
+        original = [
+            "@dataclass",
+            "@functools.lru_cache(maxsize=None)",
+            "@abstractmethod",
+        ]
+        self.assertEqual(find_residual_tags(original), [])
+
     def test_fully_converted_docstring_has_no_residuals(self):
         """A docstring whose tags all convert yields no residual tags.
 
         Would fail if ``find_residual_tags`` flagged well-formed ``@param`` /
-        ``@return`` tags (which the converter handles) and raised a spurious
-        Sphinx warning on every correctly documented docstring.
+        ``@return`` / ``@raise`` tags (which the converter handles) and raised a
+        spurious Sphinx warning on every correctly documented docstring.
         """
-        original = ["Adds a mapping.", "", "@param key: the key", "@return: None"]
+        original = [
+            "Adds a mapping.",
+            "",
+            "@param key: the key",
+            "@return: None",
+            "@raise ValueError: if key is None",
+        ]
         self.assertEqual(find_residual_tags(original), [])
 
 

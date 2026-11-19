@@ -20,13 +20,14 @@
 
 """Convert the project's Javadoc-style docstring tags into reST field lists for Sphinx autodoc.
 
-The codebase documents parameters and return values with Javadoc tags
-(``@param name: ...``, ``@return: ...``) while cross-references already use reST
-roles (``:meth:`X```). Sphinx autodoc understands reST field lists but not
-Javadoc tags, so this module rewrites the tags into ``:param name:`` /
-``:returns:`` fields and re-attaches multi-line tag descriptions to the field
-body (an unindented continuation line would otherwise render as a separate
-paragraph). reST roles in the text are left untouched.
+The codebase documents parameters, return values and raised exceptions with
+Javadoc tags (``@param name: ...``, ``@return: ...``, ``@raise Error: ...``) while
+cross-references already use reST roles (``:meth:`X```). Sphinx autodoc
+understands reST field lists but not Javadoc tags, so this module rewrites the
+tags into ``:param name:`` / ``:returns:`` / ``:raises Error:`` fields and
+re-attaches multi-line tag descriptions to the field body (an unindented
+continuation line would otherwise render as a separate paragraph). reST roles in
+the text are left untouched.
 """
 
 import re
@@ -37,22 +38,32 @@ _PARAM_RE = re.compile(r"^\s*@param\s+(\w+)\s*:?\s*(.*)$")
 # A ``@return: description`` / ``@returns description`` tag; description in 1.
 # The colon is optional here too, matching the colon-less form in the corpus.
 _RETURN_RE = re.compile(r"^\s*@returns?\s*:?\s*(.*)$")
+# A ``@raise ExceptionType: description`` / ``@raises ...`` tag; the exception
+# type (possibly dotted, e.g. ``module.Error``) in group 1, description in 2.
+# The colon is required: without it, the first word of a description such as
+# ``@raise if ...`` would be taken as the exception type, so a colon-less
+# ``@raise`` is left unconverted and reported by :func:`find_residual_tags`.
+_RAISE_RE = re.compile(r"^\s*@raises?\s+([\w.]+)\s*:\s*(.*)$")
 # A native reST field already written as ``:param foo:`` / ``:returns:`` / etc.
 # These are left as-is but still opened for continuation folding, because some
 # docstrings use reST fields directly and wrap their description across lines.
 _REST_FIELD_RE = re.compile(
     r"^\s*:(param|parameter|type|returns?|rtype|raises?|yields?|ivar|var)\b"
 )
-# A leftover Javadoc tag that conversion did not rewrite (e.g. a malformed
-# ``@param`` with no name). Used to detect silent conversion misses.
-_RESIDUAL_RE = re.compile(r"^\s*@(param|returns?)\b")
+# A line that looks like a Javadoc tag: a known tag (``@param``, ``@return``,
+# ``@raise``, also without any text after it) or any other ``@word`` followed by
+# a colon or by text, e.g. ``@throws Error: ...``. A decorator line such as
+# ``@dataclass`` or ``@functools.wraps(f)`` in a code example does not match.
+# Used to detect tags that conversion does not rewrite.
+_RESIDUAL_RE = re.compile(r"^\s*@(?:(?:param|returns?|raises?)\b|\w+(?:\s*:|\s+\S))")
 
 
 def javadoc_to_rest(lines: list[str]) -> list[str]:
-    """Rewrite Javadoc parameter/return tags in a docstring into reST field lists.
+    """Rewrite Javadoc parameter/return/raise tags in a docstring into reST field lists.
 
-    ``@param name: text`` becomes ``:param name: text`` and ``@return: text``
-    (or ``@returns:``) becomes ``:returns: text``. Native reST fields already in
+    ``@param name: text`` becomes ``:param name: text``, ``@return: text``
+    (or ``@returns:``) becomes ``:returns: text`` and ``@raise Error: text`` (or
+    ``@raises``) becomes ``:raises Error: text``. Native reST fields already in
     the docstring (``:param:``, ``:returns:``, ``:raises:``, ...) are kept as
     written. In both cases a line that continues a field's description across a
     wrap is appended to that field's body instead of being left as an unindented
@@ -73,12 +84,16 @@ def javadoc_to_rest(lines: list[str]) -> list[str]:
     for line in lines:
         param_match = _PARAM_RE.match(line)
         return_match = _RETURN_RE.match(line)
+        raise_match = _RAISE_RE.match(line)
 
         if param_match is not None:
             out.append(f":param {param_match.group(1)}: {param_match.group(2)}")
             open_field = len(out) - 1
         elif return_match is not None:
             out.append(f":returns: {return_match.group(1)}")
+            open_field = len(out) - 1
+        elif raise_match is not None:
+            out.append(f":raises {raise_match.group(1)}: {raise_match.group(2)}")
             open_field = len(out) - 1
         elif _REST_FIELD_RE.match(line) is not None:
             # A reST field written directly in the source: keep it, but open it
@@ -98,12 +113,15 @@ def javadoc_to_rest(lines: list[str]) -> list[str]:
 
 
 def find_residual_tags(lines: list[str]) -> list[str]:
-    """Return any lines carrying a ``@param``/``@return`` tag that will not convert.
+    """Return any lines carrying a Javadoc tag that will not convert.
 
     Run on the *original* (pre-conversion) docstring lines, this flags Javadoc
     tags that :func:`javadoc_to_rest` cannot rewrite -- a line that opens with
-    ``@param``/``@return`` but matches neither conversion pattern (for example a
-    malformed ``@param`` with no parameter name). Inspecting the input rather
+    ``@param``/``@return``/``@raise`` but matches no conversion pattern (for
+    example a malformed ``@param`` with no parameter name, or a ``@raise`` with
+    no exception type or no colon after it), and a line with any other tag
+    followed by a colon or by text, such as ``@throws Error: ...``, which
+    conversion does not know at all. Inspecting the input rather
     than the converted output is deliberate: a malformed tag placed right after a
     valid field would be folded into that field's body and so vanish from the
     output, escaping detection. Such a tag would otherwise render into the HTML
@@ -120,4 +138,5 @@ def find_residual_tags(lines: list[str]) -> list[str]:
         if _RESIDUAL_RE.match(line) is not None
         and _PARAM_RE.match(line) is None
         and _RETURN_RE.match(line) is None
+        and _RAISE_RE.match(line) is None
     ]
