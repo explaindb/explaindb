@@ -202,9 +202,10 @@ def compute_assignment(
     @param number_of_disks: The number of disks in the disk subsystem
     @param RAID_level: The RAID level to compute the assignment for, possible values: 0, 1, 4, 5
 
-    @return: One string per row with one column per disk; each column is padded with spaces to 11 characters (longer
-    entries are not cut), and trailing spaces are removed. A data block is shown as its logical block ID, a parity
-    block as ``P[a^b^...]`` listing the logical block IDs it covers.
+    @return: One string per row with one column per disk; all columns have the same width, 11 characters or the
+    widest entry plus one space if that is wider, so neighbouring columns are always separated by at least one space.
+    Each entry is padded with spaces to that width, and trailing spaces are removed. A data block is shown as its
+    logical block ID, a parity block as ``P[a^b^...]`` listing the logical block IDs it covers.
     """
 
     assert RAID_level in [0, 1, 4, 5]
@@ -257,21 +258,30 @@ def compute_assignment(
                 (logical_block_ID, entry.is_parity)
             )
 
-    ret: list[str] = list[str]()
-
-    # create nice string-output:
+    # render every cell as a string, one list of cells per row:
+    cells: list[list[str]] = list[list[str]]()
     row: int
     for row in range(0, rows):
-        ret_row = ""
+        row_cells: list[str] = list[str]()
         disk: int
         for disk in range(0, number_of_disks):
             entry_list: list[tuple[int, bool]] = physical_disk_blocks[disk][row]
             if len(entry_list) == 1 and entry_list[0][1] is False:
-                ret_row += str(entry_list[0][0]).ljust(11)
+                row_cells.append(str(entry_list[0][0]))
             else:
                 entry_list_mapped = list(map(lambda x: str(x[0]), entry_list))
                 # parity block using XOR-symbol "^":
-                ret_row += str("P[" + "^".join(entry_list_mapped) + "]").ljust(11)
-        ret.append(ret_row.strip())
+                row_cells.append("P[" + "^".join(entry_list_mapped) + "]")
+        cells.append(row_cells)
+
+    # one width for all columns: at least 11 characters, and at least one character more than the widest cell, so
+    # that a space always separates neighbouring columns:
+    widest_cell: int = max(len(cell) for row_cells in cells for cell in row_cells)
+    column_width: int = max(11, widest_cell + 1)
+
+    # create nice string-output: pad every cell to the column width and remove the trailing spaces of each row:
+    ret: list[str] = list[str]()
+    for row_cells in cells:
+        ret.append("".join(cell.ljust(column_width) for cell in row_cells).strip())
 
     return ret

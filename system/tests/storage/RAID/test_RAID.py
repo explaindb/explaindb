@@ -71,6 +71,47 @@ class RAIDAssignmentTest(AbstractUnitTest):
         # for row in ret:
         #    print(row)
 
+    def test_RAID_5_wide_parity_cells_keep_columns_separated(self):
+        """With seven disks the parity cells are wider than 11 characters, and every column is still
+        separated from the next one by at least one space."""
+        ret: list[str] = compute_assignment(3, 7, 5)
+        self.assertEqual(len(ret), 3)
+
+        # every row splits on whitespace into exactly one cell per disk:
+        for row in ret:
+            self.assertEqual(len(row.split()), 7)
+
+        # row 1 in full: the widest cell, P[12^13^14^15^16^17] in row 2, has 20 characters, so every cell except
+        # the last one of a row is padded to 21 characters:
+        self.assertEqual(
+            ret[1],
+            "P[6^7^8^9^10^11]     "
+            "6                    "
+            "7                    "
+            "8                    "
+            "9                    "
+            "10                   "
+            "11",
+        )
+
+    def test_RAID_5_parity_rotates_over_five_disks(self):
+        """With five disks, the RAID 5 parity block starts on the last disk and moves on by one disk
+        per row (disk 4, 0, 1, 2, 3 in rows 0 to 4), while the data blocks fill the other disks in
+        order."""
+        ret: list[str] = compute_assignment(5, 5, 5)
+
+        # split every row into its cells and compare the whole layout; the parity cells form a diagonal:
+        self.assertEqual(
+            [row.split() for row in ret],
+            [
+                ["0", "1", "2", "3", "P[0^1^2^3]"],
+                ["P[4^5^6^7]", "4", "5", "6", "7"],
+                ["8", "P[8^9^10^11]", "9", "10", "11"],
+                ["12", "13", "P[12^13^14^15]", "14", "15"],
+                ["16", "17", "18", "P[16^17^18^19]", "19"],
+            ],
+        )
+
 
 class RAIDPerformanceTest(AbstractUnitTest):
     """The tests build their arrays from devices whose four performance values all differ (sequential read and
