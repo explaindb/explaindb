@@ -175,6 +175,7 @@ confidential data, and do not enter passwords in a Binder session.
 | [Data-Layout](notebooks/Data-Layout.ipynb) | Row vs. column layout: how much each layout has to read for different queries | [![Open Data-Layout on Binder](https://mybinder.org/badge_logo.svg)](https://mybinder.org/v2/gh/explaindb/explaindb/main?urlpath=lab/tree/notebooks/Data-Layout.ipynb) |
 | [MVCC-Playground](notebooks/MVCC-Playground.ipynb) | Building schedules of transactions by clicking and running them operation by operation on the MVCC store, serializable, under snapshot isolation or without validation | [![Open MVCC-Playground on Binder](https://mybinder.org/badge_logo.svg)](https://mybinder.org/v2/gh/explaindb/explaindb/main?urlpath=lab/tree/notebooks/MVCC-Playground.ipynb) |
 | [RAID-Nesting-Trade-offs](notebooks/RAID-Nesting-Trade-offs.ipynb) | Nesting RAID 0 arrays and its effect on sequential read performance | [![Open RAID-Nesting-Trade-offs on Binder](https://mybinder.org/badge_logo.svg)](https://mybinder.org/v2/gh/explaindb/explaindb/main?urlpath=lab/tree/notebooks/RAID-Nesting-Trade-offs.ipynb) |
+| [RAID-Playground](notebooks/RAID-Playground.ipynb) | Building RAID arrays of one or two levels by clicking, failing disks and seeing which blocks survive, and comparing their cost, speed and failure tolerance | [![Open RAID-Playground on Binder](https://mybinder.org/badge_logo.svg)](https://mybinder.org/v2/gh/explaindb/explaindb/main?urlpath=lab/tree/notebooks/RAID-Playground.ipynb) |
 
 ### Indexing
 

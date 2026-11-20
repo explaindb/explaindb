@@ -25,7 +25,11 @@
 
 from typing import Iterator
 
-from system.storage.RAID.block_assignment import compute_assignment
+from system.storage.RAID.block_assignment import (
+    AssignedCell,
+    assignment_cells,
+    compute_assignment,
+)
 from system.storage.RAID.cost_model import (
     Device,
     SubSystem,
@@ -110,6 +114,38 @@ class RAIDAssignmentTest(AbstractUnitTest):
                 ["12", "13", "P[12^13^14^15]", "14", "15"],
                 ["16", "17", "18", "P[16^17^18^19]", "19"],
             ],
+        )
+
+    def test_assignment_cells(self) -> None:
+        """RAID 5 over three disks puts the data blocks 0 and 1 and their parity on disk 2 into row 0, and the parity
+        of 2 and 3 on disk 0 into row 1; every cell's text is the entry compute_assignment shows for it.
+
+        Would fail if a cell had the wrong row or disk, a parity cell were not flagged or listed other blocks, or the
+        text of a cell differed from the string output.
+        """
+        cells: list[list[AssignedCell]] = assignment_cells(2, 3, 5)
+
+        # the cells of both rows, with their logical block IDs and parity flags:
+        self.assertEqual(
+            [
+                [
+                    AssignedCell(0, 0, (0,), False),
+                    AssignedCell(0, 1, (1,), False),
+                    AssignedCell(0, 2, (0, 1), True),
+                ],
+                [
+                    AssignedCell(1, 0, (2, 3), True),
+                    AssignedCell(1, 1, (2,), False),
+                    AssignedCell(1, 2, (3,), False),
+                ],
+            ],
+            cells,
+        )
+
+        # the texts of the cells are the columns of the string output:
+        self.assertEqual(
+            [row.split() for row in compute_assignment(2, 3, 5)],
+            [[cell.text for cell in row] for row in cells],
         )
 
 

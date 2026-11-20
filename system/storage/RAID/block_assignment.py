@@ -192,20 +192,43 @@ class RAID_5(RAID_Level):
         ]
 
 
-def compute_assignment(
+@dataclass(frozen=True)
+class AssignedCell:
+    """One physical block of the disk subsystem and the logical blocks assigned to it, see
+    :func:`assignment_cells`."""
+
+    # the internal block ID on the disk, i.e. the row of the cell:
+    row: int
+
+    # the disk ID, i.e. the column of the cell:
+    disk: int
+
+    # the logical block ID of a data block, or the logical block IDs a parity block covers:
+    logical_block_IDs: tuple[int, ...]
+
+    # flag indicating if the cell holds a parity block:
+    is_parity: bool
+
+    @property
+    def text(self) -> str:
+        """The cell as text: a data block as its logical block ID, a parity block as ``P[a^b^...]`` listing the
+        logical block IDs it covers ("^" for XOR)."""
+        if len(self.logical_block_IDs) == 1 and not self.is_parity:
+            return str(self.logical_block_IDs[0])
+        return "P[" + "^".join(str(ID) for ID in self.logical_block_IDs) + "]"
+
+
+def assignment_cells(
     rows: int = 7, number_of_disks: int = 3, RAID_level: int = 0
-) -> list[str]:
-    """Computes the assignment of logical block IDs to physical block IDs for a given RAID level.
+) -> list[list[AssignedCell]]:
+    """Computes the assignment of logical block IDs to physical block IDs for a given RAID level, as data.
 
     @param rows: The number of rows in the disk subsystem, i.e. the number of internal blocks per disk to compute for
     all disks
     @param number_of_disks: The number of disks in the disk subsystem
     @param RAID_level: The RAID level to compute the assignment for, possible values: 0, 1, 4, 5
 
-    @return: One string per row with one column per disk; all columns have the same width, 11 characters or the
-    widest entry plus one space if that is wider, so neighbouring columns are always separated by at least one space.
-    Each entry is padded with spaces to that width, and trailing spaces are removed. A data block is shown as its
-    logical block ID, a parity block as ``P[a^b^...]`` listing the logical block IDs it covers.
+    @return: One list per row with one cell per disk, from the first disk to the last.
     """
 
     assert RAID_level in [0, 1, 4, 5]
@@ -258,21 +281,42 @@ def compute_assignment(
                 (logical_block_ID, entry.is_parity)
             )
 
+    # collect the cells row by row; a cell holds parity if any of its entries is a parity block:
+    return [
+        [
+            AssignedCell(
+                row,
+                disk,
+                tuple(logical_ID for logical_ID, _ in physical_disk_blocks[disk][row]),
+                any(is_parity for _, is_parity in physical_disk_blocks[disk][row]),
+            )
+            for disk in range(0, number_of_disks)
+        ]
+        for row in range(0, rows)
+    ]
+
+
+def compute_assignment(
+    rows: int = 7, number_of_disks: int = 3, RAID_level: int = 0
+) -> list[str]:
+    """Computes the assignment of logical block IDs to physical block IDs for a given RAID level.
+
+    @param rows: The number of rows in the disk subsystem, i.e. the number of internal blocks per disk to compute for
+    all disks
+    @param number_of_disks: The number of disks in the disk subsystem
+    @param RAID_level: The RAID level to compute the assignment for, possible values: 0, 1, 4, 5
+
+    @return: One string per row with one column per disk; all columns have the same width, 11 characters or the
+    widest entry plus one space if that is wider, so neighbouring columns are always separated by at least one space.
+    Each entry is padded with spaces to that width, and trailing spaces are removed. A data block is shown as its
+    logical block ID, a parity block as ``P[a^b^...]`` listing the logical block IDs it covers.
+    """
+
     # render every cell as a string, one list of cells per row:
-    cells: list[list[str]] = list[list[str]]()
-    row: int
-    for row in range(0, rows):
-        row_cells: list[str] = list[str]()
-        disk: int
-        for disk in range(0, number_of_disks):
-            entry_list: list[tuple[int, bool]] = physical_disk_blocks[disk][row]
-            if len(entry_list) == 1 and entry_list[0][1] is False:
-                row_cells.append(str(entry_list[0][0]))
-            else:
-                entry_list_mapped = list(map(lambda x: str(x[0]), entry_list))
-                # parity block using XOR-symbol "^":
-                row_cells.append("P[" + "^".join(entry_list_mapped) + "]")
-        cells.append(row_cells)
+    cells: list[list[str]] = [
+        [cell.text for cell in row_of_cells]
+        for row_of_cells in assignment_cells(rows, number_of_disks, RAID_level)
+    ]
 
     # one width for all columns: at least 11 characters, and at least one character more than the widest cell, so
     # that a space always separates neighbouring columns:

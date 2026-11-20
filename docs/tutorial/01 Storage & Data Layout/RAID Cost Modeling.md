@@ -17,6 +17,9 @@ resilience** with a small cost model, so you can compare arrangements analytical
   the nestings of 32 identical devices as RAID 0 arrays whose members of a level are alike and shows that each
   reads exactly as fast as one flat stripe; with devices of different speed, a nesting that groups the devices
   by speed beats the flat stripe.
+- **Notebook:** [`RAID-Playground.ipynb`](../../../notebooks/RAID-Playground.ipynb) — build RAID arrays of one or
+  two levels by clicking, fail disks and see block by block which data can still be read, and compare what two
+  arrays cost, how fast they are and which combinations of failed disks they survive.
 - **Implementation:** [`system/storage/RAID/cost_model.py`](../../../system/storage/RAID/cost_model.py)
   (`Device`, `RAID_0`, `RAID_1`, … and their performance/resilience; `count_survived_failures` counts which
   combinations of failed devices an array survives, e.g. RAID 0+1 vs. RAID 1+0),
