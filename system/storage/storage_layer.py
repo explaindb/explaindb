@@ -25,13 +25,21 @@ from __future__ import annotations
 import copy
 from abc import ABC, abstractmethod
 from collections.abc import MutableSequence
-from typing import Any, SupportsIndex, SupportsInt
+from typing import Any, Protocol, SupportsIndex, SupportsInt
 
-from system.interfaces.indexing.Index import KeyValueStore
+from system.interfaces.indexing.Index import Index
 
 # an offset within a page as returned by AddressConversionStrategy.split_address: anything that int() accepts,
 # e.g. "3" or 3:
 type Offset = str | SupportsInt | SupportsIndex
+
+
+class _Comparable(Protocol):
+    """A type whose values can be ordered with ``<``, e.g. ``str`` or ``int``: the addresses of a
+    :class:`StorageLayer` must be comparable, as :meth:`StorageLayer.choose_eviction_candidate` picks the largest
+    one."""
+
+    def __lt__(self, other: Any, /) -> bool: ...
 
 
 class AddressConversionStrategy[Address](ABC):
@@ -94,7 +102,7 @@ def _page_with_unit[Unit](
     return new_page
 
 
-class StorageLayer[Address, StorageUnit](KeyValueStore[Address, StorageUnit]):
+class StorageLayer[Address: _Comparable, StorageUnit](Index[Address, StorageUnit]):
     """A layer in a storage hierarchy, example incarnations of this are: DRAM, any L1, L2, L<whatever> cache, NVRAM,
     SSD, disk, tape, a CDN in a network, etc."""
 
@@ -104,7 +112,7 @@ class StorageLayer[Address, StorageUnit](KeyValueStore[Address, StorageUnit]):
         name: str = "StorageLayer",
         layer_below: StorageLayer[Address, Any] | None = None,
         address_conversion_strategy: AddressConversionStrategy[Address] | None = None,
-    ):
+    ) -> None:
         """Create a new storage layer with the given capacity, name, as well optionally a reference to the layer below.
 
         @param max_capacity: The maximum number of key-value pairs that can be stored in this layer. Must be at
@@ -134,12 +142,12 @@ class StorageLayer[Address, StorageUnit](KeyValueStore[Address, StorageUnit]):
         # the set of keys that are fixed in this storage layer and cannot be evicted:
         self.fixed: set[Address] = set[Address]()
 
-    def get(self, address: Address) -> StorageUnit:
-        """See :meth:`PointQueryMixIn.get`.
+    def get(self, key: Address) -> StorageUnit:
+        """Returns the single unit stored under the key (an address).
 
-        Storage-hierarchy variant: returns the single stored unit for the
-        address rather than an iterator. On a miss in this layer, the unit is
-        fetched from the layer below; with an address conversion strategy, the
+        A storage layer returns one unit, not an iterator as :meth:`PointQueryMixIn.get` does, so StorageLayer is an
+        :class:`Index` without the point-query mix-in. On a miss in this layer, the
+        unit is fetched from the layer below; with an address conversion strategy, the
         page for the address prefix is fetched and only ``page[int(offset)]`` is
         kept. A deep copy is stored in this layer, which may evict another
         entry or raise ``ValueError``; filling the cache never writes the
@@ -151,17 +159,17 @@ class StorageLayer[Address, StorageUnit](KeyValueStore[Address, StorageUnit]):
         """
 
         # do we have this address in the storage of this storage layer?
-        if address not in self.storage:
+        if key not in self.storage:
             # ask the layer below if this address exists below:
             if self.layer_below is None:
-                raise KeyError(f"Key {address} not found in {self._name}")
+                raise KeyError(f"Key {key} not found in {self._name}")
 
-            prefix_address_for_layer_below: Address = address
+            prefix_address_for_layer_below: Address = key
             suffix_address_for_this_layer: Offset = ""
             if self.address_conversion_strategy is not None:
                 # convert the address to the addressing schema used by the layer below:
                 prefix_address_for_layer_below, suffix_address_for_this_layer = (
-                    self.address_conversion_strategy.split_address(address)
+                    self.address_conversion_strategy.split_address(key)
                 )
 
             # a unit of this layer's type, or a whole page under an address conversion strategy:
@@ -169,15 +177,13 @@ class StorageLayer[Address, StorageUnit](KeyValueStore[Address, StorageUnit]):
 
             if self.address_conversion_strategy is not None:
                 # store the result in this layer (without writing it back below):
-                self._store(
-                    address, copy.deepcopy(res[int(suffix_address_for_this_layer)])
-                )
+                self._store(key, copy.deepcopy(res[int(suffix_address_for_this_layer)]))
             else:
-                self._store(address, copy.deepcopy(res))
+                self._store(key, copy.deepcopy(res))
 
-        return self.storage[address]
+        return self.storage[key]
 
-    def put(self, address: Address, storage_unit: StorageUnit):
+    def put(self, key: Address, value: StorageUnit) -> None:
         """See :meth:`Index.put`.
 
         Overwrites any previous mapping for the given key and stores a deep copy
@@ -208,21 +214,17 @@ class StorageLayer[Address, StorageUnit](KeyValueStore[Address, StorageUnit]):
         ):
             # write through: split the address into the page address below and the offset of the unit in the page
             # (int() rejects a malformed offset before anything is read or written):
-            page_address, offset = self.address_conversion_strategy.split_address(
-                address
-            )
+            page_address, offset = self.address_conversion_strategy.split_address(key)
             position: int = int(offset)
             # replace the unit in a copy of the page and put the changed page back into the layer below:
             page: str | MutableSequence[StorageUnit] = self.layer_below.get(
                 page_address
             )
-            self.layer_below.put(
-                page_address, _page_with_unit(page, position, storage_unit)
-            )
+            self.layer_below.put(page_address, _page_with_unit(page, position, value))
 
         # store a deep copy of the unit in this layer as well, so that later changes to the caller's object do not
         # change it:
-        self._store(address, copy.deepcopy(storage_unit))
+        self._store(key, copy.deepcopy(value))
 
     def _store(self, key: Address, value: StorageUnit) -> None:
         """Store the value under the key in this layer only: unlike :meth:`put`, it never writes the value through
@@ -243,7 +245,7 @@ class StorageLayer[Address, StorageUnit](KeyValueStore[Address, StorageUnit]):
 
         self.storage[key] = value
 
-    def fix(self, address: Address):
+    def fix(self, address: Address) -> None:
         """Fix the key in this storage layer, i.e. this mapping is never evicted: :meth:`choose_eviction_candidate`
         skips fixed keys. The key need not be stored here; deleting it from this layer (:meth:`delete`) also unfixes
         it.
@@ -251,7 +253,7 @@ class StorageLayer[Address, StorageUnit](KeyValueStore[Address, StorageUnit]):
 
         self.fixed.add(address)
 
-    def unfix(self, address: Address):
+    def unfix(self, address: Address) -> None:
         """Unfixes the key in this storage layer, i.e. this mapping may again be evicted. Raises
         ``KeyError`` if the key is not fixed."""
 

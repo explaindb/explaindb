@@ -555,3 +555,14 @@ class StorageLayerTest(AbstractUnitTest):
         # both layers still hold the unit as it was put:
         self.assertListEqual(sl_DRAM.get("01"), [9])
         self.assertListEqual(sl_ssd.get("0"), [[1], [9]])
+
+    def test_storage_layer_accepts_interface_keyword_names(self) -> None:
+        """get and put accept their arguments under the names of the interface (Index.put, PointQueryMixIn.get):
+        key and value."""
+
+        # put and get with keyword arguments, as a caller of the interface would write them:
+        sl_DRAM: StorageLayer[str, str] = StorageLayer[str, str](
+            max_capacity=2, name="DRAM"
+        )
+        sl_DRAM.put(key="a", value="A")
+        self.assertEqual(sl_DRAM.get(key="a"), "A")
