@@ -31,8 +31,9 @@ layer caches individual sub-units of the pages held below it.
    prefix address "21" = page 2, offset 1 ──► fetch SSD page 2, cache offset 1 in DRAM
 ```
 
-Under a conversion strategy the upper layer is a **read cache**: the layer below is authoritative, so
-eviction just drops the cached sub-unit locally without writing it back.
+Under a conversion strategy the upper layer is a **write-through cache**: a put also writes the sub-unit into
+its page in the layer below, so the layer below always holds the current value, and eviction just drops the
+cached sub-unit locally without writing it back.
 
 ## Try it
 

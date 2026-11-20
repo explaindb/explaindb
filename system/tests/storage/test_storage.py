@@ -267,6 +267,189 @@ class StorageLayerTest(AbstractUnitTest):
         sl_ssd.delete("2")
         self.assertEqual(sl_DRAM.get("21"), "9")
 
+    def test_storage_layer_prefix_addressing_put_writes_through(self) -> None:
+        """Under an address conversion strategy, a put replaces the unit in its page in the layer below and stores
+        the unit in the upper layer as well; a negative offset counts from the end of the page.
+        """
+
+        # a DRAM layer with prefix addressing above an SSD holding page "2":
+        sl_ssd: StorageLayer[str, str] = StorageLayer[str, str](
+            max_capacity=100, name="SSD"
+        )
+        sl_DRAM: StorageLayer[str, str] = StorageLayer[str, str](
+            max_capacity=5,
+            name="DRAM",
+            layer_below=sl_ssd,
+            address_conversion_strategy=PrefixConversion(),
+        )
+        sl_ssd.put("2", "090s")
+
+        # put "X" at offset 1 of page "2": the SSD page changes, and DRAM holds the unit:
+        sl_DRAM.put("21", "X")
+        self.assertEqual(sl_ssd.get("2"), "0X0s")
+        self.assertEqual(sl_DRAM.storage["21"], "X")
+
+        # offset -1 is the last unit of the page ("2-1" names the same unit as "23", so a program should use only
+        # one of the two addresses):
+        sl_DRAM.put("2-1", "Y")
+        self.assertEqual(sl_ssd.get("2"), "0X0Y")
+
+        # the SSD gains no entry under a DRAM address, it still holds only page "2":
+        self.assertListEqual(list(sl_ssd.storage.keys()), ["2"])
+
+    def test_storage_layer_prefix_addressing_put_into_full_layer(self) -> None:
+        """Under an address conversion strategy, a put of a new address into a full upper layer evicts one entry,
+        and overwriting a cached address writes through without evicting. If no entry can be evicted, the put
+        raises ValueError, but the page below already holds the new unit, which a get fetches once there is room.
+        """
+
+        # a DRAM layer with room for one unit above an SSD holding pages "0" and "1":
+        sl_ssd: StorageLayer[str, str] = StorageLayer[str, str](
+            max_capacity=100, name="SSD"
+        )
+        sl_DRAM: StorageLayer[str, str] = StorageLayer[str, str](
+            max_capacity=1,
+            name="DRAM",
+            layer_below=sl_ssd,
+            address_conversion_strategy=PrefixConversion(),
+        )
+        sl_ssd.put("0", "p0aa")
+        sl_ssd.put("1", "p1bb")
+
+        # put two units: the second put evicts the first from DRAM, and both reach their SSD pages:
+        sl_DRAM.put("01", "X")
+        sl_DRAM.put("12", "Y")
+        self.assertListEqual(list(sl_DRAM.storage.keys()), ["12"])
+        self.assertDictEqual(sl_ssd.storage, {"0": "pXaa", "1": "p1Yb"})
+
+        # overwrite the cached "12": DRAM keeps its one entry, and the SSD page changes again:
+        sl_DRAM.put("12", "Z")
+        self.assertListEqual(list(sl_DRAM.storage.keys()), ["12"])
+        self.assertEqual(sl_ssd.get("1"), "p1Zb")
+
+        # with "12" fixed, a put of a new address cannot make room in DRAM, but its unit already reached the SSD:
+        sl_DRAM.fix("12")
+        with self.assertRaisesRegex(ValueError, "can be evicted"):
+            sl_DRAM.put("03", "W")
+        self.assertListEqual(list(sl_DRAM.storage.keys()), ["12"])
+        self.assertEqual(sl_ssd.get("0"), "pXaW")
+
+        # once "12" is unfixed, a get fetches the new unit from the SSD page:
+        sl_DRAM.unfix("12")
+        self.assertEqual(sl_DRAM.get("03"), "W")
+
+    def test_storage_layer_prefix_addressing_put_survives_eviction(self) -> None:
+        """A unit put through an upper layer with an address conversion strategy is not lost when the upper layer
+        evicts it: a later get fetches it from the changed page in the layer below."""
+
+        # a DRAM layer with room for one unit above an SSD holding pages "0" and "1":
+        sl_ssd: StorageLayer[str, str] = StorageLayer[str, str](
+            max_capacity=100, name="SSD"
+        )
+        sl_DRAM: StorageLayer[str, str] = StorageLayer[str, str](
+            max_capacity=1,
+            name="DRAM",
+            layer_below=sl_ssd,
+            address_conversion_strategy=PrefixConversion(),
+        )
+        sl_ssd.put("0", "p0aa")
+        sl_ssd.put("1", "p1bb")
+
+        # put "X" at offset 1 of page "0", then get another unit, which evicts "01" from DRAM:
+        sl_DRAM.put("01", "X")
+        self.assertEqual(sl_DRAM.get("12"), "b")
+        self.assertNotIn("01", sl_DRAM.storage)
+
+        # the written unit is still there: get fetches it from the changed SSD page:
+        self.assertEqual(sl_DRAM.get("01"), "X")
+        self.assertEqual(sl_ssd.get("0"), "pXaa")
+
+    def test_storage_layer_prefix_addressing_put_rejects_missing_page_bad_offset_and_unit(
+        self,
+    ) -> None:
+        """Under an address conversion strategy, a put raises KeyError if the layer below holds no page for the
+        address, IndexError if the offset lies outside the page, and ValueError if the page is a str and the unit
+        is not a single character; neither layer changes."""
+
+        # a DRAM layer with prefix addressing above an SSD holding the four-character page "2":
+        sl_ssd: StorageLayer[str, str] = StorageLayer[str, str](
+            max_capacity=100, name="SSD"
+        )
+        sl_DRAM: StorageLayer[str, str] = StorageLayer[str, str](
+            max_capacity=5,
+            name="DRAM",
+            layer_below=sl_ssd,
+            address_conversion_strategy=PrefixConversion(),
+        )
+        sl_ssd.put("2", "090s")
+
+        # there is no page "9":
+        with self.assertRaises(KeyError):
+            sl_DRAM.put("91", "X")
+
+        # offsets 4 and -5 lie outside the page:
+        with self.assertRaises(IndexError):
+            sl_DRAM.put("24", "X")
+        with self.assertRaises(IndexError):
+            sl_DRAM.put("2-5", "X")
+
+        # a unit of a str page is one character, so "XY" and "" are rejected:
+        with self.assertRaisesRegex(ValueError, "single character"):
+            sl_DRAM.put("21", "XY")
+        with self.assertRaisesRegex(ValueError, "single character"):
+            sl_DRAM.put("21", "")
+
+        # neither layer changed:
+        self.assertDictEqual(sl_ssd.storage, {"2": "090s"})
+        self.assertEqual(sl_DRAM.size(), 0)
+
+    def test_storage_layer_prefix_addressing_put_into_list_page(self) -> None:
+        """A page may be a mutable sequence such as a list: a put through the upper layer puts a changed copy of the
+        list into the layer below, and the list that the layer below handed out before stays unchanged.
+        """
+
+        # a DRAM layer with prefix addressing above an SSD holding the list page "0":
+        sl_ssd: StorageLayer[str, list[str]] = StorageLayer[str, list[str]](
+            max_capacity=100, name="SSD"
+        )
+        sl_DRAM: StorageLayer[str, str] = StorageLayer[str, str](
+            max_capacity=5,
+            name="DRAM",
+            layer_below=sl_ssd,
+            address_conversion_strategy=PrefixConversion(),
+        )
+        sl_ssd.put("0", ["a", "b", "c"])
+        page_before: list[str] = sl_ssd.get("0")
+
+        # put "X" at offset 1 of page "0": the SSD holds the changed page, the old list object is unchanged:
+        sl_DRAM.put("01", "X")
+        self.assertListEqual(sl_ssd.get("0"), ["a", "X", "c"])
+        self.assertListEqual(page_before, ["a", "b", "c"])
+        self.assertEqual(sl_DRAM.get("01"), "X")
+
+    def test_storage_layer_prefix_addressing_get_does_not_write_below(self) -> None:
+        """Under an address conversion strategy, a get only reads the page in the layer below: filling the upper
+        layer's cache never puts the page back, so the layer below still holds the very same page object.
+        """
+
+        # a DRAM layer with prefix addressing above an SSD holding the list page "0":
+        sl_ssd: StorageLayer[str, list[str]] = StorageLayer[str, list[str]](
+            max_capacity=100, name="SSD"
+        )
+        sl_DRAM: StorageLayer[str, str] = StorageLayer[str, str](
+            max_capacity=5,
+            name="DRAM",
+            layer_below=sl_ssd,
+            address_conversion_strategy=PrefixConversion(),
+        )
+        sl_ssd.put("0", ["a", "b", "c"])
+        page: list[str] = sl_ssd.storage["0"]
+
+        # a get through DRAM caches the unit there; the SSD page is the same object as before:
+        self.assertEqual(sl_DRAM.get("01"), "b")
+        self.assertIn("01", sl_DRAM.storage)
+        self.assertIs(sl_ssd.storage["0"], page)
+
     def test_storage_layer_overwrite_in_full_layer_does_not_evict(self) -> None:
         """Overwriting a stored key in a full layer keeps all its entries and evicts nothing to the layer below."""
 
