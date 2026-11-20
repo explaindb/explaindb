@@ -511,3 +511,47 @@ class StorageLayerTest(AbstractUnitTest):
         self.assertEqual(sl_DRAM.get("b"), "B")
         self.assertListEqual(list(sl_DRAM.storage.keys()), ["a", "b"])
         self.assertEqual(sl_ssd.size(), 0)
+
+    def test_storage_layer_put_stores_a_deep_copy(self) -> None:
+        """put stores a deep copy of the value: changing the caller's object afterwards, also an object nested
+        inside it, does not change the stored value."""
+
+        # put a nested list into a single layer:
+        sl_DRAM: StorageLayer[str, list[list[int]]] = StorageLayer[
+            str, list[list[int]]
+        ](max_capacity=2, name="DRAM")
+        unit: list[list[int]] = [[1], [2]]
+        sl_DRAM.put("a", unit)
+
+        # change the caller's list and a list nested inside it: the stored value stays as it was put:
+        unit.append([3])
+        unit[0].append(9)
+        self.assertListEqual(sl_DRAM.get("a"), [[1], [2]])
+
+    def test_storage_layer_prefix_addressing_put_shares_no_object_with_caller(
+        self,
+    ) -> None:
+        """Under an address conversion strategy, a put stores copies of the unit in both layers: changing the
+        caller's object afterwards changes neither the unit in the upper layer nor the page in the layer below.
+        """
+
+        # a DRAM layer with prefix addressing above an SSD whose page "0" is a list of lists:
+        sl_ssd: StorageLayer[str, list[list[int]]] = StorageLayer[str, list[list[int]]](
+            max_capacity=100, name="SSD"
+        )
+        sl_DRAM: StorageLayer[str, list[int]] = StorageLayer[str, list[int]](
+            max_capacity=5,
+            name="DRAM",
+            layer_below=sl_ssd,
+            address_conversion_strategy=PrefixConversion(),
+        )
+        sl_ssd.put("0", [[1], [2]])
+
+        # put the unit [9] at offset 1 of page "0", then change the caller's list:
+        unit: list[int] = [9]
+        sl_DRAM.put("01", unit)
+        unit.append(8)
+
+        # both layers still hold the unit as it was put:
+        self.assertListEqual(sl_DRAM.get("01"), [9])
+        self.assertListEqual(sl_ssd.get("0"), [[1], [9]])

@@ -180,24 +180,26 @@ class StorageLayer[Address, StorageUnit](KeyValueStore[Address, StorageUnit]):
     def put(self, address: Address, storage_unit: StorageUnit):
         """See :meth:`Index.put`.
 
-        Overwrites any previous mapping for the given key; the value is stored
-        without copying. If the key is not stored here yet and this layer is at
-        capacity, it first evicts one entry (see :meth:`evict`); a failed
-        eviction raises ``ValueError``. Overwriting a key already stored here
-        never evicts.
+        Overwrites any previous mapping for the given key and stores a deep copy
+        of the value, so later changes to the caller's object, also to objects
+        nested inside it, do not change the stored value. If the key is not
+        stored here yet and this layer is at capacity, it first evicts one entry
+        (see :meth:`evict`); a failed eviction raises ``ValueError``.
+        Overwriting a key already stored here never evicts.
 
         With an address conversion strategy and a layer below, put writes
-        through: it splits the address, replaces the unit at the offset in the
-        page that the layer below holds under the page address (see
+        through: it splits the address, replaces the unit at the offset in a
+        copy of the page that the layer below holds under the page address (see
         :meth:`AddressConversionStrategy.split_address` for what a page must
-        support), puts the changed page back into the layer below and then
-        stores the unit here. Raises ``KeyError`` if no layer below holds the
-        page, ``IndexError`` if the offset lies outside the page, and
-        ``ValueError`` if the page is a ``str`` and the unit is not a single
-        character; no stored value changes then. If this layer then cannot make
-        room for a new key (``ValueError``), the unit is not lost: the layer
-        below already holds the changed page, from which a get fetches the unit
-        once this layer has room again.
+        support), puts the changed copy back into the layer below (whose put
+        stores its own copy of the page) and then stores a copy of the unit
+        here. Raises ``KeyError`` if no layer below holds the page,
+        ``IndexError`` if the offset lies outside the page, and ``ValueError``
+        if the page is a ``str`` and the unit is not a single character; no
+        stored value changes then. If this layer then cannot make room for a new
+        key (``ValueError``), the unit is not lost: the layer below already
+        holds the changed page, from which a get fetches the unit once this
+        layer has room again.
         """
 
         if (
@@ -218,15 +220,16 @@ class StorageLayer[Address, StorageUnit](KeyValueStore[Address, StorageUnit]):
                 page_address, _page_with_unit(page, position, storage_unit)
             )
 
-        # store the unit in this layer as well:
-        self._store(address, storage_unit)
+        # store a deep copy of the unit in this layer as well, so that later changes to the caller's object do not
+        # change it:
+        self._store(address, copy.deepcopy(storage_unit))
 
     def _store(self, key: Address, value: StorageUnit) -> None:
         """Store the value under the key in this layer only: unlike :meth:`put`, it never writes the value through
         to the layer below. :meth:`get` uses it to cache a unit fetched from the layer below.
 
         @param key: the key in this layer.
-        @param value: the value to store; it is not copied.
+        @param value: the value to store; it is not copied here, as :meth:`put` and :meth:`get` already pass a copy.
         @raise ValueError: if the key is not stored here yet, this layer is full, and no entry can be evicted (see
             :meth:`evict`).
         """
