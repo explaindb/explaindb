@@ -26,6 +26,7 @@
 import copy
 import logging
 import math
+from unittest import mock
 
 from faker import Faker
 
@@ -42,6 +43,7 @@ from system.query_processing.sorting import (
     SingleStreamMerge,
     ExternalMergeSort,
     RunGenerationResult,
+    RunMetadata,
 )
 
 logger = logging.getLogger(__name__)
@@ -213,6 +215,69 @@ class MergeSortingTest(unittest.TestCase):
             fan_in=2,
         )
         self.assertEqual(ems.fan_in, 2)
+
+    def test_runs_of_equal_size_leave_the_heap_oldest_first(self) -> None:
+        """Of two runs of the same size, the one made first is the smaller in the heap of runs; a smaller run still
+        comes before a larger one, however old."""
+        queue_factory: ListQueueFactory[int] = ListQueueFactory[int]()
+        older: RunMetadata = RunMetadata(
+            queue=queue_factory.get_queue_instance(), size=4
+        )
+        newer: RunMetadata = RunMetadata(
+            queue=queue_factory.get_queue_instance(), size=4
+        )
+        smaller_but_newest: RunMetadata = RunMetadata(
+            queue=queue_factory.get_queue_instance(), size=3
+        )
+
+        # equal sizes: the older run first, either way round:
+        self.assertTrue(older < newer)
+        self.assertFalse(newer < older)
+        # different sizes: the smaller run first, though it was made last:
+        self.assertTrue(smaller_but_newest < older)
+        self.assertFalse(older < smaller_but_newest)
+
+    def test_runs_of_equal_size_are_merged_in_the_order_they_were_made(self) -> None:
+        """With 9 runs of the same size and a fan-in of 3, ExternalMergeSort merges runs 1 to 3, then 4 to 6, then 7
+        to 9, and finally the three runs these merges made, in this order (before, ties were broken by the heap's
+        internal order, e.g. runs 1, 3 and 7 first)."""
+        # 36 values in 9 pieces of 4 (memory for 4 values): run i holds the values 4 i … 4 i + 3, unsorted within
+        # its piece, so that a run's smallest value tells which run it is:
+        values: list[int] = [
+            4 * run + place for run in range(9) for place in (2, 0, 3, 1)
+        ]
+        merges: list[list[int]] = (
+            []
+        )  # for each merge, the runs it reads (by number, from 0)
+        start_merge = SingleStreamMerge.__init__
+
+        def note_merge(
+            merge: SingleStreamMerge,
+            run_infos: list[RunMetadata],
+            queue_factory: QueueFactory,
+            number_of_tuples_in_main_memory: int,
+        ) -> None:
+            """Notes which runs a merge reads (from their smallest values), then sets it up as the code does."""
+            merges.append([min(run.queue) // 4 for run in run_infos])
+            start_merge(
+                merge, run_infos, queue_factory, number_of_tuples_in_main_memory
+            )
+
+        with mock.patch.object(SingleStreamMerge, "__init__", note_merge):
+            ems: ExternalMergeSort[int] = ExternalMergeSort[int](
+                input_data=iter(values),
+                queue_factory=ListQueueFactory[int](),
+                number_of_tuples_in_main_memory=4,
+                fan_in=3,
+            )
+            ems.create_runs()
+            ems.merge()
+            output: list[int] = list(ems)
+
+        # three merges of three runs in the order they were made, then the final merge of their three outputs (whose
+        # smallest values are 0, 12 and 24, the smallest of runs 0, 3 and 6):
+        self.assertEqual(merges, [[0, 1, 2], [3, 4, 5], [6, 7, 8], [0, 3, 6]])
+        self.assertEqual(output, sorted(values))
 
 
 if __name__ == "__main__":

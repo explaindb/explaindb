@@ -21,6 +21,7 @@
 """External merge sort with run generation and multi-way stream merging."""
 
 import heapq
+import itertools
 import logging
 from dataclasses import dataclass
 from typing import Iterable, Iterator
@@ -41,6 +42,9 @@ logging.basicConfig(
 class RunMetadata:
     """RunMetadata is a helper class allowing us to keep track of queues in external memory algorithms."""
 
+    # numbers the runs in the order they are made (see __lt__):
+    _made: Iterator[int] = itertools.count()
+
     def __init__(self, queue: ReadWriteQueue, size: int):
         """Initializes the RunMetadata.
 
@@ -50,14 +54,18 @@ class RunMetadata:
         """
         self.queue: ReadWriteQueue = queue
         self.size: int = size
+        # when the run was made, relative to the other runs (a smaller number: made earlier):
+        self.number: int = next(RunMetadata._made)
 
     def __lt__(self, other):
-        """The smallest run has the highest priority. This leads to a bottom-up merge in a recursive merge sort.
+        """The smallest run has the highest priority. This leads to a bottom-up merge in a recursive merge sort. Of
+        runs of the same size, the one made first comes first, so that such runs are merged in the order they were
+        made (runs 1 to 3 first, not, say, runs 1, 3 and 7 as the heap's internal order would have it).
 
         @param other: The other RunMetadata to compare with.
         """
 
-        return self.size < other.size
+        return (self.size, self.number) < (other.size, other.number)
 
     def __str__(self):
         """Human-readable summary showing the number of elements in the run."""
