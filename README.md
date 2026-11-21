@@ -57,35 +57,19 @@ naming rules allow and Rust versions of the Python tests of the ported parts; se
 
 Standalone animations in [`visualizations/`](visualizations).
 
-### [validation-interval-to-point](https://htmlpreview.github.io/?https://github.com/explaindb/explaindb/blob/main/visualizations/validation-interval-to-point.html)
+### [b-tree](https://htmlpreview.github.io/?https://github.com/explaindb/explaindb/blob/main/visualizations/b-tree.html)
 
-[<img src="docs/images/visualizations/validation-interval-to-point.jpg" width="480" alt="Transactions as intervals on a time axis, with the validation window and the serial schedule">](https://htmlpreview.github.io/?https://github.com/explaindb/explaindb/blob/main/visualizations/validation-interval-to-point.html)
+[<img src="docs/images/visualizations/b-tree.jpg" width="480" alt="A robot in a room of the index reads the interval signs over the holes in its floor; below the key row, chutes lead down to the next level">](https://htmlpreview.github.io/?https://github.com/explaindb/explaindb/blob/main/visualizations/b-tree.html)
 
-MVCC validation under the isolation level serializable: a transaction that passes validation shrinks from its interval
-[begin, commit] to a single point in time, a read-only transaction to its begin; the points form an equivalent serial
-schedule.
+A B⁺-tree as a warehouse: each leaf is a section of a rack on rails, holding up to 16 parcels sorted by key, linked to
+its neighbours by chains; above it hangs the index, each inner node a room with up to 8 keys and a chute from each hole
+in its floor down to a child. A robot runs a point query and a range query, then inserts three keys: one that fits, one
+that splits a leaf and one whose splits go up to the root, so that a new root opens and the tree grows at the top. The
+trees are those of the repository's `BPlusTree(8, 16)` (in 3D, with three.js; a synthetic voice speaks the narration
+once the sound is switched on).
 
-Notebook: [MVCC-Playground](notebooks/MVCC-Playground.ipynb)
-[![Open MVCC-Playground on Binder](https://mybinder.org/badge_logo.svg)](https://mybinder.org/v2/gh/explaindb/explaindb/main?urlpath=lab/tree/notebooks/MVCC-Playground.ipynb)
-
-### [elasticity-resources-follow-demand](https://htmlpreview.github.io/?https://github.com/explaindb/explaindb/blob/main/visualizations/elasticity-resources-follow-demand.html)
-
-[<img src="docs/images/visualizations/elasticity-resources-follow-demand.jpg" width="480" alt="One day of demand and capacity, with the DBMS tier as the bottleneck during an overload">](https://htmlpreview.github.io/?https://github.com/explaindb/explaindb/blob/main/visualizations/elasticity-resources-follow-demand.html)
-
-Elasticity: one day of a teaching platform with the tiers App (scales out) and DBMS (scales up), run on premise, with
-hosting, IaaS, PaaS (also with scheduled scaling by a timetable) or SaaS; shows bottlenecks, scale-up and scale-out, and
-whether the capacity follows the demand.
-
-### [row-or-column](https://htmlpreview.github.io/?https://github.com/explaindb/explaindb/blob/main/visualizations/row-or-column.html)
-
-[<img src="docs/images/visualizations/row-or-column.jpg" width="480" alt="Row layout in 3D: four cache lines loaded, three quarters of their bytes unused">](https://htmlpreview.github.io/?https://github.com/explaindb/explaindb/blob/main/visualizations/row-or-column.html)
-
-Row vs. column layout in main memory: eight books stored row by row and column by column; memory is read linearly, one
-64-byte cache line at a time, so `SELECT MAX(price)` loads 4 cache lines of the row layout but only 1 of the column
-layout (in 3D, with three.js; a synthetic voice speaks the narration once the sound is switched on).
-
-Notebook: [Data-Layout](notebooks/Data-Layout.ipynb)
-[![Open Data-Layout on Binder](https://mybinder.org/badge_logo.svg)](https://mybinder.org/v2/gh/explaindb/explaindb/main?urlpath=lab/tree/notebooks/Data-Layout.ipynb)
+Notebook: [B-tree](notebooks/B-tree.ipynb)
+[![Open B-tree on Binder](https://mybinder.org/badge_logo.svg)](https://mybinder.org/v2/gh/explaindb/explaindb/main?urlpath=lab/tree/notebooks/B-tree.ipynb)
 
 ### [call-through-dbms](https://htmlpreview.github.io/?https://github.com/explaindb/explaindb/blob/main/visualizations/call-through-dbms.html)
 
@@ -111,33 +95,24 @@ voice speaks the narration once the sound is switched on).
 Notebook: [Shared-Scan](notebooks/Shared-Scan.ipynb)
 [![Open Shared-Scan on Binder](https://mybinder.org/badge_logo.svg)](https://mybinder.org/v2/gh/explaindb/explaindb/main?urlpath=lab/tree/notebooks/Shared-Scan.ipynb)
 
-### [yannakakis](https://htmlpreview.github.io/?https://github.com/explaindb/explaindb/blob/main/visualizations/yannakakis.html)
+### [elasticity-resources-follow-demand](https://htmlpreview.github.io/?https://github.com/explaindb/explaindb/blob/main/visualizations/elasticity-resources-follow-demand.html)
 
-[<img src="docs/images/visualizations/yannakakis.jpg" width="480" alt="The join tree of R′, T′′′, U′ and S′ with the eight rows left outlined green, beside the query on the original relations and, equal to it, on the reduced ones">](https://htmlpreview.github.io/?https://github.com/explaindb/explaindb/blob/main/visualizations/yannakakis.html)
+[<img src="docs/images/visualizations/elasticity-resources-follow-demand.jpg" width="480" alt="One day of demand and capacity, with the DBMS tier as the bottleneck during an overload">](https://htmlpreview.github.io/?https://github.com/explaindb/explaindb/blob/main/visualizations/elasticity-resources-follow-demand.html)
 
-Yannakakis' semi-join reduction on an acyclic query: the joins of R, T, U and S form a tree with root R; each relation
-shows only its keys and join attributes, as coloured boxes. For a semi-join a box robot carries just a column of keys
-along an edge; at the other end the column is drawn out beside the rows of that relation, and a row stays only if its
-key is in the column. Bottom-up (T′, T″, R′), then top-down (T′′′, U′, S′): 18 rows become 8, each one a part of the
-join, and the query on the reduced relations gives the same result as on the original ones (with three.js; a synthetic
-voice speaks the narration once the sound is switched on).
+Elasticity: one day of a teaching platform with the tiers App (scales out) and DBMS (scales up), run on premise, with
+hosting, IaaS, PaaS (also with scheduled scaling by a timetable) or SaaS; shows bottlenecks, scale-up and scale-out, and
+whether the capacity follows the demand.
 
-Notebook: [Result-DB](notebooks/Result-DB.ipynb)
-[![Open Result-DB on Binder](https://mybinder.org/badge_logo.svg)](https://mybinder.org/v2/gh/explaindb/explaindb/main?urlpath=lab/tree/notebooks/Result-DB.ipynb)
+### [row-or-column](https://htmlpreview.github.io/?https://github.com/explaindb/explaindb/blob/main/visualizations/row-or-column.html)
 
-### [b-tree](https://htmlpreview.github.io/?https://github.com/explaindb/explaindb/blob/main/visualizations/b-tree.html)
+[<img src="docs/images/visualizations/row-or-column.jpg" width="480" alt="Row layout in 3D: four cache lines loaded, three quarters of their bytes unused">](https://htmlpreview.github.io/?https://github.com/explaindb/explaindb/blob/main/visualizations/row-or-column.html)
 
-[<img src="docs/images/visualizations/b-tree.jpg" width="480" alt="A robot in a room of the index reads the interval signs over the holes in its floor; below the key row, chutes lead down to the next level">](https://htmlpreview.github.io/?https://github.com/explaindb/explaindb/blob/main/visualizations/b-tree.html)
+Row vs. column layout in main memory: eight books stored row by row and column by column; memory is read linearly, one
+64-byte cache line at a time, so `SELECT MAX(price)` loads 4 cache lines of the row layout but only 1 of the column
+layout (in 3D, with three.js; a synthetic voice speaks the narration once the sound is switched on).
 
-A B⁺-tree as a warehouse: each leaf is a section of a rack on rails, holding up to 16 parcels sorted by key, linked to
-its neighbours by chains; above it hangs the index, each inner node a room with up to 8 keys and a chute from each hole
-in its floor down to a child. A robot runs a point query and a range query, then inserts three keys: one that fits, one
-that splits a leaf and one whose splits go up to the root, so that a new root opens and the tree grows at the top. The
-trees are those of the repository's `BPlusTree(8, 16)` (in 3D, with three.js; a synthetic voice speaks the narration
-once the sound is switched on).
-
-Notebook: [B-tree](notebooks/B-tree.ipynb)
-[![Open B-tree on Binder](https://mybinder.org/badge_logo.svg)](https://mybinder.org/v2/gh/explaindb/explaindb/main?urlpath=lab/tree/notebooks/B-tree.ipynb)
+Notebook: [Data-Layout](notebooks/Data-Layout.ipynb)
+[![Open Data-Layout on Binder](https://mybinder.org/badge_logo.svg)](https://mybinder.org/v2/gh/explaindb/explaindb/main?urlpath=lab/tree/notebooks/Data-Layout.ipynb)
 
 ### [storage-hierarchy](https://htmlpreview.github.io/?https://github.com/explaindb/explaindb/blob/main/visualizations/storage-hierarchy.html)
 
@@ -151,6 +126,31 @@ cache line, eight values side by side: at each level the robot pulls one into th
 every faster level, and back at the floor the robot puts the value into a register. An SSD or a hard disk delivers a
 page of 64 crates; the hard disk is a platter that turns, the Earth cut open to show it (in 3D, with three.js; a
 synthetic voice speaks the narration once the sound is switched on).
+
+### [validation-interval-to-point](https://htmlpreview.github.io/?https://github.com/explaindb/explaindb/blob/main/visualizations/validation-interval-to-point.html)
+
+[<img src="docs/images/visualizations/validation-interval-to-point.jpg" width="480" alt="Transactions as intervals on a time axis, with the validation window and the serial schedule">](https://htmlpreview.github.io/?https://github.com/explaindb/explaindb/blob/main/visualizations/validation-interval-to-point.html)
+
+MVCC validation under the isolation level serializable: a transaction that passes validation shrinks from its interval
+[begin, commit] to a single point in time, a read-only transaction to its begin; the points form an equivalent serial
+schedule.
+
+Notebook: [MVCC-Playground](notebooks/MVCC-Playground.ipynb)
+[![Open MVCC-Playground on Binder](https://mybinder.org/badge_logo.svg)](https://mybinder.org/v2/gh/explaindb/explaindb/main?urlpath=lab/tree/notebooks/MVCC-Playground.ipynb)
+
+### [yannakakis](https://htmlpreview.github.io/?https://github.com/explaindb/explaindb/blob/main/visualizations/yannakakis.html)
+
+[<img src="docs/images/visualizations/yannakakis.jpg" width="480" alt="The join tree of R′, T′′′, U′ and S′ with the eight rows left outlined green, beside the query on the original relations and, equal to it, on the reduced ones">](https://htmlpreview.github.io/?https://github.com/explaindb/explaindb/blob/main/visualizations/yannakakis.html)
+
+Yannakakis' semi-join reduction on an acyclic query: the joins of R, T, U and S form a tree with root R; each relation
+shows only its keys and join attributes, as coloured boxes. For a semi-join a box robot carries just a column of keys
+along an edge; at the other end the column is drawn out beside the rows of that relation, and a row stays only if its
+key is in the column. Bottom-up (T′, T″, R′), then top-down (T′′′, U′, S′): 18 rows become 8, each one a part of the
+join, and the query on the reduced relations gives the same result as on the original ones (with three.js; a synthetic
+voice speaks the narration once the sound is switched on).
+
+Notebook: [Result-DB](notebooks/Result-DB.ipynb)
+[![Open Result-DB on Binder](https://mybinder.org/badge_logo.svg)](https://mybinder.org/v2/gh/explaindb/explaindb/main?urlpath=lab/tree/notebooks/Result-DB.ipynb)
 
 ## Notebooks
 
