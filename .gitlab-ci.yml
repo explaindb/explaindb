@@ -797,6 +797,7 @@ visualization_test:
         - visualizations/**/*
         - system/tests/repo/test_visualizations.py
         - system/tests/repo/b_tree_page_trees.py
+        - system/tests/repo/external_sorting_page_data.py
         - .gitlab-ci.yml
         - pyproject.toml
         - uv.lock
@@ -813,9 +814,9 @@ visualization_test:
 # system/tests/repo/test_render_video.py. A job of its own, so that it runs
 # beside visualization_test and only it installs ffmpeg. It runs when the tool,
 # its test, a page, the page test (whose caption times the tool's tests use) or
-# the module that the page test imports (b_tree_page_trees.py) changes. Setup
-# about a minute (as visualization_test, plus ffmpeg); the tests take about
-# half a minute.
+# a module that the page test imports (b_tree_page_trees.py,
+# external_sorting_page_data.py) changes. Setup about a minute (as
+# visualization_test, plus ffmpeg); the tests take about half a minute.
 render_video_test:
   stage: test
   tags:
@@ -831,6 +832,7 @@ render_video_test:
         - visualizations/**/*
         - system/tests/repo/test_visualizations.py
         - system/tests/repo/b_tree_page_trees.py
+        - system/tests/repo/external_sorting_page_data.py
         - .gitlab-ci.yml
         - pyproject.toml
         - uv.lock

@@ -103,6 +103,20 @@ Elasticity: one day of a teaching platform with the tiers App (scales out) and D
 hosting, IaaS, PaaS (also with scheduled scaling by a timetable) or SaaS; shows bottlenecks, scale-up and scale-out, and
 whether the capacity follows the demand.
 
+### [external-sorting](https://htmlpreview.github.io/?https://github.com/explaindb/explaindb/blob/main/visualizations/external-sorting.html)
+
+[<img src="docs/images/visualizations/external-sorting.jpg" width="480" alt="The workbench of main memory in the final merge: three input pages on places filled in their colours, the heap stand with two values on coloured plates, the output page filling up in green">](https://htmlpreview.github.io/?https://github.com/explaindb/explaindb/blob/main/visualizations/external-sorting.html)
+
+External merge sort, seen from above, in the warehouse of the B-tree page: table R is 36 rack sections, each a page of
+16 values; main memory is a workbench with room for 4 pages, and cables in the floor pull the pages between disk and
+memory. Pass 0 reads R four pages at a time, sorts them with quicksort and writes nine runs; merge level 1 merges them
+three at a time, with the merge's heap on a stand on the bench (one value per input run, the smallest at the root);
+the final merge streams its pages to the query: 108 page reads and 72 writes. The runs and the merge groups are those
+of the repository's `ExternalMergeSort` (in 3D, with three.js).
+
+Notebook: [External-Merge-Sort](notebooks/External-Merge-Sort.ipynb)
+[![Open External-Merge-Sort on Binder](https://mybinder.org/badge_logo.svg)](https://mybinder.org/v2/gh/explaindb/explaindb/main?urlpath=lab/tree/notebooks/External-Merge-Sort.ipynb)
+
 ### [row-or-column](https://htmlpreview.github.io/?https://github.com/explaindb/explaindb/blob/main/visualizations/row-or-column.html)
 
 [<img src="docs/images/visualizations/row-or-column.jpg" width="480" alt="Row layout in 3D: four cache lines loaded, three quarters of their bytes unused">](https://htmlpreview.github.io/?https://github.com/explaindb/explaindb/blob/main/visualizations/row-or-column.html)
@@ -282,12 +296,12 @@ ExplainDB is licensed under the [GNU Affero General Public License v3.0](LICENSE
 Copyright (C) 2026 Prof. Dr. Jens Dittrich, Saarland University.
 
 The pages `visualizations/row-or-column.html`, `visualizations/call-through-dbms.html`,
-`visualizations/clock-scan.html`, `visualizations/yannakakis.html`, `visualizations/b-tree.html` and
-`visualizations/storage-hierarchy.html` also embed third-party code and fonts under their own licenses: three.js (MIT
-License) and the fonts Archivo and JetBrains Mono (SIL Open Font License 1.1). Each page gives their copyright and
-license notices. All six pages also embed a synthetic voice, spoken with the model Ming-3.0-tts (MIT License,
-voice UK_George); each page names it. `visualizations/storage-hierarchy.html` also embeds map data from Natural Earth
-(public domain).
+`visualizations/clock-scan.html`, `visualizations/yannakakis.html`, `visualizations/b-tree.html`,
+`visualizations/storage-hierarchy.html` and `visualizations/external-sorting.html` also embed third-party code and fonts
+under their own licenses: three.js (MIT License) and the fonts Archivo and JetBrains Mono (SIL Open Font License 1.1).
+Each page gives their copyright and license notices. All of them but `visualizations/external-sorting.html` also embed
+a synthetic voice, spoken with the model Ming-3.0-tts (MIT License, voice UK_George); each page names it.
+`visualizations/storage-hierarchy.html` also embeds map data from Natural Earth (public domain).
 
 ## Contributors
 

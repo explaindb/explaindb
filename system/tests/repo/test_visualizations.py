@@ -68,6 +68,21 @@ from system.tests.repo.b_tree_page_trees import (
     read_start_and_puts,
 )
 
+# the page counts and runs of the external sorting page, from a module that uses only the standard library as well:
+from system.tests.repo.external_sorting_page_data import (
+    EXPECTED_GROUPS,
+    EXPECTED_PASS_COUNTS,
+    EXPECTED_READS,
+    EXPECTED_WRITES,
+    EXTERNAL_SORTING_PAGE,
+    MEMORY_PAGES,
+    PageCounts,
+    merge_heaps,
+    merged_runs,
+    pass_0_runs,
+    read_input,
+)
+
 # the tests that open a browser run only where Playwright is installed (see the module docstring):
 PLAYWRIGHT_AVAILABLE: bool = importlib.util.find_spec("playwright") is not None
 
@@ -247,6 +262,17 @@ class VoiceEntry(TypedDict):
     warmed: str | None
     play: str | None
     blocked: bool
+
+
+class MadeBySortingPage(TypedDict):
+    """What the external sorting page's own quicksort and heap make, as its script writes it into ``data-made``."""
+
+    # the runs r1 … r9 of pass 0, each sorted:
+    runs: list[list[int]]
+    # the runs r10 … r12 of merge level 1:
+    merged: list[list[int]]
+    # the final merge's output:
+    output: list[int]
 
 
 class _PageTestCase(unittest.TestCase):
@@ -4928,6 +4954,614 @@ class StorageHierarchyPageTest(_PageTestCase):
                 self.assertEqual(f"{cycles:,}", shown_cycles)
                 self.assertEqual(human, shown_human)
                 self.assertRegex(real, r"^\d+(\.\d+)? (ns|µs|ms)$")
+
+
+@unittest.skipUnless(PLAYWRIGHT_AVAILABLE, SKIP_REASON)
+class ExternalSortingPageTest(_PageTestCase):
+    """Checks that the counter of the external sorting page counts the pages that the repository's external merge sort
+    reads and writes (decision 046).
+
+    The page sorts table R, 36 pages of 16 keys, with a main memory of 4 pages and fan-in 3, in three passes: pass 0,
+    merge level 1 and the final merge. Its header counts the pages read (``reads``) and written (``writes``); its
+    script writes the same numbers into data-* of ``stage``, with the step of the film under way (``data-phase``, e.g.
+    ``read``), the level the bench works on (``data-level``, 0 in pass 0) and the values on the merges' heap stand
+    (``data-heap``). test_external_sorting_page_data.py checks the page counts and runs of
+    external_sorting_page_data.py, which these tests expect, against the real ExternalMergeSort. Each test opens the
+    page paused at a moment of the film given in its URL; some move it on from there with the slider (see
+    stages_from), and the tests of the merges share one such sweep (see merge_stages). The page's own controls, which
+    EveryPageTest does not check, are checked as on the storage hierarchy page: the part buttons, full screen and the
+    review clips.
+    """
+
+    PAGE: Path | None = EXTERNAL_SORTING_PAGE
+    # the page is ready once it has prepared its GPU programs, a few per frame: about 1.5 s on a fast machine with a
+    # GPU emulated in software, several times that on a slow CI runner, so a wait for it ends after this many
+    # milliseconds (as for the storage hierarchy page):
+    READY_TIMEOUT: int = 8 * FILM_TIMEOUT
+    # the readings of the merges that the tests share, once merge_stages has made them; None until then:
+    shared_merge_stages: list[dict[str, str]] | None = None
+
+    def open_at(self, query: str) -> tuple[OpenedPage, dict[str, str]]:
+        """Opens the page with the given URL parameters, waits until it is ready and reads the stage's data-*
+        attributes.
+
+        @param query: e.g. ``?t=40&paused`` for the moment 40 s into the film, or ``?q=3&paused`` for the start of
+            part 3
+        @return: the opened page, and the stage's attributes without ``data-`` (e.g. ``reads``)
+        """
+        opened: OpenedPage = self.open_page(EXTERNAL_SORTING_PAGE, query=query)
+        stage = opened.page.get_by_test_id("stage")
+
+        # the browser can draw the scene (WebGL 2), as the script says at once, so that a browser without it fails
+        # here and not after the long wait below:
+        expect(stage).to_have_attribute("data-renderer", "webgl2")
+
+        # the page has made its film, after checking that its own quicksort and heap give the code's runs; if that
+        # check throws, the page's own error is reported now, not as a timeout after the long wait below:
+        try:
+            expect(stage).to_have_attribute(
+                "data-made", re.compile("."), timeout=FILM_TIMEOUT
+            )
+        except AssertionError:
+            self.assert_no_errors(opened)
+            raise
+
+        # the page has prepared its GPU programs and textures and drawn a whole frame, with the text of its textures in
+        # the embedded fonts, not in fallbacks:
+        expect(stage).to_have_attribute(
+            "data-ready", "true", timeout=self.READY_TIMEOUT
+        )
+        expect(stage).to_have_attribute("data-fonts", "embedded")
+        self.assert_no_errors(opened)
+        attributes: dict[str, str] = stage.evaluate(
+            """(stage) => Object.fromEntries([...stage.attributes].filter((a) => a.name.startsWith('data-'))
+                .map((a) => [a.name.slice('data-'.length), a.value]))"""
+        )
+        return opened, attributes
+
+    def stages_from(
+        self, opened: OpenedPage, step: float, until: str
+    ) -> list[dict[str, str]]:
+        """Moves the slider of an opened page on from the time it shows, step seconds at a time, until the stage shows
+        the phase until or the film ends, and reads the stage's data-* attributes after each move.
+
+        All in one call into the page, which shows a time at once when the slider moves; the slider takes the step
+        ``any`` for it, so that it can stand at any time of the film, not only at its 1000 steps. The page draws each
+        of these times, so the sweep waits for an animation frame after every 25 of them (as the Yannakakis page's test
+        does): else, on a GPU emulated in software, their drawings pile up in the browser. The window is made small
+        first, which makes each drawing a little cheaper; the stage's data-* do not depend on its size. Asserts that
+        the stage shows each time (its data-t, with three decimals) and that the sweep has reached the phase until.
+
+        @param opened: the page, opened paused with open_at
+        @param step: the time between two readings (s)
+        @param until: the phase to stop at, e.g. ``benchMove``: the sweep ends with the first reading that shows it
+        @return: the stage's attributes after each move (without ``data-``, e.g. ``heap``; all but ``made``, which the
+            page writes once at start-up and which is long), in order; the first one step after the time the page
+            showed
+        """
+        stage = opened.page.get_by_test_id("stage")
+        start: float = float(stage.get_attribute("data-t") or "")
+        opened.page.set_viewport_size({"width": 320, "height": 180})
+
+        # from the page's time on, step by step, until the phase until (in the browser, without a round trip per step):
+        stages: list[dict[str, str]] = opened.page.get_by_test_id("scrub").evaluate(
+            """async (scrub, [stage, start, step, until]) => {
+                const frame = () => new Promise((resolve) => requestAnimationFrame(() => resolve()));
+                const duration = Number(stage.dataset.duration), stages = [];
+                scrub.step = 'any';
+                for (let k = 1; start + k * step <= duration; k += 1) {
+                    scrub.value = String(((start + k * step) / duration) * Number(scrub.max));
+                    scrub.dispatchEvent(new Event('input', { bubbles: true }));
+                    stages.push(Object.fromEntries([...stage.attributes]
+                        .filter((a) => a.name.startsWith('data-') && a.name !== 'data-made')
+                        .map((a) => [a.name.slice('data-'.length), a.value])));
+                    if (stage.dataset.phase === until) break;
+                    if (k % 25 === 0) await frame();
+                }
+                await frame();
+                await frame();
+                return stages;
+            }""",
+            [stage.element_handle(), start, step, until],
+        )
+
+        # the stage showed each time, and the sweep ended in the phase until:
+        for k, shown in enumerate(stages, 1):
+            self.assertAlmostEqual(start + k * step, float(shown["t"]), delta=1e-3)
+        self.assertEqual(until, stages[-1]["phase"], "the sweep did not reach it")
+        return stages
+
+    def merge_stages(self) -> list[dict[str, str]]:
+        """Returns the stage's attributes from the start of part 3 (merge level 1) to the last step (``end``), read
+        every 0.8 s by stages_from on a page opened at ``?q=3&paused``, for the tests of the merges.
+
+        The sweep takes seconds on a GPU emulated in software, so the class sweeps once, for the first test that asks,
+        which also checks the page's errors meanwhile, and keeps the readings for the others (as
+        StorageHierarchyPageTest keeps its levels); each test gets copies of its own.
+
+        @return: the readings, in order (see stages_from)
+        """
+        cls: type[ExternalSortingPageTest] = type(self)
+        if cls.shared_merge_stages is None:
+            opened, _ = self.open_at("?q=3&paused")
+            stages: list[dict[str, str]] = self.stages_from(opened, 0.8, "end")
+            self.assert_no_errors(opened)
+            # close the page, which the other tests do not need:
+            opened.page.context.close()
+            cls.shared_merge_stages = stages
+        return [dict(shown) for shown in cls.shared_merge_stages]
+
+    def stage_at(self, opened: OpenedPage, seconds: float) -> dict[str, str]:
+        """Moves the slider of an opened page to a time of the film, with the step ``any`` as in stages_from, and reads
+        the stage's data-* attributes, which the page sets at once when the slider moves. Asserts that the stage shows
+        the time (its data-t, with three decimals).
+
+        @param opened: the page, opened with open_at
+        @param seconds: the time
+        @return: the stage's attributes without ``data-``
+        """
+        shown: dict[str, str] = opened.page.get_by_test_id("scrub").evaluate(
+            """(scrub, [stage, seconds]) => {
+                scrub.step = 'any';
+                scrub.value = String((seconds / Number(stage.dataset.duration)) * Number(scrub.max));
+                scrub.dispatchEvent(new Event('input', { bubbles: true }));
+                return Object.fromEntries([...stage.attributes].filter((a) => a.name.startsWith('data-'))
+                    .map((a) => [a.name.slice('data-'.length), a.value]));
+            }""",
+            [opened.page.get_by_test_id("stage").element_handle(), seconds],
+        )
+        self.assertAlmostEqual(seconds, float(shown["t"]), delta=1e-3)
+        return shown
+
+    @staticmethod
+    def next_values(runs: list[list[int]], least: int) -> set[int]:
+        """Returns the next value of each run that a merge has not used up, once it has given out all values below
+        least: each run's smallest value that is least or larger.
+
+        @param runs: the runs that a merge reads, each in ascending order
+        @param least: the smallest value not yet given out
+        @return: one value per run with a value of least or more
+        """
+        return {min(v for v in run if v >= least) for run in runs if run[-1] >= least}
+
+    def test_at_the_end_the_counter_shows_108_reads_and_72_writes(self) -> None:
+        """The counter starts at 0 pages read and 0 written; at the end of the film, it shows 108 read and 72 written,
+        the pages the code's sort reads and writes (EXPECTED_READS, EXPECTED_WRITES), in the header and on the stage,
+        and the last step's title and caption name the same two numbers.
+
+        Fails if the page counts a page that the code does not read or write (e.g. the final merge's output pages as
+        writes) or misses one, or if the title or the caption, typed by hand, names other numbers than the counter.
+        """
+        opened, stage = self.open_at("?paused")
+        page: Page = opened.page
+
+        # at the start, nothing is read or written yet:
+        self.assertEqual(("0", "0"), (stage["reads"], stage["writes"]))
+
+        # the slider to its end:
+        page.get_by_test_id("scrub").fill("1000")
+        expect(page.get_by_test_id("play")).to_have_attribute("data-state", "ended")
+        expect(page.get_by_test_id("stage")).to_have_attribute("data-phase", "end")
+
+        # the counter in the header and on the stage:
+        expect(page.get_by_test_id("reads")).to_have_text(str(EXPECTED_READS))
+        expect(page.get_by_test_id("writes")).to_have_text(str(EXPECTED_WRITES))
+        expect(page.get_by_test_id("stage")).to_have_attribute(
+            "data-reads", str(EXPECTED_READS)
+        )
+        expect(page.get_by_test_id("stage")).to_have_attribute(
+            "data-writes", str(EXPECTED_WRITES)
+        )
+
+        # the last step's title and caption sum up with the same numbers:
+        expect(page.get_by_test_id("step-name")).to_contain_text(
+            f"{EXPECTED_READS} reads, {EXPECTED_WRITES} writes"
+        )
+        expect(page.get_by_test_id("nar-text")).to_contain_text(
+            f"{EXPECTED_READS} reads and {EXPECTED_WRITES} writes"
+        )
+        self.assert_no_errors(opened)
+
+    def test_in_pass_0_pages_are_read_before_any_is_written(self) -> None:
+        """40 s into the film, while pass 0 loads its first 4 pages onto the bench, the counter shows 3 pages read and
+        none written, in the header and on the stage: pass 0 begins 31 s into the film and sends a page of R every 4
+        s, and a page counts as read once it sets out, so the third, which set out at 39 s, is counted while it rides.
+
+        Fails if the page counts a page as written before pass 0 has sorted its first load, or as read only once it
+        has arrived on the bench (the counter would show 2), or counts a page twice.
+        """
+        opened, stage = self.open_at("?t=40&paused")
+        page: Page = opened.page
+
+        # the moment lies in pass 0, while pages of R ride onto the bench:
+        self.assertEqual(
+            ("read", "0"),
+            (stage["phase"], stage["level"]),
+            "40 s into the film, pass 0 no longer loads its first pages",
+        )
+
+        # 3 pages read, none written:
+        self.assertEqual("3", stage["reads"], "pages read 40 s into the film")
+        self.assertEqual("0", stage["writes"], "pages written 40 s into the film")
+
+        # the header shows the same:
+        expect(page.get_by_test_id("reads")).to_have_text("3")
+        expect(page.get_by_test_id("writes")).to_have_text("0")
+        self.assert_no_errors(opened)
+
+    def test_each_pass_reads_all_36_pages_and_all_but_the_last_write_them(
+        self,
+    ) -> None:
+        """At the start of part 3, when the bench drives down after pass 0, the counter shows 36 pages read and 36
+        written; at the start of part 4, after merge level 1, 72 and 72: each of the two passes reads all 36 pages of
+        the data and writes them again (EXPECTED_PASS_COUNTS), which leaves the final merge's 36 reads for the end.
+
+        Fails if a pass counts a page twice or not at all (e.g. a merge's input page counted once as it sets out and
+        again as it arrives on the bench), or if a pass's last write is counted only in the next pass.
+        """
+        # (URL, the level of the pass that has just ended, the number of passes done):
+        cases: list[tuple[str, str, int]] = [
+            ("?q=3&paused", "0", 1),
+            ("?q=4&paused", "1", 2),
+        ]
+        for query, level, passes in cases:
+            with self.subTest(query=query):
+                opened, stage = self.open_at(query)
+                page: Page = opened.page
+
+                # the bench is about to drive down from the level of the pass that has just ended:
+                self.assertEqual(("benchMove", level), (stage["phase"], stage["level"]))
+
+                # the pages read and written by the passes done, on the stage and in the header:
+                done: list[PageCounts] = EXPECTED_PASS_COUNTS[:passes]
+                reads: str = str(sum(counts.reads for counts in done))
+                writes: str = str(sum(counts.writes for counts in done))
+                self.assertEqual((reads, writes), (stage["reads"], stage["writes"]))
+                expect(page.get_by_test_id("reads")).to_have_text(reads)
+                expect(page.get_by_test_id("writes")).to_have_text(writes)
+                self.assert_no_errors(opened)
+                # close the page before the next one opens, not only at the end of the test:
+                opened.page.context.close()
+
+    def test_pass_0_reads_sorts_and_writes_each_load_in_turn(self) -> None:
+        """Pass 0 takes R in 9 loads of 4 pages, one after the other: it reads a load's pages onto the bench, sorts
+        them, writes them as a run, and only then reads the next load; after the last run, the bench drives down a
+        level. Read every 0.3 s from the start of part 2 to the bench's drive, the step under way (data-phase) and the
+        counter agree: while a load is read, the runs of all loads before it are written; while it is sorted, all its
+        4 pages are read and none of its run is written; while it is written, between none and all 4 of its pages are.
+
+        Fails if the bench sorts a load before all its pages have arrived, writes it before it is sorted or reads the
+        next load before the run is written, if a step of pass 0 shows another level than 0, or if a load is missing.
+        """
+        opened, _ = self.open_at("?q=2&paused")
+        stages: list[dict[str, str]] = self.stages_from(opened, 0.3, "benchMove")
+        loads: int = EXPECTED_PASS_COUNTS[0].reads // MEMORY_PAGES
+
+        # the bench drives down from the level of pass 0 once the last run is written:
+        self.assertEqual("0", stages[-1]["level"])
+
+        # before, each reading lies in pass 0, in the load of the page read last (page i of R, from 1, is in load
+        # (i - 1) // 4, from 0), at a step of that load:
+        steps: list[str] = ["read", "sort", "out"]
+        order: list[tuple[int, int]] = []
+        for shown in stages[:-1]:
+            at: str = f"at {shown['t']} s ({shown['phase']})"
+            self.assertEqual("0", shown["level"], at)
+            self.assertIn(shown["phase"], steps, at)
+            reads, writes = int(shown["reads"]), int(shown["writes"])
+            load: int = (reads - 1) // MEMORY_PAGES
+            order.append((load, steps.index(shown["phase"])))
+
+            # the runs of the loads before are written; once the load is sorted, all its pages are read:
+            done: int = MEMORY_PAGES * load
+            if shown["phase"] == "read":
+                self.assertEqual(done, writes, at)
+            elif shown["phase"] == "sort":
+                self.assertEqual((done + MEMORY_PAGES, done), (reads, writes), at)
+            else:
+                self.assertEqual(done + MEMORY_PAGES, reads, at)
+                self.assertGreaterEqual(writes, done, at)
+                self.assertLessEqual(writes, done + MEMORY_PAGES, at)
+
+        # load after load, each read, then sorted, then written; each load seen at each of its steps (the shortest, the
+        # writing of a load at fast forward, takes about 0.7 s):
+        self.assertEqual(sorted(order), order)
+        self.assertEqual(
+            {(load, step) for load in range(loads) for step in range(len(steps))},
+            set(order),
+        )
+        self.assert_no_errors(opened)
+
+    def test_the_final_merge_reads_the_36_pages_of_its_runs_and_writes_none(
+        self,
+    ) -> None:
+        """Read every 0.8 s from the start of part 3 to the last step (merge_stages): at level 2, the counter's writes
+        stay at 72 throughout the final merge, also while its full output pages leave the bench for the query, and its
+        reads climb, never back, from the 72 of the passes before to 108: the final merge reads the 36 pages of Runs
+        10, 11 and 12 and writes none (EXPECTED_PASS_COUNTS).
+
+        Fails if the page counts an output page of the final merge as written, even only while the page moves (an
+        output page of merge level 1 counts once it has arrived in its run), or if a read is counted and taken back.
+        """
+        final: list[dict[str, str]] = [
+            shown for shown in self.merge_stages() if shown["level"] == "2"
+        ]
+        reads_before: int = sum(counts.reads for counts in EXPECTED_PASS_COUNTS[:2])
+
+        # no page written, also while an output page leaves for the query (the first one at real speed, for 10 s):
+        self.assertEqual({str(EXPECTED_WRITES)}, {shown["writes"] for shown in final})
+        outputs: list[dict[str, str]] = [
+            shown for shown in final if shown["phase"] == "swapOut"
+        ]
+        self.assertGreaterEqual(
+            len(outputs), 5, "readings while an output page leaves for the query"
+        )
+
+        # the reads climb from those of the passes before to all 108, never back:
+        reads: list[int] = [int(shown["reads"]) for shown in final]
+        self.assertEqual(sorted(reads), reads)
+        self.assertGreater(
+            reads[0], reads_before, f"reads at level 2's first reading, {final[0]}"
+        )
+        self.assertEqual(EXPECTED_READS, reads[-1], "reads at the last step")
+
+    def test_the_heap_holds_the_next_value_of_each_run_with_the_smallest_at_its_root(
+        self,
+    ) -> None:
+        """Read every 0.8 s from the start of part 3 (merge level 1) to the last step (merge_stages), the merges' heap
+        stand (data-heap: its root and two children at the start of the step under way) is the heap of a merge: at
+        each level, a merge fills it (hInit) after its pages have come and before the first value goes out (mv); its
+        root is smaller than the children present, and a second child is there only with the first; while a value
+        goes out, it holds exactly the next value of each run of the merge not yet used up, the smallest on the root,
+        each on the place where the code's heap holds it then (merge_heaps, which test_external_sorting_page_data.py
+        checks against the code's SingleStreamMerge); while a new input page refills it (hFill), the root's place is
+        empty; its values come from different runs of one merge, at level 1 of the groups EXPECTED_GROUPS in their
+        order; and while the bench drives, the pages of a merge come and hInit begins, it is empty.
+
+        Fails if the heap gives out a value that is not the smallest left (e.g. a missed swap of the root with a
+        smaller child), puts a value on another place than the code's heap (e.g. swaps the root with the first smaller
+        child, not the smallest, or fills the heap from the runs in another order), keeps a value of a used-up run or
+        of the merge before, holds two values of one run, gives out a value before it is filled, or if the stage shows
+        the heap of another moment than the step's start (e.g. the filled heap as hInit begins).
+        """
+        stages: list[dict[str, str]] = self.merge_stages()
+
+        # the runs as the page draws them, r1 … r9 of pass 0 and r10 … r12, the runs that merge level 1 writes into
+        # level 2's row (level_2_runs), and each value's run:
+        runs: list[list[int]] = pass_0_runs(read_input())
+        level_2_runs: list[list[int]] = merged_runs(runs, EXPECTED_GROUPS)
+        run_of: dict[int, int] = {v: r for r, run in enumerate(runs) for v in run}
+        level_2_run_of: dict[int, int] = {
+            v: r for r, run in enumerate(level_2_runs) for v in run
+        }
+        group_of: dict[int, int] = {
+            r: g for g, group in enumerate(EXPECTED_GROUPS) for r in group
+        }
+
+        # the code's heap by place before each value it gives out, at each level by that value, with None for an
+        # empty place; a merge reads its runs in the order of its group, the final merge r10, r11, r12:
+        heaps: dict[str, dict[int, list[int | None]]] = {"1": {}, "2": {}}
+        merges: list[tuple[str, list[list[int]]]] = [
+            ("1", [runs[r] for r in group]) for group in EXPECTED_GROUPS
+        ] + [("2", level_2_runs)]
+        for level, inputs in merges:
+            for heap in merge_heaps(inputs):
+                heaps[level][heap[0]] = [*heap, *[None] * (3 - len(heap))]
+
+        # at each level, the inputs' first pages come, then the output's empty page, then the heap is filled, and
+        # only then does the first value go out:
+        for level in ("1", "2"):
+            phases: list[str] = [
+                phase
+                for phase, _ in groupby(
+                    shown["phase"]
+                    for shown in stages
+                    if shown["level"] == level and shown["phase"] != "benchMove"
+                )
+            ]
+            self.assertEqual(
+                ["mIn", "mEmpty", "hInit", "mv"], phases[:4], f"level {level}"
+            )
+
+        groups: list[int] = []
+        going_out: dict[str, int] = {"1": 0, "2": 0}
+        refills: int = 0
+        for shown in stages:
+            at: str = f"at {shown['t']} s ({shown['phase']}, heap {shown['heap']})"
+            places: list[int | None] = [
+                int(v) if v else None for v in shown["heap"].split(",")
+            ]
+            self.assertEqual(3, len(places), at)
+            values: list[int] = [v for v in places if v is not None]
+
+            # while the bench drives, a merge's pages come and its heap is about to be filled, the stand is empty:
+            if shown["phase"] in ("benchMove", "mIn", "mEmpty", "hInit", "end"):
+                self.assertEqual([None, None, None], places, at)
+                continue
+
+            # a heap: the second child only with the first, the root smaller than the children:
+            if places[2] is not None:
+                self.assertIsNotNone(places[1], at)
+            if places[0] is not None:
+                for child in values[1:]:
+                    self.assertLess(places[0], child, at)
+            if not values:
+                continue
+
+            # its values come from different runs of one merge, at level 1 of one group:
+            inputs: list[list[int]] = level_2_runs
+            if shown["level"] == "1":
+                merged: list[int] = [run_of[v] for v in values]
+                self.assertEqual(1, len({group_of[r] for r in merged}), at)
+                groups.append(group_of[merged[0]])
+                inputs = [runs[r] for r in EXPECTED_GROUPS[groups[-1]]]
+            else:
+                merged = [level_2_run_of[v] for v in values]
+            self.assertEqual(len(values), len(set(merged)), at)
+
+            # a value goes out: the heap holds the next value of each run not used up, the smallest on the root, each
+            # on the place of the code's heap; a new page refills the root's place:
+            if shown["phase"] == "mv":
+                self.assertEqual(min(values), places[0], at)
+                self.assertEqual(self.next_values(inputs, min(values)), set(values), at)
+                self.assertEqual(heaps[shown["level"]].get(min(values)), places, at)
+                going_out[shown["level"]] += 1
+            elif shown["phase"] == "hFill":
+                self.assertIsNone(places[0], at)
+            if places[0] is None:
+                refills += 1
+
+        # merge level 1 takes the groups in their order:
+        self.assertEqual(
+            list(range(len(EXPECTED_GROUPS))), [group for group, _ in groupby(groups)]
+        )
+
+        # the readings caught many values going out at each level, and the root's place empty during a refill:
+        self.assertGreaterEqual(
+            min(going_out.values()), 20, f"values going out by level: {going_out}"
+        )
+        self.assertGreater(refills, 0, "readings during a refill")
+
+    def test_the_page_makes_the_runs_and_the_output_of_the_code(self) -> None:
+        """What the page's own quicksort and heap make, as its script writes it at start-up (``data-made``), is what
+        the code makes: pass 0's runs are the 9 pieces of R, each sorted (pass_0_runs); merge level 1 writes the groups
+        EXPECTED_GROUPS merged, in their order (merged_runs); the final merge gives out R sorted.
+        test_external_sorting_page_data.py checks these against the real ExternalMergeSort.
+
+        Fails if the page's quicksort or merge sorts wrongly, or if it makes other runs or merges other groups or in
+        another order than the code, even where its start-up check, which compares them with its own RUNS and LEVEL2
+        only, passes.
+        """
+        _, stage = self.open_at("?paused")
+        made: MadeBySortingPage = json.loads(stage["made"])
+        values: list[int] = read_input()
+        runs: list[list[int]] = pass_0_runs(values)
+
+        # the runs of pass 0, the runs of merge level 1 and the output, each in its order:
+        self.assertEqual(runs, made["runs"])
+        self.assertEqual(merged_runs(runs, EXPECTED_GROUPS), made["merged"])
+        self.assertEqual(sorted(values), made["output"])
+
+    def test_the_part_buttons_jump_to_their_parts_and_play(self) -> None:
+        """Each of the four part buttons (the table, pass 0, merge level 1, the final merge), pressed from part 4 down
+        to part 1, starting near the film's end (so that each jumps back from a later time), jumps to the start of its
+        part and plays from there, and marks itself as the current part while the three others are not marked. The
+        film's time is read in the same step as the click. Part 1 starts the film (at 0); parts 2 to 4 start where the
+        step named after them begins: pass 0's first load, with its first page of R on its way (read), and the bench's
+        drive down after pass 0 and after merge level 1 (benchMove, from level 0 and 1); 0.01 s earlier another step
+        shows.
+
+        Fails if a button jumps to another part or into the middle of one (e.g. past the start of its step), does not
+        jump at all, does not play, leaves another part marked, or cannot be clicked (hidden or covered).
+        """
+        opened, _ = self.open_at("?t=340&paused")
+        page: Page = opened.page
+        stage = page.get_by_test_id("stage")
+        play = page.get_by_test_id("play")
+        step_name = page.get_by_test_id("step-name")
+        # parts 2 to 4: (the name of the step they start with, the step's phase and level):
+        later_parts: dict[int, tuple[str, str, str]] = {
+            2: ("Pass 0: four pages into memory", "read", "0"),
+            3: ("Down a level, round the runs", "benchMove", "0"),
+            4: ("Down a level again", "benchMove", "1"),
+        }
+        for part in range(4, 0, -1):
+            with self.subTest(part=part):
+                # the button can be clicked; it jumps (its time read at once), plays, and is the one part marked:
+                button = page.get_by_test_id(f"chapter-{part}")
+                button.click(trial=True)
+                seconds: float = float(
+                    button.evaluate(
+                        "(b, stage) => { b.click(); return stage.dataset.t; }",
+                        stage.element_handle(),
+                    )
+                )
+                expect(play).to_have_attribute("data-state", "playing")
+                play.click()
+                expect(play).to_have_attribute("data-state", "paused")
+                expect(button).to_have_attribute("aria-current", "true")
+                for other in range(1, 5):
+                    if other != part:
+                        expect(
+                            page.get_by_test_id(f"chapter-{other}")
+                        ).not_to_have_attribute("aria-current", "true")
+                if part == 1:
+                    self.assertEqual(0, seconds)
+                    continue
+
+                # 1 ms after the time read (data-t has three decimals: the part begins at most half a millisecond
+                # from it), the part's step shows:
+                title, phase, level = later_parts[part]
+                shown: dict[str, str] = self.stage_at(opened, seconds + 0.001)
+                expect(step_name).to_have_text(re.compile(f"· {re.escape(title)}$"))
+                self.assertEqual((phase, level), (shown["phase"], shown["level"]))
+
+                # 0.01 s before, another step:
+                self.stage_at(opened, seconds - 0.01)
+                expect(step_name).not_to_have_text(re.compile(f"· {re.escape(title)}$"))
+        self.assert_no_errors(opened)
+
+    def test_the_full_screen_button_and_the_key_f_switch_full_screen(self) -> None:
+        """The full-screen button puts the page into full screen and says so (``aria-pressed`` true); the key F
+        leaves it again (``aria-pressed`` false), and F once more enters it.
+
+        Fails if the button or the key does nothing, or if the button does not show whether the page is in full screen.
+        """
+        opened, _ = self.open_at("?paused")
+        page: Page = opened.page
+        button = page.get_by_test_id("fullscreen")
+        in_full_screen: str = "() => document.fullscreenElement !== null"
+
+        # the button enters full screen:
+        button.click()
+        expect(button).to_have_attribute("aria-pressed", "true")
+        self.assertTrue(page.evaluate(in_full_screen))
+
+        # F leaves it, and enters it again:
+        page.keyboard.press("f")
+        expect(button).to_have_attribute("aria-pressed", "false")
+        self.assertFalse(page.evaluate(in_full_screen))
+        page.keyboard.press("f")
+        expect(button).to_have_attribute("aria-pressed", "true")
+        self.assertTrue(page.evaluate(in_full_screen))
+        self.assert_no_errors(opened)
+
+    def test_review_clips_play_one_after_the_other_and_then_pause(self) -> None:
+        """Opened with the review clips 40-41 and 100-101 (``?clips=40-41,100-101``), the page stands paused at 40 s,
+        its hint saying "review clip 1/2"; Play plays the first clip, goes on with the second from 100 s and pauses at
+        its end, 101 s, the hint saying "end of review clips · press space to play on"; Play then plays on from there,
+        and the hint goes.
+
+        Fails if the page ignores the clips (starts elsewhere, or plays on past a clip's end: from 41 s to 100 s at
+        real speed would outlast the wait), does not stop at the last clip's end, or shows the hint at the wrong time.
+        """
+        opened, shown = self.open_at("?clips=40-41,100-101&paused")
+        page: Page = opened.page
+        stage = page.get_by_test_id("stage")
+        play = page.get_by_test_id("play")
+        hint = page.get_by_test_id("clips-hint")
+
+        # paused at the first clip's start:
+        self.assertEqual("40.000", shown["t"])
+        expect(hint).to_have_text("review clip 1/2")
+        expect(play).to_have_attribute("data-state", "paused")
+
+        # Play plays both clips and pauses at the second one's end:
+        play.click()
+        expect(hint).to_have_text(
+            "end of review clips · press space to play on", timeout=FILM_TIMEOUT
+        )
+        expect(play).to_have_attribute("data-state", "paused")
+        expect(stage).to_have_attribute("data-t", "101.000")
+
+        # Play again plays on from there, without the hint:
+        play.click()
+        expect(play).to_have_attribute("data-state", "playing")
+        expect(hint).to_be_hidden()
+        expect(stage).not_to_have_attribute("data-t", "101.000")
+        play.click()
+        self.assertGreater(float(stage.get_attribute("data-t") or ""), 101)
+        self.assert_no_errors(opened)
 
 
 @unittest.skipUnless(PLAYWRIGHT_AVAILABLE, SKIP_REASON)

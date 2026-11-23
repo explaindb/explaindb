@@ -270,10 +270,10 @@ each page in a headless Chromium, driven by [Playwright](https://playwright.dev/
 its controls the way a reader does. The tests fail if a page's script throws an error or logs one
 to the console, if a control does not work, or if the page requests anything but a local file.
 The CI job `visualization_test` runs them in every merge request that changes a page, the test, the
-module it imports for the B-tree page (`system/tests/repo/b_tree_page_trees.py`), `.gitlab-ci.yml`,
-`pyproject.toml` or `uv.lock`. It runs in three jobs,
-each on its share of the pages (the pages with sound, whose tests take longest, are spread evenly
-over the jobs first; see
+modules it imports for the B-tree and the external sorting pages (`system/tests/repo/b_tree_page_trees.py`,
+`system/tests/repo/external_sorting_page_data.py`), `.gitlab-ci.yml`, `pyproject.toml` or `uv.lock`.
+It runs in three jobs, each on its share of the pages (the pages with sound, whose tests take longest,
+are spread evenly over the jobs first; see
 [`docs/changes/047-split-visualization-test`](docs/changes/047-split-visualization-test/DECISION.md)).
 A new page, with or without sound, is assigned to a job without a change to the CI configuration.
 A local run tests every page. A test class for one page names it in `PAGE`,
@@ -535,8 +535,8 @@ start of the film, and `--hold` sets how long the last frame stays (3 s by defau
 
 The CI job `render_video_test` runs the tool's tests (`system/tests/repo/test_render_video.py`) beside
 `visualization_test`, in every merge request that changes the tool, its test, a page, the page
-test, the module it imports for the B-tree page (`b_tree_page_trees.py`), `.gitlab-ci.yml`,
-`pyproject.toml` or `uv.lock`; only this job installs ffmpeg.
+test, the modules it imports for the B-tree and the external sorting pages (`b_tree_page_trees.py`,
+`external_sorting_page_data.py`), `.gitlab-ci.yml`, `pyproject.toml` or `uv.lock`; only this job installs ffmpeg.
 
 ## Logo
 

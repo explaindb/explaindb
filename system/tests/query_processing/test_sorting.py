@@ -246,17 +246,16 @@ class MergeSortingTest(unittest.TestCase):
         self.assertFalse(older < smaller_but_newest)
 
     def test_runs_of_equal_size_are_merged_in_the_order_they_were_made(self) -> None:
-        """With 9 runs of the same size and a fan-in of 3, ExternalMergeSort merges runs 1 to 3, then 4 to 6, then 7
-        to 9, and finally the three runs these merges made, in this order (before, ties were broken by the heap's
-        internal order, e.g. runs 1, 3 and 7 first)."""
+        """With 9 runs of the same size and a fan-in of 3, ExternalMergeSort merges runs 0 to 2, then 3 to 5, then 6
+        to 8 (numbered from 0 in the order they were made), and finally the three runs these merges made, in this
+        order: of runs of the same size, the oldest first."""
         # 36 values in 9 pieces of 4 (memory for 4 values): run i holds the values 4 i … 4 i + 3, unsorted within
         # its piece, so that a run's smallest value tells which run it is:
         values: list[int] = [
             4 * run + place for run in range(9) for place in (2, 0, 3, 1)
         ]
-        merges: list[list[int]] = (
-            []
-        )  # for each merge, the runs it reads (by number, from 0)
+        # for each merge, the runs it reads (by number, from 0):
+        merges: list[list[int]] = []
         start_merge = SingleStreamMerge.__init__
 
         def note_merge(
