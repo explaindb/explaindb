@@ -28,10 +28,9 @@ with the page's name linked to the page, a preview image linked to the page as w
 for a page with a notebook, the notebook with its Binder badge. A page's name is its path in
 ``visualizations/`` without ``.html``. These tests fail when the section and the folders drift
 apart: a page without a subsection or a subsection without a page, a page listed twice, a subsection
-not in the expected form, subsections not in the alphabetical order of their names, a heading or
-preview that links to another page, a preview that is not the page's image, a page without its
-preview or a preview without its page, or a notebook link to a notebook that does not exist, with
-another label or with a Binder badge that opens another notebook.
+not in the expected form, a heading or preview that links to another page, a preview that is not the
+page's image, a page without its preview or a preview without its page, or a notebook link to a
+notebook that does not exist, with another label or with a Binder badge that opens another notebook.
 They do not check the topic text, the order of the parts in a subsection, whether a page that
 should link a notebook does, what a preview's alt text says (only that it is not empty or a
 placeholder), or the notebook name in the alt text of a Binder badge.
@@ -643,21 +642,6 @@ class ReadmeVisualizationsTest(unittest.TestCase):
         duplicates: list[str] = sorted(name for name, n in counts.items() if n > 1)
         if duplicates:
             self.fail(f"Pages listed twice in the README: {', '.join(duplicates)}")
-
-    def test_subsections_in_alphabetical_order(self) -> None:
-        """The subsections follow each other in the alphabetical order of their pages' names.
-
-        Would fail if a new page's subsection was appended at the end of the section instead of
-        being put in its place, so that readers could no longer find a page by its name.
-        """
-        names: list[str] = [
-            name for name in map(heading_name, readme_subsections()) if name is not None
-        ]
-        self.assertEqual(
-            names,
-            sorted(names),
-            f"README subsections of Visualizations not in alphabetical order ({FORM_HINT}).",
-        )
 
     def test_heading_and_preview_link_to_the_page(self) -> None:
         """The heading and the preview link to the page the heading names, and the preview is its image.

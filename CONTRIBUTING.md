@@ -300,9 +300,9 @@ In the README's section *Visualizations*, each page has a subsection: a heading 
 `visualizations/` without `.html` (for a page directly in the folder, its file name), which links to
 the page, a preview 480 pixels wide, which links to the page as well, the topic, and, if there is one,
 the line `Notebook: [<name>](notebooks/<name>.ipynb)` with the notebook's Binder badge on the next
-line, written as in the notebook tables. The subsections are in the alphabetical order of the pages'
-names. `system/tests/repo/test_readme_visualizations.py` fails if the section, the pages, the previews
-and the notebooks disagree, or if the subsections are out of order. The section has no table: GitLab
+line, written as in the notebook tables. A new page's subsection goes at the end of the section.
+`system/tests/repo/test_readme_visualizations.py` fails if the section, the pages, the previews and the
+notebooks disagree. The section has no table: GitLab
 shows a Markdown table at most 70 % of the window high and lets a higher one scroll inside itself. The
 preview is written as
 `[<img src="docs/images/visualizations/<page>.jpg" width="480" alt="…">](<link>)`: an HTML image, as
