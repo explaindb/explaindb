@@ -18,13 +18,13 @@
 #
 #
 
-"""External merge sort with run generation and multi-way stream merging."""
+"""External merge sort: runs by chunk sorting or replacement selection (textbook heap), multi-way merging (heapq)."""
 
 import heapq
 import itertools
 import logging
 from dataclasses import dataclass
-from typing import Iterable, Iterator
+from typing import Any, Iterable, Iterator, Protocol
 
 from system.interfaces.queues import (
     QueueFactory,
@@ -83,9 +83,152 @@ class RunGenerationResult:
     elements_written: int
 
 
-class RunGenerator[ObjectType]:
-    """Phase 0 of external merge sort: reads the input in memory-sized chunks, sorts each chunk, and writes it out
-    as a sorted run via the queue factory.
+class Comparable(Protocol):
+    """An element that the sorting code in this module can order: it supports ``<``."""
+
+    def __lt__(self, other: Any, /) -> bool:
+        """Whether this element comes before ``other``."""
+
+
+def sift_down[ObjectType: Comparable](heap: list[ObjectType], position: int) -> None:
+    """Moves the element at ``position`` down the heap until no child is smaller: it swaps with its smaller child
+    (the left one, unless the right one is smaller) and stops above a child that is not smaller, including an equal
+    one. The heap is a list in level order: the children of position i are at 2i + 1 and 2i + 2. Only ``<`` is used.
+
+    @param heap: The list whose subtrees below ``position`` are heaps already.
+    @param position: The index of the element to move down.
+    """
+    size: int = len(heap)
+    # walk down, one level per round, until the element has no smaller child:
+    while True:
+        # the left child of the position (the right child, if there is one, follows it):
+        child: int = 2 * position + 1
+        if child >= size:
+            # a leaf: no child to compare with:
+            return
+        # the smaller of the two children (the left one if they are equal):
+        if child + 1 < size and heap[child + 1] < heap[child]:
+            child += 1
+        # the element stays where it is if the smaller child is not smaller (also if it is equal):
+        if not heap[child] < heap[position]:
+            return
+        # the smaller child moves up, the element one level down, and the walk goes on from there:
+        heap[position], heap[child] = heap[child], heap[position]
+        position = child
+
+
+def bulkload[ObjectType: Comparable](elements: list[ObjectType]) -> None:
+    """Turns ``elements`` into a heap in place in linear time (Floyd's method): every inner node is moved down with
+    ``sift_down``, from the last inner node up to the root, so each node moves down only into subtrees that are
+    heaps already.
+
+    @param elements: The list to turn into a heap.
+    """
+    # the inner nodes are the positions 0 to len // 2 - 1; the leaves after them are heaps of one element each.
+    # From the last inner node up to the root, both subtrees of a node are heaps already when it moves down:
+    for position in reversed(range(len(elements) // 2)):
+        sift_down(elements, position)
+
+
+class ReplacementSelection[ObjectType: Comparable](Iterator[tuple[int, ObjectType]]):
+    """Run generation by replacement selection. Main memory holds M elements (``number_of_tuples_in_main_memory``),
+    split into a heap (``heap``) for the current run and a list (``pending``, the slides' "list") for the next one.
+    Each step outputs the root of the heap and reads the next input element: if it is not smaller than that output,
+    it still fits into the current run and goes into the heap, else it goes into the list. When the heap is empty,
+    the list is bulk-loaded into a heap and the next run starts. Yields (run number, element); run numbers start at
+    0 for each instance (``run`` is -1 until the first run starts). ``heap``, ``pending`` and ``run`` can be read
+    between steps; ``start_next_run`` makes the list the new ``heap`` and gives ``pending`` a new empty list, so read
+    both again after each step.
+    """
+
+    def __init__(
+        self, input_data: Iterable[ObjectType], number_of_tuples_in_main_memory: int
+    ):
+        """Reads the first M elements into the list; the first call of ``start_next_run`` (or of ``__next__``)
+        bulk-loads them into the heap and starts run 0.
+
+        @param input_data: The input data to create runs from.
+        @param number_of_tuples_in_main_memory: M, the number of elements heap and list may hold together.
+        @raise ValueError: if M is less than 1.
+        """
+        if number_of_tuples_in_main_memory < 1:
+            raise ValueError(
+                f"number_of_tuples_in_main_memory must be at least 1, got {number_of_tuples_in_main_memory}"
+            )
+        self.input_data: Iterator[ObjectType] = iter(input_data)
+        # the elements of the current run, as a heap:
+        self.heap: list[ObjectType] = list[ObjectType]()
+        # the elements for the next run (the "list" of the slides), initially the first M input elements:
+        self.pending: list[ObjectType] = list(
+            itertools.islice(self.input_data, number_of_tuples_in_main_memory)
+        )
+        # the number of the current run, from 0 on (-1 until the first run starts):
+        self.run: int = -1
+
+    def start_next_run(self) -> bool:
+        """If the heap is empty and the list (``pending``) is not, bulk-loads the list into the heap and starts the
+        next run. ``__next__`` calls it whenever the heap is empty; it is public so that a caller can call it first
+        and look at the new heap before the run's first output.
+
+        @return: True if a run was started, False if nothing changed (the heap still holds elements, or the list is
+        empty).
+        """
+        # a new run starts only when the current one is over (empty heap) and elements wait for it:
+        if self.heap or not self.pending:
+            return False
+        # the list becomes the new run's heap, and an empty list collects the elements for the run after it:
+        self.heap, self.pending = self.pending, list[ObjectType]()
+        # turn the list into a heap, in linear time:
+        bulkload(self.heap)
+        self.run += 1
+        return True
+
+    def _remove_root(self) -> None:
+        """Removes the root of the heap: the heap's last element takes the root's place and moves down."""
+        # take the last element off, so the heap stays a complete tree:
+        last: ObjectType = self.heap.pop()
+        # unless it was the root itself, it takes the root's place and moves down:
+        if self.heap:
+            self.heap[0] = last
+            sift_down(self.heap, 0)
+
+    def __next__(self) -> tuple[int, ObjectType]:
+        """Outputs the root of the heap and reads the next input element into memory. If the heap is empty, the next
+        run is started first (``start_next_run``).
+
+        @return: The run number and the element written to that run.
+        @raise StopIteration: when heap and list are both empty.
+        """
+        # an empty heap ends the run: start the next one, or stop if the list is empty too:
+        if not self.heap and not self.start_next_run():
+            raise StopIteration
+        # the root, the smallest element of the heap, is the run's next output:
+        output: ObjectType = self.heap[0]
+        # read the next input element into the place the output frees:
+        try:
+            next_element: ObjectType = next(self.input_data)
+        except StopIteration:
+            # no input is left: the heap shrinks:
+            self._remove_root()
+            return self.run, output
+        if next_element < output:
+            # the next element is smaller than the output, so it waits in the list for the next run:
+            self._remove_root()
+            self.pending.append(next_element)
+        else:
+            # the next element still fits into this run: it takes the root's place and moves down:
+            self.heap[0] = next_element
+            sift_down(self.heap, 0)
+        return self.run, output
+
+    def __iter__(self) -> Iterator[tuple[int, ObjectType]]:
+        """Returns the iterator object."""
+        return self
+
+
+class RunGenerator[ObjectType: Comparable]:
+    """Phase 0 of external merge sort: makes sorted runs, each written to a new queue from the queue factory,
+    either by sorting memory-sized chunks or by replacement selection.
     """
 
     def __init__(
@@ -93,24 +236,72 @@ class RunGenerator[ObjectType]:
         input_data: Iterator[ObjectType],
         queue_factory: QueueFactory,
         number_of_tuples_in_main_memory: int = 1000,
+        replacement_selection: bool = False,
     ):
         """Initializes the RunGenerator.
 
         @param queue_factory: The factory to use to create read and write queues.
         @param input_data: The input data to create runs from.
         @param number_of_tuples_in_main_memory: The number of tuples that can be stored in memory.
+        @param replacement_selection: Make the runs by replacement selection instead of sorting chunks. Then
+        ``create_runs`` raises a ValueError if ``number_of_tuples_in_main_memory`` is less than 1; chunk sorting does
+        not check it.
         """
 
         self.queue_factory: QueueFactory = queue_factory
         self.input_data: Iterator[ObjectType] = input_data
         self.number_of_tuples_in_main_memory: int = number_of_tuples_in_main_memory
+        self.replacement_selection: bool = replacement_selection
 
-    def create_runs(self) -> RunGenerationResult:
-        """Reads the input data in chunks of number_of_tuples_in_main_memory elements, sorts each chunk in memory
-        and writes it as a sorted run to a new queue from the queue factory.
+    def _finish_run(self, queue: ReadWriteQueue[ObjectType]) -> RunMetadata:
+        """Flushes a run's queue and returns the run's metadata (its queue and size). The queue stays open, as the
+        merge reads the run from it.
+
+        @param queue: The queue holding the run.
+        @return: The metadata of the run.
+        """
+        # write what the queue still buffers (a disk-backed queue writes it to its file):
+        queue.flush()
+        return RunMetadata(queue=queue, size=queue.size())
+
+    def _create_runs_by_replacement_selection(self) -> RunGenerationResult:
+        """Writes the output of replacement selection to one new queue per run.
 
         @return: A RunGenerationResult with the metadata of all runs and the number of elements written.
+        @raise ValueError: if ``number_of_tuples_in_main_memory`` is less than 1.
         """
+        runs_metadata: list[RunMetadata] = list[RunMetadata]()
+        selection: ReplacementSelection[ObjectType] = ReplacementSelection(
+            self.input_data, self.number_of_tuples_in_main_memory
+        )
+        # the queue of the run being written (none before the first element), and its run number:
+        queue: ReadWriteQueue[ObjectType] | None = None
+        current_run_number: int = 0
+        for run_number, element in selection:
+            if queue is None or run_number != current_run_number:
+                # the first element, or a new run number: finish the current run (if any) and open a new queue:
+                if queue is not None:
+                    runs_metadata.append(self._finish_run(queue))
+                queue = self.queue_factory.get_queue_instance()
+                current_run_number = run_number
+            queue.insert(element)
+        # the last run (none for empty input):
+        if queue is not None:
+            runs_metadata.append(self._finish_run(queue))
+        return RunGenerationResult(
+            runs_metadata, sum(metadata.size for metadata in runs_metadata)
+        )
+
+    def create_runs(self) -> RunGenerationResult:
+        """Reads the input data in chunks of ``number_of_tuples_in_main_memory`` elements, sorts each chunk in memory
+        and writes it as a sorted run to a new queue from the queue factory. With ``replacement_selection``, makes the
+        runs by replacement selection instead (see :class:`ReplacementSelection`).
+
+        @return: A RunGenerationResult with the metadata of all runs and the number of elements written.
+        @raise ValueError: with ``replacement_selection``, if ``number_of_tuples_in_main_memory`` is less than 1.
+        """
+        if self.replacement_selection:
+            return self._create_runs_by_replacement_selection()
         runs_metadata: list[RunMetadata] = list[RunMetadata]()
         elements_written: int = 0
 
@@ -128,7 +319,6 @@ class RunGenerator[ObjectType]:
                 break
 
             # sort the buffer:
-            # TODO here we could alternatively use replacement selection
             buffer.sort()
 
             # get a queue instance:
@@ -263,7 +453,7 @@ class SingleStreamMerge[ObjectType](Iterator):
         return self
 
 
-class ExternalMergeSort[ObjectType](Iterator):
+class ExternalMergeSort[ObjectType: Comparable](Iterator):
     """ExternalMergeSort sorts its input data based on arbitrary queues (which may be list-based or external or
     whatever queues). Call create_runs() to create sorted runs (phase 0), then merge() to merge them until at most
     <fan_in> runs are left. After that, ExternalMergeSort is an iterator that returns the elements in sorted order
@@ -276,6 +466,7 @@ class ExternalMergeSort[ObjectType](Iterator):
         queue_factory: QueueFactory,
         number_of_tuples_in_main_memory: int = 1000,
         fan_in: int = 10,
+        replacement_selection: bool = False,
     ):
         """Initializes the ExternalMergeSort.
 
@@ -284,6 +475,8 @@ class ExternalMergeSort[ObjectType](Iterator):
         @param number_of_tuples_in_main_memory: The number of tuples that can be stored in memory. Must be at least
         fan_in + 1, which is one tuple per input run plus one for the output run.
         @param fan_in: The fan-in of the merge sort. Must be at least 2.
+        @param replacement_selection: Make the runs by replacement selection instead of sorting chunks. Then
+        ``create_runs`` raises a ValueError if ``number_of_tuples_in_main_memory`` is less than 1.
         @raise ValueError: if fan_in is less than 2.
 
         """
@@ -294,6 +487,7 @@ class ExternalMergeSort[ObjectType](Iterator):
         self.queue_factory = queue_factory
         self.number_of_tuples_in_main_memory = number_of_tuples_in_main_memory
         self.fan_in = fan_in
+        self.replacement_selection: bool = replacement_selection
 
         # heap to keep track of the runs:
         self.heap: list[RunMetadata] = list[RunMetadata]()
@@ -308,6 +502,7 @@ class ExternalMergeSort[ObjectType](Iterator):
             input_data=self.input_data,
             queue_factory=self.queue_factory,
             number_of_tuples_in_main_memory=self.number_of_tuples_in_main_memory,
+            replacement_selection=self.replacement_selection,
         )
 
         # create the runs, i.e. execute phase 0:

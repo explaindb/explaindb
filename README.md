@@ -38,8 +38,8 @@ A small DBMS written for reading, not for speed. Interfaces in
 - **Query processing** ([`query_processing/`](system/query_processing)): operators such as scan,
   filter, hash join, semi-join and count, plus WHERE-clause predicates.
 - **Sorting and queues** ([`query_processing/sorting.py`](system/query_processing/sorting.py),
-  [`query_processing/queues/`](system/query_processing/queues)): external merge sort with in-memory and
-  disk-backed queues.
+  [`query_processing/queues/`](system/query_processing/queues)): external merge sort, its runs made by
+  sorting chunks or by replacement selection, with in-memory and disk-backed queues.
 - **Query optimization** ([`query_optimization/`](system/query_optimization)): join graphs (chain,
   star, cycle, clique), cardinality estimation, the C_out cost function, plan tables and the
   dynamic-programming join-order enumeration algorithms DPsize, DPsub and DPccp.

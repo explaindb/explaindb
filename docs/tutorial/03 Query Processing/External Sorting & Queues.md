@@ -31,6 +31,18 @@ input ─► [sort in-memory chunks] ─► run1 run2 run3 …  (on disk)
                                        merge passes ─► fully sorted output
 ```
 
+## Replacement selection
+
+Run generation can also make runs longer than memory. **Replacement selection** keeps M elements in memory: a heap
+for the current run and a list for the next one (|heap| + |list| ≤ M). It writes the heap's smallest element to the
+current run and reads the next input element: if that is not smaller than the element just written, it still fits
+into the current run and goes into the heap; otherwise it waits in the list. When the heap is empty, the list is
+bulk-loaded into a heap (in linear time) and the next run starts. On random input the runs are about 2M long; on
+sorted input there is a single run. Every run but the last holds at least M elements, so it never makes more runs
+than sorting memory-sized chunks, and on such inputs far fewer.
+In `sorting.py`, switch it on with `ExternalMergeSort(..., replacement_selection=True)` (or `RunGenerator`); the
+iterator `ReplacementSelection` implements it with the heap functions `sift_down` and `bulkload`.
+
 ## Try it
 
 In `External-Merge-Sort.ipynb`, shrink the in-memory budget and watch the number of runs (and merge
