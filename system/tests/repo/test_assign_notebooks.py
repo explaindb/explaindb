@@ -65,8 +65,8 @@ EXPECTED_PACKING: dict[int, list[str]] = {
         "B-tree.ipynb",
         "PlanEnumeration.ipynb",
         "Result-DB.ipynb",
-        "External-Merge-Sort.ipynb",
-        "RAID-Playground.ipynb",
+        "Online-Aggregation.ipynb",
+        "Replacement-Selection-Playground.ipynb",
     ],
     2: [
         "Recursive-Model-Index.ipynb",
@@ -74,8 +74,7 @@ EXPECTED_PACKING: dict[int, list[str]] = {
         "Data-Layout.ipynb",
         "Bit-Sequences-in-Pandas.ipynb",
         "Z-Order-Curve.ipynb",
-        "MVCC-Playground.ipynb",
-        "Replacement-Selection-Playground.ipynb",
+        "RAID-Playground.ipynb",
     ],
     3: [
         "Bitmaps-and-Bloom-Filters.ipynb",
@@ -83,7 +82,8 @@ EXPECTED_PACKING: dict[int, list[str]] = {
         "Distributed-Joins.ipynb",
         "Top-k.ipynb",
         "Shared-Scan.ipynb",
-        "Online-Aggregation.ipynb",
+        "MVCC-Playground.ipynb",
+        "External-Merge-Sort.ipynb",
     ],
 }
 

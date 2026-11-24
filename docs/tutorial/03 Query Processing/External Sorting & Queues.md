@@ -13,8 +13,10 @@ beyond memory, so the algorithm can be written as if everything were in memory.
 
 ## In this repo
 
-- **Notebook:** [`External-Merge-Sort.ipynb`](../../../notebooks/External-Merge-Sort.ipynb) — starts from a
-  main-memory sort and builds up to the external, run-and-merge version.
+- **Notebook:** [`External-Merge-Sort.ipynb`](../../../notebooks/External-Merge-Sort.ipynb) — runs the repo's
+  external merge sort: a small example after the lecture's drawn as merge trees (quicksort and replacement
+  selection, merges of three runs), runs written to disk, and the elements written and read counted next to the
+  cost formula.
 - **Notebook:** [`Replacement-Selection-Playground.ipynb`](../../../notebooks/Replacement-Selection-Playground.ipynb)
   — follow run generation by replacement selection on your own input, step by step: main memory as one array, with
   the heap at its front drawn as a tree, its maintenance comparison by comparison and swap by swap, the linear bulk
@@ -52,5 +54,5 @@ iterator `ReplacementSelection` implements it with the heap functions `sift_down
 
 ## Try it
 
-In `External-Merge-Sort.ipynb`, shrink the in-memory budget and watch the number of runs (and merge
-passes) grow — the whole point of doing it externally.
+In `External-Merge-Sort.ipynb`, shrink the in-memory budget and watch the number of runs and merges
+grow — the whole point of doing it externally.
