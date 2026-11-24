@@ -298,9 +298,10 @@ therefore needs no HTML links to force a new tab.
 
 In the README's section *Visualizations*, each page has a subsection: a heading with its path in
 `visualizations/` without `.html` (for a page directly in the folder, its file name), which links to
-the page, a preview 480 pixels wide, which links to the page as well, the topic, and, if there is one,
-the line `Notebook: [<name>](notebooks/<name>.ipynb)` with the notebook's Binder badge on the next
-line, written as in the notebook tables. A new page's subsection goes at the end of the section.
+the page, a preview 480 pixels wide, which links to the page as well, the topic, and, for each notebook
+the page links, the line `Notebook: [<name>](notebooks/<name>.ipynb)` with the notebook's Binder badge
+on the next line, written as in the notebook tables; a blank line separates two notebooks, and a page
+links each notebook only once. A new page's subsection goes at the end of the section.
 `system/tests/repo/test_readme_visualizations.py` fails if the section, the pages, the previews and the
 notebooks disagree. The section has no table: GitLab
 shows a Markdown table at most 70 % of the window high and lets a higher one scroll inside itself. The

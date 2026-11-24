@@ -167,6 +167,9 @@ switched on).
 Notebook: [External-Merge-Sort](notebooks/External-Merge-Sort.ipynb)
 [![Open External-Merge-Sort on Binder](https://mybinder.org/badge_logo.svg)](https://mybinder.org/v2/gh/explaindb/explaindb/main?urlpath=lab/tree/notebooks/External-Merge-Sort.ipynb)
 
+Notebook: [Replacement-Selection-Playground](notebooks/Replacement-Selection-Playground.ipynb)
+[![Open Replacement-Selection-Playground on Binder](https://mybinder.org/badge_logo.svg)](https://mybinder.org/v2/gh/explaindb/explaindb/main?urlpath=lab/tree/notebooks/Replacement-Selection-Playground.ipynb)
+
 ## Notebooks
 
 The notebooks are grouped by the chapters of the [tutorial](docs/tutorial/README.md), which explains each

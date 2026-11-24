@@ -25,15 +25,17 @@
 
 The section has one subsection per page (see CONTRIBUTING.md, section Visualizations): a heading
 with the page's name linked to the page, a preview image linked to the page as well, the topic and,
-for a page with a notebook, the notebook with its Binder badge. A page's name is its path in
+for a page with notebooks, each notebook with its Binder badge. A page's name is its path in
 ``visualizations/`` without ``.html``. These tests fail when the section and the folders drift
 apart: a page without a subsection or a subsection without a page, a page listed twice, a subsection
 not in the expected form, a heading or preview that links to another page, a preview that is not the
-page's image, a page without its preview or a preview without its page, or a notebook link to a
-notebook that does not exist, with another label or with a Binder badge that opens another notebook.
-They do not check the topic text, the order of the parts in a subsection, whether a page that
-should link a notebook does, what a preview's alt text says (only that it is not empty or a
-placeholder), or the notebook name in the alt text of a Binder badge.
+page's image, a page without its preview or a preview without its page, a notebook linked twice by
+one page, or a notebook link to a notebook that does not exist, with another label or with a Binder
+badge that opens another notebook.
+They do not check the topic text, the order of the parts in a subsection, whether a blank line
+separates two notebooks, whether a page that should link a notebook does, what a preview's alt
+text says (only that it is not empty or a placeholder), or the notebook name in the alt text of a
+Binder badge.
 """
 
 import re
@@ -90,7 +92,7 @@ class MalformedSubsection(ValueError):
 
 @dataclass(frozen=True)
 class NotebookLink:
-    """The notebook of a visualization, as its subsection links it.
+    """One notebook of a visualization, as its subsection links it.
 
     ``label`` is the link text of the notebook line and ``file`` the notebook it links to;
     ``target`` is the notebook the Binder badge on the next line opens.
@@ -103,14 +105,17 @@ class NotebookLink:
 
 @dataclass(frozen=True)
 class Subsection:
-    """One parsed subsection of the README section ``## Visualizations``."""
+    """One parsed subsection of the README section ``## Visualizations``.
+
+    ``notebooks`` holds the notebook links in README order; it is empty for a page without a notebook.
+    """
 
     heading: str
     name: str
     heading_url: str
     preview_image: str
     preview_url: str
-    notebook: NotebookLink | None
+    notebooks: tuple[NotebookLink, ...]
 
 
 def readme_section(text: str, heading: str) -> list[str]:
@@ -162,9 +167,10 @@ def heading_name(lines: list[str]) -> str | None:
 def parse_subsection(lines: list[str]) -> Subsection:
     """Parse one subsection; raise :class:`MalformedSubsection` if it is not in the expected form.
 
-    A preview line is a line with ``<img`` or ``docs/images/``; the notebook line starts with
-    ``Notebook:``, and its Binder badge is the next line. Any other line that mentions ``.ipynb``
-    or ``mybinder.org`` is an error, so a notebook link in another form is not skipped silently.
+    A preview line is a line with ``<img`` or ``docs/images/``; a notebook line starts with
+    ``Notebook:``, and its Binder badge is the next line. A subsection may have several notebook
+    lines, but not two for the same notebook. Any other line that mentions ``.ipynb`` or
+    ``mybinder.org`` is an error, so a notebook link in another form is not skipped silently.
     :meth:`ReadmeVisualizationsTest.test_every_subsection_has_expected_form` reports the errors.
 
     @param lines: the lines of the subsection, starting with its heading line.
@@ -191,17 +197,12 @@ def parse_subsection(lines: list[str]) -> Subsection:
     if not preview["alt"].strip(" .…"):
         raise MalformedSubsection("the preview has no alt text")
 
-    # at most one notebook line, with its Binder badge on the next line:
+    # any number of notebook lines, each with its Binder badge on the next line:
     notebook_lines: list[int] = [
         i for i, line in enumerate(lines) if line.startswith("Notebook:")
     ]
-    if len(notebook_lines) > 1:
-        raise MalformedSubsection(
-            f"{len(notebook_lines)} notebook lines instead of one"
-        )
-    notebook: NotebookLink | None = None
-    if notebook_lines:
-        i: int = notebook_lines[0]
+    notebooks: list[NotebookLink] = []
+    for i in notebook_lines:
         link: re.Match[str] | None = NOTEBOOK_PATTERN.fullmatch(lines[i])
         if link is None:
             raise MalformedSubsection(
@@ -214,19 +215,25 @@ def parse_subsection(lines: list[str]) -> Subsection:
         )
         if badge is None:
             raise MalformedSubsection(
-                "the line after the notebook line is not its Binder badge"
+                f"the line after the notebook line {lines[i]!r} is not its Binder badge"
                 " [![Open <name> on Binder](https://mybinder.org/badge_logo.svg)]"
                 f"({BINDER_PREFIX}<name>.ipynb): "
                 + (repr(after) if after is not None else "no line")
             )
-        notebook = NotebookLink(link["label"], link["file"], badge["target"])
+        notebooks.append(NotebookLink(link["label"], link["file"], badge["target"]))
+
+    # no notebook is linked twice:
+    counts: Counter[str] = Counter(notebook.file for notebook in notebooks)
+    duplicates: list[str] = sorted(file for file, n in counts.items() if n > 1)
+    if duplicates:
+        raise MalformedSubsection(f"notebooks linked twice: {', '.join(duplicates)}")
 
     # no other line links a notebook or Binder:
     known: set[int] = {i for j in notebook_lines for i in (j, j + 1)}
     for i, line in enumerate(lines):
         if i not in known and (".ipynb" in line or "mybinder.org" in line):
             raise MalformedSubsection(
-                f"a notebook or Binder link outside the notebook line and its badge: {line!r}"
+                f"a notebook or Binder link outside the notebook lines and their badges: {line!r}"
             )
     return Subsection(
         lines[0],
@@ -234,7 +241,7 @@ def parse_subsection(lines: list[str]) -> Subsection:
         heading["url"],
         preview["image"],
         preview["url"],
-        notebook,
+        tuple(notebooks),
     )
 
 
@@ -412,10 +419,57 @@ class ReadmeVisualizationsHelpersTest(unittest.TestCase):
                 heading_url=heading_url,
                 preview_image="elasticity-resources-follow-demand.jpg",
                 preview_url=other_page_url,
-                notebook=NotebookLink(
-                    label="Shared Scan",
-                    file="Shared-Scan.ipynb",
-                    target="Data-Layout.ipynb",
+                notebooks=(
+                    NotebookLink(
+                        label="Shared Scan",
+                        file="Shared-Scan.ipynb",
+                        target="Data-Layout.ipynb",
+                    ),
+                ),
+            ),
+        )
+
+    def test_parse_subsection_with_two_notebooks(self) -> None:
+        """A subsection with two notebooks yields both notebook links in README order.
+
+        Each notebook line is followed by its own Binder badge, and a blank line separates the two
+        blocks, as in the README. Would fail if only the first or the last notebook line were kept,
+        the notebooks came out in another order, or a badge were paired with the other notebook
+        line.
+        """
+        # the subsection of clock-scan with a Shared-Scan and then a Data-Layout notebook, each
+        # followed by the Binder badge that opens it:
+        lines: list[str] = self._subsection_without_notebook() + [
+            "",
+            "Notebook: [Shared-Scan](notebooks/Shared-Scan.ipynb)",
+            "[![Open Shared-Scan on Binder](https://mybinder.org/badge_logo.svg)]"
+            f"({BINDER_PREFIX}Shared-Scan.ipynb)",
+            "",
+            "Notebook: [Data-Layout](notebooks/Data-Layout.ipynb)",
+            "[![Open Data-Layout on Binder](https://mybinder.org/badge_logo.svg)]"
+            f"({BINDER_PREFIX}Data-Layout.ipynb)",
+        ]
+
+        # both notebooks are parsed, in README order, each with the target of its own badge:
+        self.assertEqual(
+            parse_subsection(lines),
+            Subsection(
+                heading=lines[0],
+                name="clock-scan",
+                heading_url=self.PAGE_URL,
+                preview_image="clock-scan.jpg",
+                preview_url=self.PAGE_URL,
+                notebooks=(
+                    NotebookLink(
+                        label="Shared-Scan",
+                        file="Shared-Scan.ipynb",
+                        target="Shared-Scan.ipynb",
+                    ),
+                    NotebookLink(
+                        label="Data-Layout",
+                        file="Data-Layout.ipynb",
+                        target="Data-Layout.ipynb",
+                    ),
                 ),
             ),
         )
@@ -435,7 +489,7 @@ class ReadmeVisualizationsHelpersTest(unittest.TestCase):
                 heading_url=self.PAGE_URL,
                 preview_image="clock-scan.jpg",
                 preview_url=self.PAGE_URL,
-                notebook=None,
+                notebooks=(),
             ),
         )
 
@@ -443,20 +497,29 @@ class ReadmeVisualizationsHelpersTest(unittest.TestCase):
         """A subsection not in the expected form raises ``MalformedSubsection``, whose message says why.
 
         Would fail if one of these variants parsed, so the live checks would skip it without a
-        word (e.g. a preview in Markdown's image syntax, a badge to another branch, or a notebook
-        link outside the notebook line), or if its message named another problem.
+        word (e.g. a preview in Markdown's image syntax, a badge to another branch, a broken second
+        notebook block after a valid first one, or a notebook link outside the notebook lines), or
+        if its message named another problem.
         """
-        # the parts of a subsection with a notebook, which parse without the blank lines:
+        # the parts of a subsection with one or two notebooks; both forms parse without the blank lines:
         heading, _, preview, _, topic = self._subsection_without_notebook()
         notebook: str = "Notebook: [Shared-Scan](notebooks/Shared-Scan.ipynb)"
         badge: str = (
             "[![Open Shared-Scan on Binder](https://mybinder.org/badge_logo.svg)]"
             f"({BINDER_PREFIX}Shared-Scan.ipynb)"
         )
+        other_notebook: str = "Notebook: [Data-Layout](notebooks/Data-Layout.ipynb)"
+        other_badge: str = (
+            "[![Open Data-Layout on Binder](https://mybinder.org/badge_logo.svg)]"
+            f"({BINDER_PREFIX}Data-Layout.ipynb)"
+        )
         alt: str = 'alt="Three query robots ride the scan car"'
         parse_subsection([heading, preview, topic, notebook, badge])
+        parse_subsection(
+            [heading, preview, topic, notebook, badge, other_notebook, other_badge]
+        )
 
-        # each variant changes the valid subsection in one place; the reason names that place:
+        # each variant breaks one of the valid forms above; the reason names what is wrong:
         markdown_preview: str = (
             "[![Three query robots ride the scan car]"
             f"(docs/images/visualizations/clock-scan.jpg)]({self.PAGE_URL})"
@@ -496,13 +559,24 @@ class ReadmeVisualizationsHelpersTest(unittest.TestCase):
                 ],
                 "preview is not",
             ),
-            "two notebook lines": (
-                [heading, preview, topic, notebook, badge, notebook, badge],
-                "2 notebook lines",
+            # the second Shared-Scan line has another label, and Data-Layout stands between them:
+            "same notebook linked twice": (
+                [
+                    heading,
+                    preview,
+                    topic,
+                    notebook,
+                    badge,
+                    other_notebook,
+                    other_badge,
+                    "Notebook: [Shared Scan](notebooks/Shared-Scan.ipynb)",
+                    badge,
+                ],
+                "notebooks linked twice: Shared-Scan.ipynb",
             ),
             "notebook line in another form": (
                 [heading, preview, topic, "Notebook: [x](../notebooks/x.ipynb)", badge],
-                # anchored, as the badge message contains these words, too:
+                # anchored, so that only the message about the notebook line's own form matches:
                 "^the notebook line is not",
             ),
             "notebook line followed by the topic": (
@@ -521,17 +595,50 @@ class ReadmeVisualizationsHelpersTest(unittest.TestCase):
                 [heading, preview, topic, notebook, badge.replace("/main?", "/dev?")],
                 "not its Binder badge",
             ),
+            # the first notebook block is valid, the second one is broken:
+            "second notebook line without its badge": (
+                [heading, preview, topic, notebook, badge, other_notebook],
+                "Data-Layout.*not its Binder badge",
+            ),
+            "second notebook line followed by the topic": (
+                [heading, preview, notebook, badge, other_notebook, topic],
+                "Data-Layout.*not its Binder badge",
+            ),
+            "second notebook line in another form": (
+                [
+                    heading,
+                    preview,
+                    topic,
+                    notebook,
+                    badge,
+                    "Notebook: [y](../notebooks/y.ipynb)",
+                    other_badge,
+                ],
+                r"^the notebook line is not.*\[y\]",
+            ),
+            "second badge to another branch": (
+                [
+                    heading,
+                    preview,
+                    topic,
+                    notebook,
+                    badge,
+                    other_notebook,
+                    other_badge.replace("/main?", "/dev?"),
+                ],
+                "Data-Layout.*not its Binder badge",
+            ),
             "notebook link in bold": (
                 [heading, preview, topic, "**Notebook:** [X](notebooks/X.ipynb)"],
-                "outside the notebook line",
+                "outside the notebook lines",
             ),
             "Binder badge without notebook line": (
                 [heading, preview, topic, badge],
-                "outside the notebook line",
+                "outside the notebook lines",
             ),
             "second badge after the notebook's badge": (
                 [heading, preview, topic, notebook, badge, badge],
-                "outside the notebook line",
+                "outside the notebook lines",
             ),
         }
         for case, (lines, reason) in variants.items():
@@ -586,7 +693,7 @@ class ReadmeVisualizationsTest(unittest.TestCase):
         )
 
     def test_every_subsection_has_expected_form(self) -> None:
-        """Every subsection has a linked heading, one preview and at most one notebook with its badge.
+        """Every subsection has a linked heading, one preview, and each notebook line followed by its badge.
 
         Would fail if a subsection had, for example, no preview, a preview in Markdown's image
         syntax, or a notebook link without its Binder badge; such a subsection would otherwise be
@@ -683,23 +790,26 @@ class ReadmeVisualizationsTest(unittest.TestCase):
             self.fail("\n".join(problems))
 
     def test_notebook_links_exist_and_agree(self) -> None:
-        """A linked notebook exists, its label is its name, and its Binder badge opens it.
+        """Every linked notebook exists, its label is its name, and its Binder badge opens it.
 
         Would fail if a notebook was renamed or removed without updating the README, or a copied
         notebook line kept another notebook's label or Binder badge.
         """
-        notebooks: set[str] = {path.name for path in NOTEBOOKS_DIR.glob("*.ipynb")}
+        on_disk: set[str] = {path.name for path in NOTEBOOKS_DIR.glob("*.ipynb")}
         for s in parsed_subsections():
-            if s.notebook is None:
-                continue
-            with self.subTest(page=s.name, part="notebook exists"):
-                self.assertIn(
-                    s.notebook.file, notebooks, f"no notebooks/{s.notebook.file}"
-                )
-            with self.subTest(page=s.name, part="label"):
-                self.assertEqual(s.notebook.label, Path(s.notebook.file).stem)
-            with self.subTest(page=s.name, part="Binder badge"):
-                self.assertEqual(s.notebook.target, s.notebook.file)
+            for notebook in s.notebooks:
+                with self.subTest(
+                    page=s.name, notebook=notebook.file, part="notebook exists"
+                ):
+                    self.assertIn(
+                        notebook.file, on_disk, f"no notebooks/{notebook.file}"
+                    )
+                with self.subTest(page=s.name, notebook=notebook.file, part="label"):
+                    self.assertEqual(notebook.label, Path(notebook.file).stem)
+                with self.subTest(
+                    page=s.name, notebook=notebook.file, part="Binder badge"
+                ):
+                    self.assertEqual(notebook.target, notebook.file)
 
 
 if __name__ == "__main__":
