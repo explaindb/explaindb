@@ -128,4 +128,80 @@ memory split differs from the code's in the final merge (the code has no output 
   made into `stage[data-made]` for the tests; the merge groups are compared in their order, not as sets (replaces
   "merge groups (as sets)" above).
 
+## Scope-shift 2026-11-23
+
+- **The page speaks its narration** (own merge request, which builds on !251; deferred above): the voice of the other
+  pages (Ming-3.0-tts, UK_George; decision 034), its code taken over from the storage hierarchy page (045): the sound
+  button and M, the hint while the voice is silent, the words lit as the voice says them, Next and ← stopping where a
+  caption begins while the voice may speak, and the voice named on the card at the end. The captions are the page's;
+  numbers are written out for the voice (e.g. "one hundred and eight" for 108).
+- **The scenes last as long as the voice needs**, so that every clip plays at its own pace: the hall stands still for
+  10.5 s instead of 7 s, while the first caption is said; the first merge's heap stays still for 2.2 s once it is
+  filled; the first drive down a level takes 9 s instead of 8 s; the caption of Run 1 ends 0.4 s later, and the next
+  one begins 0.4 s later. The film lasts 5:47 (347.7 s) instead of 5:41 (341.0 s; this replaces the 5:45 above).
+  CONTRIBUTING.md names the page, with the B-tree page, as an exception to the rule that a film lasts at most about
+  four minutes.
+- **What the voice names lights up**, as on 045: a green frame round the workbench, the heap stand, its root and the
+  depot; the counter in the header is outlined while the voice speaks of the pages read and written.
+- Every take was checked with the speech recogniser and for gaps: no pause inside a clip is longer than 0.66 s, and
+  each such pause comes at the end of a sentence or after a comma. Two takes were made anew: in one, "leave" was heard
+  as "lead"; in the other, "Runs 7" was heard as "run 7". The new take of the second was heard the same way, but cut
+  out on its own the word is recognised as "runs", so the new take was kept. "Root" is heard as "route", which sounds
+  the same in British English.
+
+## Scope-shift 2026-11-23 (2)
+
+After the user watched the film with its voice ("wenn ein neues Kapitel beginnt, das oben links jeweils kurz
+einblenden; mehr Kommentare im Video"):
+
+- **Each part's name shows top left as the part begins**, for 4 s with a fade of 0.4 s: its number small ("Part 2")
+  and its name large ("Pass 0"), the name of its part button. It follows the film's time, so it shows the same when
+  the film is scrubbed or jumped to a part.
+- **Five more captions, said by the voice**, in the long stretches without words (the film keeps its length): in the
+  first merge's fast forward why memory merges three runs at a time (four pages: one per input run and the output
+  page); during the two more merges that merge level 1 reads and writes every page once (72 and 72), with the counter
+  lit; in the final merge's fast forward, a third each, that the query gets the result page by page while the merge
+  still runs, that nine runs with fan-in 3 need two merge levels, more memory a larger fan-in and fewer passes, and
+  (user) that because of the random access times of disks and SSDs the largest possible fan-in does not necessarily
+  give the shortest end-to-end sort time. The caption of the two more merges ends after 12 s, so that the next one
+  can begin. The longest stretch without words is now 39 s (the final merge's first page, as slow as the first
+  merge's), instead of 71 s. The five new takes were heard right by the speech recogniser.
+
+## Scope-shift 2026-11-24
+
+The user's review notes on the film with its voice:
+
+- The part titles show for 9 s instead of 4 s.
+- Wording: quicksort works on each part "recursively"; the first drive down says that the bench moving a level down
+  is for the purpose of the visualization and that it is the same main memory as before (the drive takes 15 s
+  instead of 9 s, so that the voice can say it); "the value at the root of the heap" goes to the output page; a new
+  caption says that the heap is so small that its memory can be neglected for small inputs like this one; after the
+  first merge "all input runs are merged the same way into larger output runs"; "the merged input runs can be
+  deleted"; after merge level 1 "so far, each page was read twice and written twice".
+- Sound and picture in step: the caption on the full output page begins as that page leaves for Run 10 (it said so
+  some 9 s before the page was full), and a caption of its own tells of the first input page used up as it goes to
+  the depot; that step goes at real speed instead of 24 times as fast (the film is about 12 s longer in all).
+
+## Scope-shift 2026-11-24 (2)
+
+From the code review of the film with its voice:
+
+- **Each part begins in silence:** the page stays in view from above 4 s longer (pass 0 begins after 38.5 s instead
+  of 34.5 s), so that the voice has said the caption on it ("From above: 16 values …") before part 2 begins; before,
+  a jump to part 2 with sound on began in the middle of that sentence.
+- **The final merge's first full page is told of as it leaves:** its caption ("Each full page goes straight on to
+  the query …") begins as that page leaves for the query, as the caption of Run 10's first page does; before, it
+  began some 25 s earlier, as the first value went out. The caption before it ("The final merge takes Runs 10, 11
+  and 12 …") shows until then.
+- The film lasts 6:03 (363.5 s) instead of 5:59 (359.5 s: the 5:47 above and the 12 s of the review notes);
+  CONTRIBUTING.md says so.
+
+## Scope-shift 2026-11-24 (3)
+
+With its voice, the page counts among the pages with sound, which the CI job visualization_test spreads over its
+three jobs first. Sorted by path, b-tree, external-sorting and yannakakis, whose tests take longest, fell into the same
+job, which ran over the job's time limit of 10 minutes and crashed the browser (merge request !289). The pages with
+sound are now spread largest first (the size of a page goes with how long its tests take: voice, 3D code and fonts),
+so that the three largest go to three different jobs; a test checks this for the pages there are.
+
 <!-- notes below: skill never overwrites past this marker -->

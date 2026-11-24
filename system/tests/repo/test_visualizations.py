@@ -125,8 +125,9 @@ YANNAKAKIS_PAGE: Path = PAGES_DIR / "yannakakis.html"
 # the storage hierarchy as a mine shaft under the House DBMS, its depth strictly to scale with the access times
 # (decision 045):
 STORAGE_HIERARCHY_PAGE: Path = PAGES_DIR / "storage-hierarchy.html"
-# the pages that speak their narration (the B-tree page, B_TREE_PAGE, and the storage hierarchy page,
-# STORAGE_HIERARCHY_PAGE, with the same voice, decisions 040 and 045); each must keep its sound button:
+# the pages that speak their narration (the B-tree page, B_TREE_PAGE, the storage hierarchy page,
+# STORAGE_HIERARCHY_PAGE, and the external sorting page, EXTERNAL_SORTING_PAGE, with the same voice, decisions 040, 045
+# and 046); each must keep its sound button:
 PAGES_WITH_SOUND: frozenset[Path] = frozenset(
     {
         CLOCK_SCAN_PAGE,
@@ -135,6 +136,7 @@ PAGES_WITH_SOUND: frozenset[Path] = frozenset(
         YANNAKAKIS_PAGE,
         B_TREE_PAGE,
         STORAGE_HIERARCHY_PAGE,
+        EXTERNAL_SORTING_PAGE,
     }
 )
 # the pages with sound whose film has parts, with a button (chapter-1, ...) that jumps to the start of each:
@@ -145,6 +147,7 @@ PAGES_WITH_PARTS: frozenset[Path] = frozenset(
         YANNAKAKIS_PAGE,
         B_TREE_PAGE,
         STORAGE_HIERARCHY_PAGE,
+        EXTERNAL_SORTING_PAGE,
     }
 )
 
@@ -192,22 +195,30 @@ def has_sound(path: Path) -> bool:
     return 'data-testid="sound"' in path.read_text(encoding="utf-8")
 
 
+def file_size(path: Path) -> int:
+    """Returns the size of the file at path in bytes."""
+    return path.stat().st_size
+
+
 def pages_of_job(
     pages: list[Path],
     index: int,
     total: int,
     sound: Callable[[Path], bool] = has_sound,
+    size: Callable[[Path], int] = file_size,
 ) -> list[Path]:
     """Returns the pages that job index of total tests; each page is tested in exactly one job.
 
-    The pages with a sound button, whose tests take longest, come first, then the others, each group sorted by path;
-    page number k of this order (from 0) goes to job k mod total + 1. So the pages with sound are spread over the jobs
-    before the others.
+    The pages with a sound button, whose tests take longest, come first, then the others; each group is sorted by size,
+    largest first (a page's size, its voice, 3D code and fonts, goes with how long its tests take), then by path; page
+    number k of this order (from 0) goes to job k mod total + 1. So the pages with sound, and among them the largest,
+    are spread over the jobs before the others.
 
     @param pages: all pages
     @param index: the job, from 1 to total
     @param total: the number of jobs
     @param sound: whether a page has a sound button
+    @param size: a page's size
     @return: the pages of the job, in the order above
     @raise ValueError: if the job is not one of 1 to total, or if there are more jobs than pages, so that a job would
         test no page
@@ -218,7 +229,9 @@ def pages_of_job(
         raise ValueError(
             f"{total} jobs for {len(pages)} pages: a job would test no page"
         )
-    order: list[Path] = sorted(pages, key=lambda path: (not sound(path), path))
+    order: list[Path] = sorted(
+        pages, key=lambda path: (not sound(path), -size(path), path)
+    )
     return order[index - 1 :: total]
 
 
@@ -4958,19 +4971,27 @@ class StorageHierarchyPageTest(_PageTestCase):
 
 @unittest.skipUnless(PLAYWRIGHT_AVAILABLE, SKIP_REASON)
 class ExternalSortingPageTest(_PageTestCase):
-    """Checks that the counter of the external sorting page counts the pages that the repository's external merge sort
-    reads and writes (decision 046).
+    """Checks the external sorting page (decision 046): its counter counts the pages that the repository's external
+    merge sort reads and writes, its film makes the runs of the code, and its narration, which a synthetic voice says,
+    fits the film.
 
     The page sorts table R, 36 pages of 16 keys, with a main memory of 4 pages and fan-in 3, in three passes: pass 0,
     merge level 1 and the final merge. Its header counts the pages read (``reads``) and written (``writes``); its
     script writes the same numbers into data-* of ``stage``, with the step of the film under way (``data-phase``, e.g.
-    ``read``), the level the bench works on (``data-level``, 0 in pass 0) and the values on the merges' heap stand
-    (``data-heap``). test_external_sorting_page_data.py checks the page counts and runs of
-    external_sorting_page_data.py, which these tests expect, against the real ExternalMergeSort. Each test opens the
-    page paused at a moment of the film given in its URL; some move it on from there with the slider (see
-    stages_from), and the tests of the merges share one such sweep (see merge_stages). The page's own controls, which
-    EveryPageTest does not check, are checked as on the storage hierarchy page: the part buttons, full screen and the
-    review clips.
+    ``read``), the level the bench works on (``data-level``, 0 in pass 0), the values on the merges' heap stand
+    (``data-heap``) and what is lit because the voice names it (``data-highlight``). test_external_sorting_page_data.py
+    checks the page counts and runs of external_sorting_page_data.py, which these tests expect, against the real
+    ExternalMergeSort. The tests of the film open the page paused at a moment given in its URL and wait until it has
+    prepared its GPU programs (open_at); some move it on from there with the slider (see stages_from), and the tests
+    of the merges share one such sweep (see merge_stages).
+
+    The narration is the 25 captions of CAPTIONS: each begins in the step it tells of (CAPTION_STEPS), the voice has
+    said a caption before the next part begins, what the voice names lights up while it says it, and the page stops
+    if a clip of its voice does not belong to its caption; EveryPageWithSoundTest checks the voice itself. The page's
+    own controls, which EveryPageTest does not check, are checked as on the storage hierarchy page: the part buttons,
+    full screen and the review clips; so are the part's name top left as a part begins, the hint how to switch on the
+    sound, which gives way to the end card, and the end card's credit to the voice. Some of the tests that look only at
+    the header, the narration, the controls or the end card do not wait for the GPU (open_controls).
     """
 
     PAGE: Path | None = EXTERNAL_SORTING_PAGE
@@ -4980,6 +5001,123 @@ class ExternalSortingPageTest(_PageTestCase):
     READY_TIMEOUT: int = 8 * FILM_TIMEOUT
     # the readings of the merges that the tests share, once merge_stages has made them; None until then:
     shared_merge_stages: list[dict[str, str]] | None = None
+    # what the voice names stays lit from just before its phrase's first word (0.15 s) until a moment (1.8 s at most)
+    # after its last; the longest phrase that lights something up takes about 3 s, so a highlight lasts at most this
+    # many seconds:
+    LIT_AT_MOST: float = 6.0
+    # the narration, caption by caption, as the page shows it (without the marks of the words that name a result, which
+    # show green); the voice says each caption, its numbers written out (e.g. "one hundred and eight" for 108):
+    CAPTIONS: list[str] = [
+        (
+            "Table R: 36 pages of 16 keys, unsorted. The query wants them sorted, but"
+            " main memory holds only 4 pages."
+        ),
+        (
+            "As in the B-tree film, we linearize the rack sections: page after page, "
+            "as the file lies on disk."
+        ),
+        (
+            "For the purpose of the visualization, each section tips onto its back "
+            "and stays whole: one page."
+        ),
+        (
+            "From above: 16 values, four rows of four, ordered left to right and top "
+            "to bottom. The blue bar shows the key."
+        ),
+        (
+            "Pass 0. Main memory is a workbench with room for 4 pages. A cable pulls "
+            "R's first 4 pages onto it, one after the other."
+        ),
+        (
+            "In memory, quicksort sorts the 64 values: the red one is the pivot. "
+            "Values smaller than it swap into the left part, larger ones into the "
+            "right part; then the same for each part, recursively."
+        ),
+        (
+            "The sorted pages leave by the second cable, close behind each other, "
+            "into a temporary file: Run 1."
+        ),
+        (
+            "The same for the rest of R: nine runs of 4 pages, each one sorted. Every"
+            " page was read once and written once."
+        ),
+        (
+            "For the next pass, for the purpose of the visualization, the bench "
+            "drives round the runs, one level down; in reality we use the same main "
+            "memory as before. Input comes from above, output goes below."
+        ),
+        (
+            "Merge level 1 merges three runs at a time. Each sends its first page "
+            "onto the bench; the fourth place takes the output."
+        ),
+        (
+            "The first value of each input page goes into a heap of three. Its root, "
+            "at the top, holds the smallest."
+        ),
+        (
+            "The value at the root of the heap goes to the output page. The next "
+            "value of its run takes the root's place and swaps with a smaller child."
+        ),
+        (
+            "The size of the heap is so small that its memory requirements can be "
+            "neglected for small inputs like this one."
+        ),
+        (
+            "The output page is full: it goes to Run 10, and an empty page takes its "
+            "place."
+        ),
+        (
+            "An input page is used up: it goes to the depot, and its cable brings the"
+            " next page of its run."
+        ),
+        (
+            "From here the film runs faster. Memory never holds more than four pages:"
+            " one page of each input run, and the output page. That is why it merges "
+            "three runs at a time. All input runs are merged the same way into larger"
+            " output runs."
+        ),
+        (
+            "Two more merges: Runs 4, 5 and 6 into Run 11, Runs 7, 8 and 9 into Run "
+            "12. The merged input runs can be deleted."
+        ),
+        (
+            "Like pass 0, merge level 1 reads every page once and writes it once: "
+            "when it ends, the counter shows 72 reads and 72 writes: so far, each "
+            "page was read twice and written twice."
+        ),
+        "Three runs of 12 pages are left: one more level down.",
+        (
+            "The final merge takes Runs 10, 11 and 12. Its output is not written to "
+            "disk, but streamed to the consumer."
+        ),
+        (
+            "Each full page goes straight on to the query: the first 16 values of the"
+            " result."
+        ),
+        (
+            "The query gets the result page by page, in sorted order, while the merge"
+            " is still running: it can start working before the sort is done."
+        ),
+        (
+            "Nine runs with fan-in 3 need two merge levels: nine runs become three, "
+            "three become one. More memory means a larger fan-in and fewer passes."
+        ),
+        (
+            "Note, though: because of the random access times of disks and SSDs, "
+            "setting the fan-in to the largest possible value does not necessarily "
+            "give the shortest end-to-end sort time."
+        ),
+        (
+            "Each of the three passes read all 36 pages, and the first two also wrote"
+            " all 36: 108 reads and 72 writes."
+        ),
+    ]
+    # the step of the header (01 … 13) in which each caption of CAPTIONS begins: one in each of the steps 1 to 8 but
+    # two in step 3, seven in step 9 (the first merge of level 1), two in step 10, one in step 11, five in step 12
+    # (the final merge) and one in step 13:
+    CAPTION_STEPS: list[int] = (
+        [1, 2, 3, 3, 4, 5, 6, 7, 8] + [9] * 7 + [10, 10, 11] + [12] * 5 + [13]
+    )
 
     def open_at(self, query: str) -> tuple[OpenedPage, dict[str, str]]:
         """Opens the page with the given URL parameters, waits until it is ready and reads the stage's data-*
@@ -5019,6 +5157,30 @@ class ExternalSortingPageTest(_PageTestCase):
         )
         return opened, attributes
 
+    def open_controls(self, query: str = "?paused") -> OpenedPage:
+        """Opens the page with the given URL parameters and waits only until it has set up its controls, not until it
+        has prepared its GPU programs (see open_at): for tests of the header, the narration, the controls and the end
+        card, which the page shows without drawing the scene. The page sets up its controls at the end of its
+        start-up, after its own checks and after writing ``data-made``.
+
+        @param query: e.g. ``?paused`` for the start of the film
+        @return: the opened page, which has had no errors so far
+        """
+        opened: OpenedPage = self.open_page(EXTERNAL_SORTING_PAGE, query=query)
+
+        # the page has made its film and set up its controls; if a check of its start-up throws, the page's own error
+        # is reported, not a timeout:
+        try:
+            expect(opened.page.get_by_test_id("stage")).to_have_attribute(
+                "data-made", re.compile("."), timeout=FILM_TIMEOUT
+            )
+            expect(opened.page.get_by_test_id("play")).to_be_enabled()
+        except AssertionError:
+            self.assert_no_errors(opened)
+            raise
+        self.assert_no_errors(opened)
+        return opened
+
     def stages_from(
         self, opened: OpenedPage, step: float, until: str
     ) -> list[dict[str, str]]:
@@ -5036,8 +5198,8 @@ class ExternalSortingPageTest(_PageTestCase):
         @param step: the time between two readings (s)
         @param until: the phase to stop at, e.g. ``benchMove``: the sweep ends with the first reading that shows it
         @return: the stage's attributes after each move (without ``data-``, e.g. ``heap``; all but ``made``, which the
-            page writes once at start-up and which is long), in order; the first one step after the time the page
-            showed
+            page writes once at start-up and which is long), with the words of the caption shown (``words``) and how
+            many of them the voice has said (``said``), in order; the first one step after the time the page showed
         """
         stage = opened.page.get_by_test_id("stage")
         start: float = float(stage.get_attribute("data-t") or "")
@@ -5045,16 +5207,19 @@ class ExternalSortingPageTest(_PageTestCase):
 
         # from the page's time on, step by step, until the phase until (in the browser, without a round trip per step):
         stages: list[dict[str, str]] = opened.page.get_by_test_id("scrub").evaluate(
-            """async (scrub, [stage, start, step, until]) => {
+            """async (scrub, [stage, narration, start, step, until]) => {
                 const frame = () => new Promise((resolve) => requestAnimationFrame(() => resolve()));
                 const duration = Number(stage.dataset.duration), stages = [];
                 scrub.step = 'any';
                 for (let k = 1; start + k * step <= duration; k += 1) {
                     scrub.value = String(((start + k * step) / duration) * Number(scrub.max));
                     scrub.dispatchEvent(new Event('input', { bubbles: true }));
-                    stages.push(Object.fromEntries([...stage.attributes]
-                        .filter((a) => a.name.startsWith('data-') && a.name !== 'data-made')
-                        .map((a) => [a.name.slice('data-'.length), a.value])));
+                    stages.push({
+                        ...Object.fromEntries([...stage.attributes]
+                            .filter((a) => a.name.startsWith('data-') && a.name !== 'data-made')
+                            .map((a) => [a.name.slice('data-'.length), a.value])),
+                        words: narration.textContent.trim(), said: narration.dataset.wordsSaid,
+                    });
                     if (stage.dataset.phase === until) break;
                     if (k % 25 === 0) await frame();
                 }
@@ -5062,7 +5227,13 @@ class ExternalSortingPageTest(_PageTestCase):
                 await frame();
                 return stages;
             }""",
-            [stage.element_handle(), start, step, until],
+            [
+                stage.element_handle(),
+                opened.page.get_by_test_id("narration").element_handle(),
+                start,
+                step,
+                until,
+            ],
         )
 
         # the stage showed each time, and the sweep ended in the phase until:
@@ -5163,26 +5334,27 @@ class ExternalSortingPageTest(_PageTestCase):
         self.assert_no_errors(opened)
 
     def test_in_pass_0_pages_are_read_before_any_is_written(self) -> None:
-        """40 s into the film, while pass 0 loads its first 4 pages onto the bench, the counter shows 3 pages read and
-        none written, in the header and on the stage: pass 0 begins 31 s into the film and sends a page of R every 4
-        s, and a page counts as read once it sets out, so the third, which set out at 39 s, is counted while it rides.
+        """47.5 s into the film, while pass 0 loads its first 4 pages onto the bench, the counter shows 3 pages read
+        and none written, in the header and on the stage: pass 0 begins 38.5 s into the film (after the opening, whose
+        scenes last as long as the voice speaks) and sends a page of R every 4 s, and a page counts as read once it
+        sets out, so the third, which set out at 46.5 s, is counted while it rides.
 
         Fails if the page counts a page as written before pass 0 has sorted its first load, or as read only once it
         has arrived on the bench (the counter would show 2), or counts a page twice.
         """
-        opened, stage = self.open_at("?t=40&paused")
+        opened, stage = self.open_at("?t=47.5&paused")
         page: Page = opened.page
 
         # the moment lies in pass 0, while pages of R ride onto the bench:
         self.assertEqual(
             ("read", "0"),
             (stage["phase"], stage["level"]),
-            "40 s into the film, pass 0 no longer loads its first pages",
+            "47.5 s into the film, pass 0 no longer loads its first pages",
         )
 
         # 3 pages read, none written:
-        self.assertEqual("3", stage["reads"], "pages read 40 s into the film")
-        self.assertEqual("0", stage["writes"], "pages written 40 s into the film")
+        self.assertEqual("3", stage["reads"], "pages read 47.5 s into the film")
+        self.assertEqual("0", stage["writes"], "pages written 47.5 s into the film")
 
         # the header shows the same:
         expect(page.get_by_test_id("reads")).to_have_text("3")
@@ -5563,6 +5735,502 @@ class ExternalSortingPageTest(_PageTestCase):
         self.assertGreater(float(stage.get_attribute("data-t") or ""), 101)
         self.assert_no_errors(opened)
 
+    def read_stops(self, opened: OpenedPage) -> list[dict[str, str]]:
+        """Clicks Next on an opened page until its film has ended, and reads after each click where Next stopped: the
+        stage's data-* attributes (without ``data-``; all but ``made``), the words of the caption shown (``words``) and
+        how many of them the voice has said (``said``). All in one call into the page, which shows a stop at once.
+
+        With sound off, Next stops where a caption is shown in full; while the voice may speak, where a caption begins.
+
+        @param opened: the page, opened paused
+        @return: the readings, one per click, the last one at the end of the film
+        """
+        page: Page = opened.page
+        stops: list[dict[str, str]] = page.get_by_test_id("next").evaluate(
+            """(next, [stage, narration, play, limit]) => {
+                const stops = [];
+                while (play.dataset.state !== 'ended' && stops.length < limit) {
+                    next.click();
+                    const { made, ...shown } = stage.dataset;
+                    stops.push({ ...shown, words: narration.textContent.trim(), said: narration.dataset.wordsSaid });
+                }
+                return stops;
+            }""",
+            [
+                page.get_by_test_id("stage").element_handle(),
+                page.get_by_test_id("narration").element_handle(),
+                page.get_by_test_id("play").element_handle(),
+                MAX_NEXT_CLICKS,
+            ],
+        )
+
+        # Next has led to the end of the film:
+        expect(page.get_by_test_id("play")).to_have_attribute("data-state", "ended")
+        return stops
+
+    def test_the_narration_is_its_25_captions_in_order(self) -> None:
+        """With sound off, Next stops once per caption, where the caption is shown in full, and then at the end of the
+        film: the narration is the 25 captions of CAPTIONS, in their order, and at each stop the voice has said every
+        word of its caption (the words light up as the voice says them, also with sound off).
+
+        Fails if a caption is missing or added, says other words than CAPTIONS (the voice's clips are made for these
+        texts, and the page checks that each clip belongs to its caption), if two captions change places, or if Next
+        stops before the voice has said a caption in full.
+        """
+        opened: OpenedPage = self.open_controls()
+        stops: list[dict[str, str]] = self.read_stops(opened)
+        captions: list[dict[str, str]] = stops[:-1]
+
+        # 25 captions, in their order:
+        self.assertEqual(25, len(captions), "captions")
+        self.assertEqual(self.CAPTIONS, [stop["words"] for stop in captions])
+
+        # each said in full where Next stops:
+        for n, stop in enumerate(captions, 1):
+            self.assertEqual(
+                str(len(stop["words"].split(" "))), stop["said"], f"caption {n}"
+            )
+        self.assert_no_errors(opened)
+
+    def test_each_caption_begins_in_the_step_it_tells_of(self) -> None:
+        """With sound on, Next stops where each caption begins, before the voice has said a word of it: each caption
+        begins in its step of the header (CAPTION_STEPS), and those that tell of a moment begin as it comes, each in
+        the one step that goes at real speed for it: "The output page is full" (caption 14) as merge level 1's first
+        output page leaves for Run 10 (``swapOut``), "An input page is used up" (15) as its first input page used up
+        goes to the depot (``swapIn``), and "Each full page goes straight on to the query" (21) as the final merge's
+        first output page leaves for the query (``swapOut`` at level 2). The three captions after it begin in the final
+        merge's fast forward, and the last one in the last step (``end``).
+
+        Fails if a caption begins in another step, e.g. tells of a page leaving before the page is full (in the steps
+        that fill it), or of a step that is over.
+        """
+        opened: OpenedPage = self.open_controls()
+        page: Page = opened.page
+
+        # the sound on, so that Next stops where a caption begins (the voice may speak, the narration is not shown):
+        page.get_by_test_id("sound").click()
+        expect(page.get_by_test_id("narration")).to_have_attribute("data-voiced", "")
+        stops: list[dict[str, str]] = self.read_stops(opened)
+        expect(page.get_by_test_id("narration")).to_have_attribute("data-voiced", "")
+        starts: list[dict[str, str]] = stops[:-1]
+
+        # one stop where each caption begins, none of its words said yet, then the end:
+        self.assertEqual(self.CAPTIONS, [stop["words"] for stop in starts])
+        self.assertEqual(["0"] * len(starts), [stop["said"] for stop in starts])
+
+        # each caption begins in its step of the header:
+        self.assertEqual(self.CAPTION_STEPS, [int(stop["scene"]) for stop in starts])
+
+        # captions 14, 15 and 21 begin in the steps they tell of (phase, level, speed: real speed only there):
+        moments: dict[int, tuple[str, str, str]] = {
+            14: ("swapOut", "1", "1"),
+            15: ("swapIn", "1", "1"),
+            21: ("swapOut", "2", "1"),
+        }
+        for caption, moment in moments.items():
+            stop: dict[str, str] = starts[caption - 1]
+            self.assertEqual(
+                moment,
+                (stop["phase"], stop["level"], stop["speed"]),
+                f"caption {caption}, at {stop['t']} s",
+            )
+
+        # captions 22 to 24 in the final merge's fast forward, the last one in the last step:
+        for caption in (22, 23, 24):
+            stop = starts[caption - 1]
+            at: str = f"caption {caption}, at {stop['t']} s"
+            self.assertEqual("2", stop["level"], at)
+            self.assertGreater(float(stop["speed"]), 1, at)
+        self.assertEqual("end", starts[24]["phase"])
+        self.assert_no_errors(opened)
+
+    def test_the_voice_has_said_the_caption_before_a_part_begins(self) -> None:
+        """Where parts 2, 3 and 4 begin, as their buttons jump there, the voice has said every word of the caption
+        before: a jump to a part with sound on does not begin in the middle of a sentence. The narration is read in the
+        same step as the click on the part's button.
+
+        Fails if a caption is still being said as a part begins, e.g. one that begins too late in the part before for
+        its words to fit.
+        """
+        opened: OpenedPage = self.open_controls()
+        page: Page = opened.page
+
+        # each part button jumps to its part's start and plays from there; the narration is read at once, then the
+        # film is paused again:
+        readings: list[dict[str, str]] = page.get_by_test_id("play").evaluate(
+            """(play, [stage, narration, buttons]) => buttons.map((button) => {
+                button.click();
+                const reading = { t: stage.dataset.t, words: narration.textContent.trim(),
+                    said: narration.dataset.wordsSaid };
+                play.click();
+                return reading;
+            })""",
+            [
+                page.get_by_test_id("stage").element_handle(),
+                page.get_by_test_id("narration").element_handle(),
+                [
+                    page.get_by_test_id(f"chapter-{part}").element_handle()
+                    for part in (2, 3, 4)
+                ],
+            ],
+        )
+
+        # as each part begins, the caption before it has been said in full:
+        for part, reading in zip((2, 3, 4), readings, strict=True):
+            at: str = f"part {part}, at {reading['t']} s"
+            words: list[str] = reading["words"].split(" ")
+            self.assertGreater(len(words), 1, f"{at}: no caption before it")
+            self.assertEqual(str(len(words)), reading["said"], at)
+        self.assert_no_errors(opened)
+
+    def test_what_the_voice_names_lights_up_while_it_says_it(self) -> None:
+        """While the voice names a thing in the picture, the stage names it as lit (``data-highlight``, separated by
+        ``|``; the times are the clips' word times, so the same with sound off), each for one short stretch (at most
+        ``LIT_AT_MOST`` s) per phrase that names it, in the step of that phrase:
+
+        - the workbench in step 4 (pass 0's first load: "Main memory is a workbench …");
+        - the counter of pages read and written in step 7 (pass 0's eight more loads: "Every page was read once and
+          written once"), in step 10 (merge level 1's two more merges: "the counter shows 72 reads and 72 writes")
+          and in step 13, the last ("The bill"), from the word "108" on ("108 reads and 72 writes"), outlined in green
+          exactly while it is lit;
+        - the heap stand, its root and the depot one after the other in step 9 (the first merge of level 1), the heap
+          and its root while the heap is filled (``hInit``).
+
+        Each stretch is tied to the words of its phrase, as the narration counts them (``data-words-said``): it begins
+        in the caption that says the phrase, as the voice reaches it (read again 0.2 s after its first reading, the
+        voice has said every word before the phrase: a frame fades in from 0.15 s before the phrase's first word), the
+        counter's outline only once the voice has begun the phrase; and it lasts until the voice has said the phrase in
+        full.
+
+        The film is read every 0.5 s from its start to the bench's first drive and through the last step, and every
+        0.8 s from part 3 on (merge_stages). The frames in the scene are checked by their names only, not by whether or
+        where they are drawn (as on the storage hierarchy page).
+
+        Fails if something lights up in another step than the phrase that names it, for longer or more often, never,
+        or out of order; if anything else lights up; if something lights up before the voice reaches its phrase or
+        goes dark before the voice has said it, e.g. a frame whose times come from another caption or word; if the
+        counter is lit at the end before the voice says "108"; or if its outline shows while it is not lit, or not
+        while it is.
+        """
+        # from the start to the bench's first drive:
+        opened, _ = self.open_at("?paused")
+        early: list[dict[str, str]] = self.stages_from(opened, 0.5, "benchMove")
+        merges: list[dict[str, str]] = self.merge_stages()
+
+        # the last step, every 0.5 s from where the merges' readings end to the end of the film (in one call into the
+        # page, on the page opened above), with the counter's outline as drawn and the words of the caption said:
+        last_step: list[dict[str, str]] = opened.page.get_by_test_id("scrub").evaluate(
+            """(scrub, [stage, counter, narration, start]) => {
+                const duration = Number(stage.dataset.duration), readings = [];
+                scrub.step = 'any';
+                for (let t = start + 0.5; t <= duration; t += 0.5) {
+                    scrub.value = String((t / duration) * Number(scrub.max));
+                    scrub.dispatchEvent(new Event('input', { bubbles: true }));
+                    // (without data-made, which the page writes once at start-up and which is long)
+                    const { made, ...shown } = stage.dataset;
+                    readings.push({ ...shown, outline: getComputedStyle(counter).outlineStyle,
+                        said: narration.dataset.wordsSaid, words: narration.textContent.trim() });
+                }
+                return readings;
+            }""",
+            [
+                opened.page.get_by_test_id("stage").element_handle(),
+                opened.page.get_by_test_id("counter").element_handle(),
+                opened.page.get_by_test_id("narration").element_handle(),
+                float(merges[-1]["t"]),
+            ],
+        )
+        self.assert_no_errors(opened)
+
+        def lit(reading: dict[str, str]) -> set[str]:
+            """Returns what is lit at a reading."""
+            return set(filter(None, reading["highlight"].split("|")))
+
+        def lit_stretches(name: str) -> list[list[dict[str, str]]]:
+            """Returns each stretch of readings in a row (within one sweep) at which name is lit."""
+            stretches: list[list[dict[str, str]]] = []
+            for sweep in (early, merges, last_step):
+                for is_lit, stretch in groupby(sweep, key=lambda r: name in lit(r)):
+                    if is_lit:
+                        stretches.append(list(stretch))
+            return stretches
+
+        readings: list[dict[str, str]] = early + merges + last_step
+
+        # each thing lights up only in the steps whose words name it, and nothing else lights up:
+        expected: dict[str, set[str]] = {
+            "workbench": {"4"},
+            "counter": {"7", "10", "13"},
+            "heap": {"9"},
+            "root": {"9"},
+            "depot": {"9"},
+        }
+        for name, steps in expected.items():
+            self.assertEqual(
+                steps,
+                {reading["scene"] for reading in readings if name in lit(reading)},
+                f"the steps in which the {name} is lit",
+            )
+        self.assertEqual(
+            set(expected),
+            set().union(*(lit(reading) for reading in readings)),
+            "what lights up",
+        )
+
+        # once per phrase that names it (the counter three times), each time for one short stretch of readings in a row:
+        for name, steps in expected.items():
+            stretches: list[list[dict[str, str]]] = lit_stretches(name)
+            self.assertEqual(
+                len(steps), len(stretches), f"how often the {name} lights up"
+            )
+            for stretch in stretches:
+                self.assertLessEqual(
+                    float(stretch[-1]["t"]) - float(stretch[0]["t"]),
+                    self.LIT_AT_MOST,
+                    f"the {name} lit from {stretch[0]['t']} s",
+                )
+
+        # in step 9 one after the other: the heap, its root, the depot; the heap and its root while it is filled:
+        firsts: list[int] = [
+            next(i for i, reading in enumerate(readings) if name in lit(reading))
+            for name in ("heap", "root", "depot")
+        ]
+        self.assertLess(firsts[0], firsts[1], "the root lights up before the heap")
+        self.assertLess(firsts[1], firsts[2], "the depot lights up before the root")
+        for reading in readings:
+            if lit(reading) & {"heap", "root"}:
+                self.assertEqual("hInit", reading["phase"], f"at {reading['t']} s")
+
+        # in the last step, the counter is lit from the word "108" on, and outlined exactly while it is lit:
+        self.assertTrue(any("counter" in lit(reading) for reading in last_step))
+        for reading in last_step:
+            at: str = f"at {reading['t']} s"
+            counter_lit: bool = "counter" in lit(reading)
+            self.assertEqual(counter_lit, reading["outline"] == "solid", at)
+            if counter_lit:
+                words_before: int = reading["words"].split(" ").index("108")
+                self.assertGreaterEqual(int(reading["said"]), words_before, at)
+
+        # the phrases that name each thing (their first and last word, as shown), in the order the voice says them:
+        phrases: dict[str, list[tuple[str, str]]] = {
+            "workbench": [("workbench", "pages.")],
+            "counter": [("Every", "once."), ("counter", "writes:"), ("108", "writes.")],
+            "heap": [("heap", "three.")],
+            "root": [("root,", "top,")],
+            "depot": [("depot,", "depot,")],
+        }
+        stretches_of: dict[str, list[list[dict[str, str]]]] = {
+            name: lit_stretches(name) for name in phrases
+        }
+
+        # the narration 0.2 s after the first reading of each stretch, read again on the page opened above:
+        soon: float = 0.2
+        soon_after: list[dict[str, str]] = opened.page.get_by_test_id("scrub").evaluate(
+            """(scrub, [stage, narration, times]) => {
+                scrub.step = 'any';
+                return times.map((t) => {
+                    scrub.value = String((t / Number(stage.dataset.duration)) * Number(scrub.max));
+                    scrub.dispatchEvent(new Event('input', { bubbles: true }));
+                    return { t: stage.dataset.t, words: narration.textContent.trim(), said: narration.dataset.wordsSaid };
+                });
+            }""",
+            [
+                opened.page.get_by_test_id("stage").element_handle(),
+                opened.page.get_by_test_id("narration").element_handle(),
+                [
+                    float(stretch[0]["t"]) + soon
+                    for name in phrases
+                    for stretch in stretches_of[name]
+                ],
+            ],
+        )
+        self.assert_no_errors(opened)
+
+        # each stretch is tied to the words of its phrase:
+        later: Iterator[dict[str, str]] = iter(soon_after)
+        for name, named_by in phrases.items():
+            for (first, last), stretch in zip(
+                named_by, stretches_of[name], strict=True
+            ):
+                start: dict[str, str] = stretch[0]
+                at = f"the {name} lit from {start['t']} s"
+
+                # it lights up in the caption that says its phrase:
+                words: list[str] = start["words"].split(" ")
+                self.assertIn(first, words, at)
+                i: int = words.index(first)
+                self.assertIn(last, words[i:], at)
+                j: int = words.index(last, i)
+
+                # as the voice reaches the phrase: 0.2 s later, it has said every word before it:
+                reading_soon: dict[str, str] = next(later)
+                self.assertEqual(start["words"], reading_soon["words"], at)
+                self.assertGreaterEqual(int(reading_soon["said"]), i, at)
+
+                # the counter's outline shows only once the voice has begun the phrase:
+                in_caption: list[dict[str, str]] = [
+                    reading for reading in stretch if reading["words"] == start["words"]
+                ]
+                if name == "counter":
+                    for reading in in_caption:
+                        self.assertGreaterEqual(int(reading["said"]), i, at)
+
+                # it stays lit until the voice has said the phrase in full:
+                self.assertGreater(
+                    max(int(reading["said"]) for reading in in_caption), j, at
+                )
+
+    def test_a_part_shows_its_name_top_left_as_it_begins(self) -> None:
+        """As each part begins, its number and name show top left (``part-title``) for about 9 s, fading in and out:
+        "Part 1 · The table" at the start of the film, then "Part 2 · Pass 0", "Part 3 · Merge level 1" and "Part 4 ·
+        Final merge", each the name on its part button; before a part begins and from 9 s after, the title is hidden.
+
+        Each part's start comes from the slider, whose segments are as long as the parts (``flex-grow``). The film is
+        read 0.3 s before each start, at 0.3, 2, 5, 8 and 8.6 s after it, where the title shows the part (it fades in
+        and out in 0.4 s), and at 9.3 and 11 s after it, where it is hidden. A few readings only: each reading draws a
+        frame, and a long sweep would keep the browser busy into the next test.
+
+        Fails if a part shows another part's name or a name other than its button's, if the title does not show as a
+        part begins or still shows 9.3 s after, or if ``data-shown`` and its opacity disagree.
+        """
+        names: dict[int, str] = {
+            1: "The table",
+            2: "Pass 0",
+            3: "Merge level 1",
+            4: "Final merge",
+        }
+        opened = self.open_controls()
+        page: Page = opened.page
+        for part, name in names.items():
+            expect(page.get_by_test_id(f"chapter-{part}")).to_have_text(
+                f"{part} · {name}"
+            )
+        readings: list[dict[str, str | float | int]] = page.get_by_test_id(
+            "scrub"
+        ).evaluate(
+            """(scrub, [stage, title, number, name, segments]) => {
+                const duration = Number(stage.dataset.duration);
+                const lengths = [...segments.children].map((segment) => parseFloat(segment.style.flexGrow));
+                const readings = [];
+                scrub.step = 'any';
+                lengths.forEach((_, i) => {
+                    const start = lengths.slice(0, i).reduce((sum, length) => sum + length, 0);
+                    for (const after of [-0.3, 0.3, 2, 5, 8, 8.6, 9.3, 11]) {
+                        if (start + after < 0) continue;
+                        scrub.value = String(((start + after) / duration) * Number(scrub.max));
+                        scrub.dispatchEvent(new Event('input', { bubbles: true }));
+                        readings.push({ part: i + 1, after, t: Number(stage.dataset.t), shownPart: title.dataset.part,
+                            shown: title.dataset.shown, opacity: Number(getComputedStyle(title).opacity),
+                            text: `${number.textContent} · ${name.textContent}` });
+                    }
+                });
+                return readings;
+            }""",
+            [
+                page.get_by_test_id("stage").element_handle(),
+                page.get_by_test_id("part-title").element_handle(),
+                page.get_by_test_id("part-number").element_handle(),
+                page.get_by_test_id("part-name").element_handle(),
+                page.get_by_test_id("segments").element_handle(),
+            ],
+        )
+        self.assert_no_errors(opened)
+
+        # four parts, each read 8 times (the first one not before its start):
+        self.assertEqual(
+            [1] * 7 + [2] * 8 + [3] * 8 + [4] * 8, [r["part"] for r in readings]
+        )
+        for reading in readings:
+            part, after = int(reading["part"]), float(reading["after"])
+            at: str = f"part {part}, {after} s after its start, at {reading['t']} s"
+            # before the start, the title names the part before, and is hidden:
+            shown_part: int = part - 1 if after < 0 else part
+            self.assertEqual(str(shown_part), reading["shownPart"], at)
+            self.assertEqual(
+                f"Part {shown_part} · {names[shown_part]}", reading["text"], at
+            )
+            self.assertEqual(0 < after < 9, reading["shown"] == "true", at)
+            self.assertEqual(
+                reading["shown"] == "true", float(reading["opacity"]) > 0.5, at
+            )
+
+    def test_the_end_card_names_the_voice(self) -> None:
+        """The last line of the end card, the credit, ends by saying that the voice is synthetic and naming its model
+        and voice."""
+        voice_named: str = "The voice is synthetic: Ming-3.0 TTS, voice UK_George."
+        opened: OpenedPage = self.open_controls()
+        page: Page = opened.page
+
+        # at the end, the end card shows, and its credit ends with the voice's (read as shown, so that the line breaks
+        # of the HTML count as spaces):
+        page.get_by_test_id("scrub").fill("1000")
+        expect(page.get_by_test_id("legend")).to_have_css("opacity", "1")
+        expect(page.get_by_test_id("credit")).to_have_text(
+            re.compile(re.escape(voice_named) + "$"), use_inner_text=True
+        )
+        self.assert_no_errors(opened)
+
+    def test_the_sound_hint_gives_way_to_the_end_card(self) -> None:
+        """With sound off, the hint "Switch on audio (M)" fades out while the end card fades in, which it would cover on
+        a narrow window, and shows again before it."""
+        opened: OpenedPage = self.open_controls()
+        page: Page = opened.page
+        hint = page.get_by_test_id("sound-hint")
+        scrub = page.get_by_test_id("scrub")
+
+        # at the start, the hint shows in full:
+        expect(hint).to_have_text("Switch on audio (M)")
+        expect(hint).to_have_css("opacity", "1")
+
+        # at the end, where the end card shows, the hint has faded out:
+        scrub.fill("1000")
+        expect(page.get_by_test_id("legend")).to_have_css("opacity", "1")
+        expect(hint).to_have_css("opacity", "0")
+
+        # back at the start, it shows again:
+        scrub.fill("0")
+        expect(hint).to_have_css("opacity", "1")
+        self.assert_no_errors(opened)
+
+    def test_the_page_stops_if_a_clip_of_its_voice_does_not_belong_to_its_caption(
+        self,
+    ) -> None:
+        """At start-up, the page checks that each clip of its voice belongs to its caption: a copy whose first clip was
+        made for another text stops with an error that says so, whereas the page itself passes the check.
+
+        The clips are matched to the captions by their order, as on the Yannakakis page, so a voice built for other
+        captions would otherwise speak the wrong words; with the error, the page fails its tests instead.
+        """
+        # the page itself passes the check: it sets up its controls, which comes after the check, without an error
+        # (open_controls waits for them):
+        opened: OpenedPage = self.open_controls()
+        page: Page = opened.page
+
+        # a copy whose voice notes another text for its first clip than the first caption's, loaded into the same tab
+        # (the class opens only its own page) after an empty page, so that it starts with globals of its own (the
+        # page's clips are a global constant), with the errors recorded so far cleared:
+        html: str = EXTERNAL_SORTING_PAGE.read_text(encoding="utf-8")
+        first_clip: str = 'const VOICE = [{"text": "'
+        self.assertEqual(1, html.count(first_clip), "the page's voice was not found")
+        page.goto("about:blank")
+        opened.errors.clear()
+        page.set_content(html.replace(first_clip, first_clip + "Once more: "))
+
+        # the copy throws the error once it has loaded its fonts and built its scene; the error is recorded as soon as
+        # Playwright has handled it. The copy requests nothing but local files:
+        error: str = (
+            "uncaught: the voice does not match caption 1: rebuild it with voice.py"
+        )
+        for _ in range(FILM_TIMEOUT // 100):
+            if error in opened.errors:
+                break
+            page.wait_for_timeout(100)
+        self.assertEqual([error], opened.errors)
+        self.assertEqual([], opened.outside_requests)
+
+        # the copy stops there: it never sets up its controls, so Play stays disabled, as the HTML writes it:
+        expect(page.get_by_test_id("play")).to_be_disabled()
+
 
 @unittest.skipUnless(PLAYWRIGHT_AVAILABLE, SKIP_REASON)
 class ElasticityPageTest(_PageTestCase):
@@ -5731,15 +6399,24 @@ class JobShareTest(unittest.TestCase):
     The tests that read the variable set it themselves, as they also run inside a CI job, where it is set.
     """
 
-    # made-up pages, which need not exist, in no particular order; three of the five have a sound button:
+    # made-up pages, which need not exist, in no particular order; three of the five have a sound button; their sizes
+    # in bytes, made up as well, so that neither group's order by size is that by path:
     PAGES: list[Path] = [Path(f"v/{name}.html") for name in "eabdc"]
     WITH_SOUND: frozenset[Path] = frozenset(Path(f"v/{name}.html") for name in "bde")
+    SIZES: dict[Path, int] = {
+        Path(f"v/{name}.html"): size
+        for name, size in {"b": 200, "d": 300, "e": 100, "a": 10, "c": 20}.items()
+    }
 
     def shares(self, total: int) -> list[list[Path]]:
         """Returns the made-up pages of each of total jobs, from job 1 on."""
         return [
             pages_of_job(
-                self.PAGES, index, total, sound=lambda path: path in self.WITH_SOUND
+                self.PAGES,
+                index,
+                total,
+                sound=lambda path: path in self.WITH_SOUND,
+                size=self.SIZES.__getitem__,
             )
             for index in range(1, total + 1)
         ]
@@ -5790,9 +6467,13 @@ class JobShareTest(unittest.TestCase):
                 self.assertIn(repr(value), str(raised.exception))
 
     def test_one_job_tests_the_pages_with_sound_first(self) -> None:
-        """A single job tests all pages: those with sound first, then the others, each sorted by path."""
+        """A single job tests all pages: those with sound first, then the others, each sorted by size, largest first
+        (d 300, b 200, e 100 with sound; c 20, a 10).
+
+        Would fail if a group were sorted by path (b, d, e and a, c) or by size the other way round.
+        """
         b, d, e, a, c = (Path(f"v/{name}.html") for name in "bdeac")
-        self.assertEqual([[b, d, e, a, c]], self.shares(1))
+        self.assertEqual([[d, b, e, c, a]], self.shares(1))
 
     def test_each_page_is_tested_in_exactly_one_job(self) -> None:
         """For any number of jobs up to the number of pages, each page is in exactly one job, and no job is empty."""
@@ -5808,15 +6489,26 @@ class JobShareTest(unittest.TestCase):
     def test_three_jobs_get_one_page_with_sound_each(self) -> None:
         """With three jobs and three pages with sound among five, each job gets one page with sound.
 
-        In the order b, d, e (with sound), a, c, page k goes to job k mod 3 + 1; sorted by path alone, job 2 would get
-        b and e, and job 3 no page with sound.
+        In the order d, b, e (with sound, largest first), c, a, page k goes to job k mod 3 + 1; sorted by path alone,
+        job 2 would get b and e, and job 3 no page with sound.
         """
         b, d, e, a, c = (Path(f"v/{name}.html") for name in "bdeac")
         shares: list[list[Path]] = self.shares(3)
-        self.assertEqual([[b, a], [d, c], [e]], shares)
+        self.assertEqual([[d, c], [b, a], [e]], shares)
         self.assertEqual(
             [1, 1, 1], [len(self.WITH_SOUND.intersection(share)) for share in shares]
         )
+
+    def test_the_largest_pages_with_sound_go_to_different_jobs(self) -> None:
+        """Among the pages of visualizations/, the CI_JOBS largest pages with sound, whose tests take longest, are
+        tested in CI_JOBS different jobs.
+
+        Would fail if the pages with sound were spread by path again: then b-tree, external-sorting and yannakakis
+        went to the same job of three, which ran over the CI job's time limit of 10 minutes (merge request !289).
+        """
+        with_sound: list[Path] = [page for page in find_pages() if has_sound(page)]
+        largest: list[Path] = sorted(with_sound, key=file_size, reverse=True)[:CI_JOBS]
+        self.assertEqual(CI_JOBS, len({self.job_of(page, CI_JOBS) for page in largest}))
 
     def test_more_jobs_than_pages_is_an_error(self) -> None:
         """More jobs than pages, also one job for no page, is an error that names both, as a job would test no page."""

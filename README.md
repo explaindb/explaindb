@@ -161,7 +161,8 @@ External merge sort, seen from above, in the warehouse of the B-tree page: table
 memory. Pass 0 reads R four pages at a time, sorts them with quicksort and writes nine runs; merge level 1 merges them
 three at a time, with the merge's heap on a stand on the bench (one value per input run, the smallest at the root);
 the final merge streams its pages to the query: 108 page reads and 72 writes. The runs and the merge groups are those
-of the repository's `ExternalMergeSort` (in 3D, with three.js).
+of the repository's `ExternalMergeSort` (in 3D, with three.js; a synthetic voice speaks the narration once the sound is
+switched on).
 
 Notebook: [External-Merge-Sort](notebooks/External-Merge-Sort.ipynb)
 [![Open External-Merge-Sort on Binder](https://mybinder.org/badge_logo.svg)](https://mybinder.org/v2/gh/explaindb/explaindb/main?urlpath=lab/tree/notebooks/External-Merge-Sort.ipynb)
@@ -299,8 +300,8 @@ The pages `visualizations/row-or-column.html`, `visualizations/call-through-dbms
 `visualizations/clock-scan.html`, `visualizations/yannakakis.html`, `visualizations/b-tree.html`,
 `visualizations/storage-hierarchy.html` and `visualizations/external-sorting.html` also embed third-party code and fonts
 under their own licenses: three.js (MIT License) and the fonts Archivo and JetBrains Mono (SIL Open Font License 1.1).
-Each page gives their copyright and license notices. All of them but `visualizations/external-sorting.html` also embed
-a synthetic voice, spoken with the model Ming-3.0-tts (MIT License, voice UK_George); each page names it.
+Each page gives their copyright and license notices. All seven pages also embed a synthetic voice, spoken with the model
+Ming-3.0-tts (MIT License, voice UK_George); each page names it.
 `visualizations/storage-hierarchy.html` also embeds map data from Natural Earth (public domain).
 
 ## Contributors

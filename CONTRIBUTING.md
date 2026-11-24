@@ -343,8 +343,10 @@ a few seconds of it, the second within about ten seconds of the first, and the c
 lasts more than 1.5 s (`test_a_jump_back_drops_the_clip`); the film lasts at most about four minutes. A
 longer film, or a later second caption, needs a faster runner: the B-tree page (6:23, its second caption
 after 13.4 s) is such an exception, which passed the shared sound tests in CI (see
-[`docs/changes/040-b-tree`](docs/changes/040-b-tree/DECISION.md)). The other rules are checked by the author
-and the reviewers.
+[`docs/changes/040-b-tree`](docs/changes/040-b-tree/DECISION.md)). The external sorting page (6:03, its
+second caption after 10.7 s) is another (see
+[`docs/changes/046-external-sorting`](docs/changes/046-external-sorting/DECISION.md)). The other rules are
+checked by the author and the reviewers.
 
 The words used here: a page plays a *film* from its start to its end. A longer film is cut into
 *parts*, e.g. the four orders (queries) of the House DBMS page; the test ids of the part buttons call
