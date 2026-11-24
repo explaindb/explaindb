@@ -491,23 +491,75 @@ class SiftDownAndBulkLoadTest(unittest.TestCase):
                 sift_down(heap, 0)
                 self.assertEqual(heap, expected)
 
-    def test_bulkload_of_the_slides_lists(self) -> None:
-        """bulkload turns the first four elements of the slide input into the heap [10, 20, 30, 40] and leaves the
-        list [16, 26, 33, 50] of run 1 as it is.
+    def test_sift_down_looks_at_the_first_size_places_only(self) -> None:
+        """With ``size``, sift_down treats the first ``size`` places as the heap and does not look at the places
+        behind them, which may hold smaller elements or None for an empty place. Worked out by hand:
 
-        The inner nodes of four elements are positions 1 and 0, sifted in this order. In [30, 20, 10, 40], 20 stays
-        above its child 40, then 30 swaps with 10, the smaller of 20 and 10, and lands on a leaf. In
-        [16, 26, 33, 50], 26 is smaller than 50 and 16 smaller than 26 and 33: nothing moves.
+        - [50, 30, 40, 10] with size 3: 50 swaps with 30, the smaller of 30 and 40, and stops at position 1, as its
+          child position 3 is not part of the heap: [30, 50, 40, 10]. Without size, 50 would also swap with 10;
+        - [73, 30, 40, None, None] with size 3: 73 swaps with 30 and stops: [30, 73, 40, None, None]. Without size,
+          sift_down would compare the two None places below position 1 and raise a TypeError;
+        - [5, 1] with size 1 (a heap of one element) and with size 0 (no heap): nothing moves. Without size, 5 would
+          swap with 1.
+        """
+        cases: list[tuple[list[int | None], int, list[int | None]]] = [
+            ([50, 30, 40, 10], 3, [30, 50, 40, 10]),
+            ([73, 30, 40, None, None], 3, [30, 73, 40, None, None]),
+            ([5, 1], 1, [5, 1]),
+            ([5, 1], 0, [5, 1]),
+        ]
+        for heap, size, expected in cases:
+            with self.subTest(heap=list(heap), size=size):
+                # move the root down within the first size places:
+                sift_down(heap, 0, size)
+                self.assertEqual(heap, expected)
+
+    def test_bulkload_of_the_slides_lists(self) -> None:
+        """bulkload turns the first four elements of the slide input into the heap [10, 20, 30, 40], and run 1's
+        list 50 33 26 16 (in memory order, newest element first) into the heap [16, 33, 26, 50].
+
+        Worked out by hand: the inner nodes of four elements are positions 1 and 0, sifted in this order. In
+        [30, 20, 10, 40], 20 stays above its child 40, then 30 swaps with 10, the smaller of 20 and 10, and lands on
+        a leaf. In [50, 33, 26, 16], 33 swaps with its child 16: [50, 16, 26, 33]; then 50 swaps with 16, the
+        smaller of 16 and 26, and once more with its child 33: [16, 33, 26, 50]. The slides draw run 1's heap as
+        16 26 33 50: no element is smaller than its parent, so bulkload leaves it as it is.
         """
         # the first M = 4 elements of the slide input:
         first_four: list[int] = list(SLIDE_INPUT[:4])
         bulkload(first_four)
         self.assertEqual(first_four, [10, 20, 30, 40])
 
-        # the list from which run 1's heap is bulk-loaded:
-        pending: list[int] = [16, 26, 33, 50]
+        # the list from which run 1's heap is bulk-loaded, newest element first:
+        pending: list[int] = [50, 33, 26, 16]
         bulkload(pending)
-        self.assertEqual(pending, [16, 26, 33, 50])
+        self.assertEqual(pending, [16, 33, 26, 50])
+
+        # the heap of run 1 as the slides draw it is a heap already and stays as it is:
+        slides_heap: list[int] = [16, 26, 33, 50]
+        bulkload(slides_heap)
+        self.assertEqual(slides_heap, [16, 26, 33, 50])
+
+    def test_bulkload_looks_at_the_first_size_places_only(self) -> None:
+        """With ``size``, bulkload turns the first ``size`` places into a heap and leaves the places behind them as
+        they are. Worked out by hand:
+
+        - [30, 20, 10, 40, 5] with size 4: the first four places become [10, 20, 30, 40] as in
+          test_bulkload_of_the_slides_lists, and 5 stays at position 4. Without size, 5 would move up to the root:
+          [5, 20, 10, 40, 30];
+        - [3, 2, 4, 1, None, None] with size 4 (a list moved to the front of memory, two empty places behind it):
+          2 swaps with its child 1: [3, 1, 4, 2]; then 3 swaps with 1, the smaller of 1 and 4, and once more with
+          its child 2: [1, 2, 4, 3, None, None]. Without size, bulkload would compare the None places and raise a
+          TypeError.
+        """
+        cases: list[tuple[list[int | None], int, list[int | None]]] = [
+            ([30, 20, 10, 40, 5], 4, [10, 20, 30, 40, 5]),
+            ([3, 2, 4, 1, None, None], 4, [1, 2, 4, 3, None, None]),
+        ]
+        for elements, size, expected in cases:
+            with self.subTest(elements=list(elements), size=size):
+                # turn the first size places into a heap:
+                bulkload(elements, size)
+                self.assertEqual(elements, expected)
 
     def test_bulkload_makes_a_heap_of_the_same_elements(self) -> None:
         """bulkload turns random lists of 1 to 64 elements into heaps that hold the same elements.
@@ -611,8 +663,9 @@ class ReplacementSelectionTest(unittest.TestCase):
         list into the heap, empties the list and counts up the run number.
 
         On the slide input with M = 4, after three outputs the heap is [30, 40, 73] and the list [16]. The sixth
-        output, 73, empties the heap; the list then holds 16 26 33 50, a heap as it is, and 16 is the first output
-        of run 1.
+        output, 73, empties the heap; the list then holds 50 33 26 16, newest element first, and the bulk load
+        makes the heap [16, 33, 26, 50] of run 1, whose first output is 16. These values are worked out by hand in
+        test_memory_on_the_slide_input and test_bulkload_of_the_slides_lists.
         """
         rs: ReplacementSelection[int] = ReplacementSelection[int](SLIDE_INPUT, 4)
 
@@ -623,14 +676,308 @@ class ReplacementSelectionTest(unittest.TestCase):
 
         # three more outputs empty the heap; the list holds the elements of the next run:
         self.assertEqual([next(rs) for _ in range(3)], [(0, 30), (0, 40), (0, 73)])
-        self.assertEqual((rs.heap, rs.pending, rs.run), ([], [16, 26, 33, 50], 0))
+        self.assertEqual((rs.heap, rs.pending, rs.run), ([], [50, 33, 26, 16], 0))
 
         # start_next_run() makes the list the heap of run 1:
         self.assertIs(rs.start_next_run(), True)
-        self.assertEqual((rs.heap, rs.pending, rs.run), ([16, 26, 33, 50], [], 1))
+        self.assertEqual((rs.heap, rs.pending, rs.run), ([16, 33, 26, 50], [], 1))
 
         # the next output is the root of the new heap, in run 1:
         self.assertEqual(next(rs), (1, 16))
+
+    def test_memory_on_the_slide_input(self) -> None:
+        """On the slide input with M = 4, main memory is one array of four places: the heap at the front (its first
+        heap_size places), the list behind it, newest element first. Worked out by hand ("|" marks the end of the
+        heap):
+
+        - the heap starts as [10, 20, 30, 40]; 25 and 73 are not smaller than the outputs 10 and 20 and take the
+          root's place: [20, 25, 30, 40], then [25, 40, 30, 73];
+        - output 25, 16 is smaller: the heap's last element 73 takes the root's place, the heap gives up place 3,
+          16 goes there, and 73 swaps with 30: [30, 40, 73 | 16];
+        - output 30, 26 is smaller: 73 takes the root's place, 26 place 2, and 73 swaps with 40: [40, 73 | 26, 16];
+        - output 40, 33 is smaller: 73 takes the root's place, 33 place 1: [73 | 33, 26, 16];
+        - output 73, 50 is smaller: 50 takes the place of the heap's only element, as the list's newest element:
+          [| 50, 33, 26, 16];
+        - start_next_run bulk-loads the list in place (see test_bulkload_of_the_slides_lists): [16, 33, 26, 50 |].
+        """
+        rs: ReplacementSelection[int] = ReplacementSelection[int](SLIDE_INPUT, 4)
+
+        # the bulk load of the first four elements starts run 0:
+        self.assertIs(rs.start_next_run(), True)
+        self.assertEqual((rs.memory, rs.heap_size), ([10, 20, 30, 40], 4))
+
+        # memory after each output of run 0; no place is empty, so heap and list are its two parts. Each row:
+        # (run, output), memory after it, heap_size:
+        steps: list[tuple[tuple[int, int], list[int], int]] = [
+            ((0, 10), [20, 25, 30, 40], 4),
+            ((0, 20), [25, 40, 30, 73], 4),
+            ((0, 25), [30, 40, 73, 16], 3),
+            ((0, 30), [40, 73, 26, 16], 2),
+            ((0, 40), [73, 33, 26, 16], 1),
+            ((0, 73), [50, 33, 26, 16], 0),
+        ]
+        for output, memory, heap_size in steps:
+            step: str = f"after output {output}"
+            self.assertEqual(next(rs), output, step)
+            self.assertEqual((rs.memory, rs.heap_size), (memory, heap_size), step)
+            self.assertEqual(
+                (rs.heap, rs.pending), (memory[:heap_size], memory[heap_size:]), step
+            )
+
+        # start_next_run bulk-loads the list in place into the heap of run 1:
+        self.assertIs(rs.start_next_run(), True)
+        self.assertEqual((rs.memory, rs.heap_size), ([16, 33, 26, 50], 4))
+        self.assertEqual((rs.heap, rs.pending), ([16, 33, 26, 50], []))
+
+    def test_memory_heap_and_pending_are_read_only_copies(self) -> None:
+        """memory, heap and pending return copies, so changing them does not change the replacement selection, and
+        none of memory, heap_size, heap, pending and run can be set. On the slide input with M = 4, memory stays
+        [30, 40, 73, 16] after three outputs (see test_memory_on_the_slide_input), and the next output is 30.
+        """
+        # three outputs: memory holds [30, 40, 73 | 16]:
+        rs: ReplacementSelection[int] = ReplacementSelection[int](SLIDE_INPUT, 4)
+        self.assertEqual([next(rs) for _ in range(3)], [(0, 10), (0, 20), (0, 25)])
+
+        # change each list returned; the replacement selection keeps its memory:
+        rs.memory[0] = 0
+        self.assertEqual(rs.memory, [30, 40, 73, 16])
+        rs.heap.clear()
+        self.assertEqual(rs.heap, [30, 40, 73])
+        rs.pending.append(99)
+        self.assertEqual(rs.pending, [16])
+
+        # none of the five can be set:
+        for name in ("memory", "heap_size", "heap", "pending", "run"):
+            with self.subTest(name=name):
+                with self.assertRaises(AttributeError):
+                    setattr(rs, name, [])
+
+        # the next output is still 30, the root of the unchanged heap:
+        self.assertEqual(next(rs), (0, 30))
+
+    def test_an_element_that_fits_the_run_moves_down_within_the_heap_only(self) -> None:
+        """An input element that still fits into the current run takes the root's place and moves down within the
+        heap only, not into the list behind it. M = 3, input 1 2 3 0 5, worked out by hand ("|" marks the end of
+        the heap):
+
+        - the heap starts as [1, 2, 3]; output 1, 0 is smaller: 3 takes the root's place, 0 the place the heap
+          gives up, and 3 swaps with 2: [2, 3 | 0];
+        - output 2, 5 is not smaller and takes the root's place, then swaps with 3, its only child in the heap:
+          [3, 5 | 0]. A sift that did not stop at the end of the heap would swap 5 with 0, the smaller of 3 and 0:
+          [0, 3, 5];
+        - output 3, no input left: 5 takes the root's place, its own place stays empty: [5 | None, 0]; output 5:
+          [| None, None, 0]. Run 0 is 1 2 3 5, run 1 is 0.
+        """
+        rs: ReplacementSelection[int] = ReplacementSelection[int]([1, 2, 3, 0, 5], 3)
+
+        # 0 waits in the list; 5 moves down within the heap of two places:
+        self.assertEqual(next(rs), (0, 1))
+        self.assertEqual((rs.memory, rs.heap_size), ([2, 3, 0], 2))
+        self.assertEqual(next(rs), (0, 2))
+        self.assertEqual((rs.memory, rs.heap_size), ([3, 5, 0], 2))
+
+        # no input left: the heap shrinks, and the places it gives up stay empty:
+        self.assertEqual(next(rs), (0, 3))
+        self.assertEqual((rs.memory, rs.heap_size), ([5, None, 0], 1))
+        self.assertEqual(next(rs), (0, 5))
+        self.assertEqual((rs.memory, rs.heap_size), ([None, None, 0], 0))
+
+        # run 1 holds the element that waited in the list:
+        self.assertEqual(list(rs), [(1, 0)])
+
+    def test_the_end_of_the_input_leaves_empty_places_that_the_next_run_closes(
+        self,
+    ) -> None:
+        """Once the input has ended, every output frees a place of the heap, which stays empty (None). When the
+        heap is empty, start_next_run moves the list's elements to the front, in their memory order, and bulk-loads
+        them there; the empty places end up behind them. M = 6, input 10 20 30 40 50 60 1 4 2 3, worked out by hand
+        ("|" marks the end of the heap):
+
+        - the heap starts as [10, 20, 30, 40, 50, 60]; 1, 4, 2 and 3 are smaller than the outputs 10, 20, 30 and 40,
+          and each takes the place the heap gives up: [50, 60 | 3, 2, 4, 1];
+        - output 50, no input left: 60 takes the root's place, and its own place stays empty: [60 | None, 3, 2, 4, 1];
+        - output 60: [| None, None, 3, 2, 4, 1];
+        - start_next_run moves the list 3 2 4 1 to the front, [3, 2, 4, 1, None, None], and bulk-loads it (see
+          test_bulkload_looks_at_the_first_size_places_only): [1, 2, 4, 3 | None, None].
+
+        A move to the front that put the list back into reading order, 1 4 2 3, would bulk-load it into
+        [1, 3, 2, 4].
+        """
+        rs: ReplacementSelection[int] = ReplacementSelection[int](
+            [10, 20, 30, 40, 50, 60, 1, 4, 2, 3], 6
+        )
+
+        # four outputs: the list holds the four smaller elements, newest first:
+        self.assertEqual(
+            [next(rs) for _ in range(4)], [(0, 10), (0, 20), (0, 30), (0, 40)]
+        )
+        self.assertEqual((rs.memory, rs.heap_size), ([50, 60, 3, 2, 4, 1], 2))
+
+        # no input left: each output leaves an empty place between heap and list:
+        self.assertEqual(next(rs), (0, 50))
+        self.assertEqual((rs.memory, rs.heap_size), ([60, None, 3, 2, 4, 1], 1))
+        self.assertEqual(next(rs), (0, 60))
+        self.assertEqual((rs.memory, rs.heap_size), ([None, None, 3, 2, 4, 1], 0))
+        self.assertEqual((rs.heap, rs.pending), ([], [3, 2, 4, 1]))
+
+        # start_next_run closes the empty places and bulk-loads the list at the front:
+        self.assertIs(rs.start_next_run(), True)
+        self.assertEqual((rs.memory, rs.heap_size), ([1, 2, 4, 3, None, None], 4))
+        self.assertEqual((rs.heap, rs.pending, rs.run), ([1, 2, 4, 3], [], 1))
+
+        # run 1 outputs its four elements in order and leaves all places empty:
+        self.assertEqual(list(rs), [(1, 1), (1, 2), (1, 3), (1, 4)])
+        self.assertEqual((rs.memory, rs.heap_size), ([None] * 6, 0))
+
+    def test_M_larger_than_the_input_gives_one_place_per_element(self) -> None:
+        """With M larger than the input, memory has one place per input element, not M. Input 3 1 2, M = 6, worked
+        out by hand ("|" marks the end of the heap): memory [| 3, 1, 2] after construction; the bulk load makes
+        [1, 3, 2 |]; output 1, no input left: 2 takes the root's place and its own place stays empty: [2, 3 | None];
+        output 2: [3 | None, None]; output 3: [| None, None, None].
+        """
+        rs: ReplacementSelection[int] = ReplacementSelection[int]([3, 1, 2], 6)
+        self.assertEqual((rs.memory, rs.heap_size), ([3, 1, 2], 0))
+
+        # the bulk load:
+        self.assertIs(rs.start_next_run(), True)
+        self.assertEqual((rs.memory, rs.heap_size), ([1, 3, 2], 3))
+
+        # one place freed per output:
+        self.assertEqual(next(rs), (0, 1))
+        self.assertEqual((rs.memory, rs.heap_size), ([2, 3, None], 2))
+        self.assertEqual(next(rs), (0, 2))
+        self.assertEqual((rs.memory, rs.heap_size), ([3, None, None], 1))
+        self.assertEqual(next(rs), (0, 3))
+        self.assertEqual((rs.memory, rs.heap_size), ([None, None, None], 0))
+
+        # nothing is left:
+        self.assertEqual(list(rs), [])
+
+    def test_M_of_1_shares_one_place_between_heap_and_list(self) -> None:
+        """With M = 1, memory has one place, which holds either the heap's only element or the list's. Input 3 5 2,
+        worked out by hand ("|" marks the end of the heap): [| 3] after construction, [3 |] after the bulk load;
+        output 3, 5 is not smaller and takes the root's place: [5 |]; output 5, 2 is smaller and takes the place of
+        the heap's only element, as the list's newest element: [| 2]; run 1 starts with [2 |]; output 2, no input
+        left: [| None].
+        """
+        # after construction and the bulk load:
+        rs: ReplacementSelection[int] = ReplacementSelection[int]([3, 5, 2], 1)
+        self.assertEqual((rs.memory, rs.heap_size), ([3], 0))
+        self.assertIs(rs.start_next_run(), True)
+        self.assertEqual((rs.memory, rs.heap_size, rs.run), ([3], 1, 0))
+
+        # run 0: 5 replaces 3 in the heap, then 2 takes the heap's place as the list:
+        self.assertEqual(next(rs), (0, 3))
+        self.assertEqual((rs.memory, rs.heap_size), ([5], 1))
+        self.assertEqual(next(rs), (0, 5))
+        self.assertEqual((rs.memory, rs.heap_size), ([2], 0))
+        self.assertEqual((rs.heap, rs.pending), ([], [2]))
+
+        # run 1: the list becomes the heap, and its output leaves the place empty:
+        self.assertIs(rs.start_next_run(), True)
+        self.assertEqual((rs.memory, rs.heap_size, rs.run), ([2], 1, 1))
+        self.assertEqual(next(rs), (1, 2))
+        self.assertEqual((rs.memory, rs.heap_size), ([None], 0))
+        self.assertEqual(list(rs), [])
+
+    def test_equal_elements_in_the_list_are_bulk_loaded_in_memory_order(self) -> None:
+        """Elements waiting in the list are bulk-loaded in their memory order, newest first, so of two equal
+        elements in the list the one read later can leave the next run first. M = 2, input 5 6 3a 3b, worked out by
+        hand ("|" marks the end of the heap): output 5, 3a is smaller: 6 takes the root's place and 3a the place
+        the heap gives up: [6 | 3a]; output 6, 3b is smaller and takes the place of the heap's only element:
+        [| 3b, 3a]. The bulk load leaves 3b above the equal 3a, so run 1 is 3b 3a.
+        """
+        values: list[TaggedValue] = tagged("5", "6", "3a", "3b")
+        rs: ReplacementSelection[TaggedValue] = ReplacementSelection[TaggedValue](
+            values, 2
+        )
+
+        # run 0 outputs 5 and 6; the list holds 3b and 3a, newest first:
+        self.assertEqual([next(rs) for _ in range(2)], [(0, values[0]), (0, values[1])])
+        self.assertEqual((rs.memory, rs.heap_size), (tagged("3b", "3a"), 0))
+
+        # the bulk load keeps 3b at the root, above the equal 3a:
+        self.assertIs(rs.start_next_run(), True)
+        self.assertEqual((rs.memory, rs.heap_size), (tagged("3b", "3a"), 2))
+        self.assertEqual(list(rs), [(1, value) for value in tagged("3b", "3a")])
+
+    def assert_each_element_in_one_place(
+        self,
+        rs: ReplacementSelection[TaggedValue],
+        read: list[TaggedValue],
+        outputs: list[TaggedValue],
+        places: int,
+    ) -> None:
+        """Checks that each element read so far is either output or held in exactly one place of memory (told
+        apart by identity, not by value), that memory has ``places`` places, that the heap has no empty place and
+        no element smaller than its parent, and that ``heap`` and ``pending`` show the elements of memory in memory
+        order.
+
+        @param rs: the replacement selection to check, between two steps
+        @param read: the input elements read so far
+        @param outputs: the elements output so far
+        @param places: the number of places memory must have
+        """
+        memory: list[TaggedValue | None] = rs.memory
+        held: list[TaggedValue] = [element for element in memory if element is not None]
+
+        # memory keeps its number of places, and the heap has no empty place:
+        self.assertEqual(len(memory), places)
+        self.assertNotIn(None, memory[: rs.heap_size])
+
+        # the elements held and output are the elements read, each exactly once:
+        self.assertEqual(
+            sorted(id(element) for element in held + outputs),
+            sorted(id(element) for element in read),
+        )
+
+        # heap and list show the elements held, in memory order, and the heap is a heap:
+        self.assertEqual(rs.heap + rs.pending, held)
+        self.assertEqual(heap_violations(rs.heap), [])
+
+    def test_every_element_read_is_in_exactly_one_place_or_output(self) -> None:
+        """After every output and every start of a run, each element read so far is either output or held in
+        exactly one place of memory: none is lost or held twice, memory keeps min(M, n) places, and the heap stays
+        a heap. The 40 input elements take only five values, but are distinct objects, and the check tells them
+        apart by identity, so an element held twice is caught even next to an equal one; M = 50 is larger than the
+        input.
+        """
+        rng: random.Random = random.Random(49)
+        for M in (1, 2, 3, 4, 7, 50):
+            with self.subTest(M=M):
+                # 40 distinct elements with many equal values, read through a counting iterator:
+                values: list[TaggedValue] = [
+                    TaggedValue(rng.randrange(5), f"_{index}") for index in range(40)
+                ]
+                input_data: CountingIterator[TaggedValue] = CountingIterator[
+                    TaggedValue
+                ](values)
+                rs: ReplacementSelection[TaggedValue] = ReplacementSelection[
+                    TaggedValue
+                ](input_data, M)
+                places: int = min(M, len(values))
+                outputs: list[TaggedValue] = list[TaggedValue]()
+
+                # right after construction:
+                self.assert_each_element_in_one_place(
+                    rs, values[: input_data.taken], outputs, places
+                )
+
+                # one output at a time; when the heap is empty, the next run is started and checked first:
+                while True:
+                    if rs.heap_size == 0:
+                        if not rs.start_next_run():
+                            break
+                        self.assert_each_element_in_one_place(
+                            rs, values[: input_data.taken], outputs, places
+                        )
+                    outputs.append(next(rs)[1])
+                    self.assert_each_element_in_one_place(
+                        rs, values[: input_data.taken], outputs, places
+                    )
+
+                # every element has been output:
+                self.assertEqual(len(outputs), len(values))
 
     def test_sorted_input_gives_one_run(self) -> None:
         """Sorted input gives a single run: every next element is not smaller than the output before it, so it
@@ -808,13 +1155,15 @@ class ReplacementSelectionTest(unittest.TestCase):
                 )
 
     def test_empty_input_gives_no_run(self) -> None:
-        """On empty input, start_next_run() returns False, as heap and list are empty, the run number stays -1,
-        and ReplacementSelection yields nothing."""
+        """On empty input, memory has no place (min(M, 0) = 0) and heap_size is 0, start_next_run() returns False,
+        as heap and list are empty, the run number stays -1, and ReplacementSelection yields nothing.
+        """
         rs: ReplacementSelection[int] = ReplacementSelection[int]([], 4)
 
-        # no element to start a run with:
+        # no element to start a run with, and memory has no place:
         self.assertIs(rs.start_next_run(), False)
         self.assertEqual((rs.heap, rs.pending, rs.run), ([], [], -1))
+        self.assertEqual((rs.memory, rs.heap_size), ([], 0))
 
         # and nothing to output:
         self.assertEqual(list(rs), [])
@@ -883,6 +1232,43 @@ class ReplacementSelectionTest(unittest.TestCase):
                 input_data=iter(SLIDE_INPUT),
                 queue_factory=ListQueueFactory[int](),
                 number_of_tuples_in_main_memory=0,
+                fan_in=2,
+                replacement_selection=True,
+            ).create_runs()
+
+    def test_None_as_an_input_element_is_rejected(self) -> None:
+        """None marks an empty place of memory, so it cannot be an input element: a None among the first M input
+        elements makes the constructor raise a ValueError; a None read later makes next() raise it and leaves
+        memory as it was. Through ExternalMergeSort with replacement selection, create_runs() raises it.
+
+        A None among the first M elements that went unnoticed would count as an empty place and be missing from the
+        runs.
+        """
+        # a None among the first M = 4 elements (at the front, in the middle, in the last place, alone):
+        cases: list[list[int | None]] = [
+            [None, 3, 1],
+            [3, None, 1],
+            [3, 1, 4, None],
+            [None],
+        ]
+        for values in cases:
+            with self.subTest(values=values):
+                with self.assertRaisesRegex(ValueError, "an input element is None"):
+                    ReplacementSelection[int](values, 4)
+
+        # a None read later, with M = 2: the first next() takes the root 1 as its output, reads None and raises
+        # before it returns 1; memory stays [1, 3]:
+        rs: ReplacementSelection[int] = ReplacementSelection[int]([3, 1, None], 2)
+        with self.assertRaisesRegex(ValueError, "an input element is None"):
+            next(rs)
+        self.assertEqual((rs.memory, rs.heap_size), ([1, 3], 2))
+
+        # inside the external merge sort, a None read after the first M elements:
+        with self.assertRaisesRegex(ValueError, "an input element is None"):
+            ExternalMergeSort[int](
+                input_data=iter([30, 20, 10, 40, None]),
+                queue_factory=ListQueueFactory[int](),
+                number_of_tuples_in_main_memory=4,
                 fan_in=2,
                 replacement_selection=True,
             ).create_runs()

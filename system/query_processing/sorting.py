@@ -18,13 +18,13 @@
 #
 #
 
-"""External merge sort: runs by chunk sorting or replacement selection (textbook heap), multi-way merging (heapq)."""
+"""External merge sort: runs by chunk sorting or in-place replacement selection (textbook heap), k-way merge (heapq)."""
 
 import heapq
 import itertools
 import logging
 from dataclasses import dataclass
-from typing import Any, Iterable, Iterator, Protocol
+from typing import Any, Iterable, Iterator, Protocol, cast
 
 from system.interfaces.queues import (
     QueueFactory,
@@ -90,15 +90,25 @@ class Comparable(Protocol):
         """Whether this element comes before ``other``."""
 
 
-def sift_down[ObjectType: Comparable](heap: list[ObjectType], position: int) -> None:
+def sift_down[ObjectType: Comparable](
+    heap: list[ObjectType] | list[ObjectType | None],
+    position: int,
+    size: int | None = None,
+) -> None:
     """Moves the element at ``position`` down the heap until no child is smaller: it swaps with its smaller child
     (the left one, unless the right one is smaller) and stops above a child that is not smaller, including an equal
     one. The heap is a list in level order: the children of position i are at 2i + 1 and 2i + 2. Only ``<`` is used.
+    The heap may be the front of a longer list, as in the memory of :class:`ReplacementSelection`.
 
-    @param heap: The list whose subtrees below ``position`` are heaps already.
+    @param heap: The list whose first ``size`` places hold the heap; the subtrees below ``position`` are heaps
+    already.
     @param position: The index of the element to move down.
+    @param size: The number of places at the front of ``heap`` that hold the heap, from 0 to ``len(heap)``
+    (default: all of them). The places behind them are not looked at, so they may hold None for an empty place.
     """
-    size: int = len(heap)
+    # without size, the whole list is the heap:
+    if size is None:
+        size = len(heap)
     # walk down, one level per round, until the element has no smaller child:
     while True:
         # the left child of the position (the right child, if there is one, follows it):
@@ -117,80 +127,155 @@ def sift_down[ObjectType: Comparable](heap: list[ObjectType], position: int) -> 
         position = child
 
 
-def bulkload[ObjectType: Comparable](elements: list[ObjectType]) -> None:
-    """Turns ``elements`` into a heap in place in linear time (Floyd's method): every inner node is moved down with
-    ``sift_down``, from the last inner node up to the root, so each node moves down only into subtrees that are
-    heaps already.
+def bulkload[ObjectType: Comparable](
+    elements: list[ObjectType] | list[ObjectType | None], size: int | None = None
+) -> None:
+    """Turns ``elements`` (or their first ``size`` places) into a heap in place in linear time (Floyd's method):
+    every inner node is moved down with ``sift_down``, from the last inner node up to the root, so each node moves
+    down only into subtrees that are heaps already.
 
     @param elements: The list to turn into a heap.
+    @param size: The number of places at the front of ``elements`` to turn into a heap, from 0 to
+    ``len(elements)`` (default: all of them). The places behind them stay as they are and may hold None for an
+    empty place.
     """
-    # the inner nodes are the positions 0 to len // 2 - 1; the leaves after them are heaps of one element each.
+    # without size, the whole list becomes the heap:
+    if size is None:
+        size = len(elements)
+    # the inner nodes are the positions 0 to size // 2 - 1; the leaves after them are heaps of one element each.
     # From the last inner node up to the root, both subtrees of a node are heaps already when it moves down:
-    for position in reversed(range(len(elements) // 2)):
-        sift_down(elements, position)
+    for position in reversed(range(size // 2)):
+        sift_down(elements, position, size)
 
 
 class ReplacementSelection[ObjectType: Comparable](Iterator[tuple[int, ObjectType]]):
-    """Run generation by replacement selection. Main memory holds M elements (``number_of_tuples_in_main_memory``),
-    split into a heap (``heap``) for the current run and a list (``pending``, the slides' "list") for the next one.
-    Each step outputs the root of the heap and reads the next input element: if it is not smaller than that output,
-    it still fits into the current run and goes into the heap, else it goes into the list. When the heap is empty,
-    the list is bulk-loaded into a heap and the next run starts. Yields (run number, element); run numbers start at
-    0 for each instance (``run`` is -1 until the first run starts). ``heap``, ``pending`` and ``run`` can be read
-    between steps; ``start_next_run`` makes the list the new ``heap`` and gives ``pending`` a new empty list, so read
-    both again after each step.
+    """Run generation by replacement selection, in place. Main memory is one array (``memory``) of M places
+    (``number_of_tuples_in_main_memory``; one per input element if the input is shorter): the heap of the current
+    run at its front (``heap``, the first ``heap_size`` places) and the list behind it (``pending``, the slides'
+    "list"), which holds the elements that wait for the next run. Each step outputs the root of the heap and reads
+    the next input element: if it is not smaller than that output, it still fits into the current run, takes the
+    root's place in the heap and moves down; else the heap's last element takes the root's place and moves down, the
+    heap gives up its last place, and the input element takes that place as the list's newest element. So the heap
+    shrinks and the list grows towards the front, newest element first. Once the input has ended, each output leaves
+    the place the heap gives up empty (None). When the heap is empty, the list's elements move to the front of
+    memory, closing the empty places, and are bulk-loaded there into the heap of the next run. Yields (run number,
+    element); run numbers start at 0 for each instance (``run`` is -1 until the first run starts). ``memory``,
+    ``heap_size``, ``heap``, ``pending`` and ``run`` can be read between steps; ``memory``, ``heap`` and ``pending``
+    are copies. As None marks an empty place, no input element may be None.
     """
+
+    # the message of the ValueError for an input element that is None:
+    _NONE_ELEMENT_MESSAGE: str = (
+        "an input element is None, which marks an empty place of memory"
+    )
 
     def __init__(
         self, input_data: Iterable[ObjectType], number_of_tuples_in_main_memory: int
     ):
-        """Reads the first M elements into the list; the first call of ``start_next_run`` (or of ``__next__``)
-        bulk-loads them into the heap and starts run 0.
+        """Reads the first M elements into memory, in reading order, as the list (memory has fewer places if the
+        input is shorter); the first call of ``start_next_run`` (or of ``__next__``) bulk-loads them in place into
+        the heap and starts run 0.
 
         @param input_data: The input data to create runs from.
-        @param number_of_tuples_in_main_memory: M, the number of elements heap and list may hold together.
-        @raise ValueError: if M is less than 1.
+        @param number_of_tuples_in_main_memory: M, the number of places of memory, which heap and list share.
+        @raise ValueError: if M is less than 1, or if one of the first M input elements is None.
         """
         if number_of_tuples_in_main_memory < 1:
             raise ValueError(
                 f"number_of_tuples_in_main_memory must be at least 1, got {number_of_tuples_in_main_memory}"
             )
         self.input_data: Iterator[ObjectType] = iter(input_data)
-        # the elements of the current run, as a heap:
-        self.heap: list[ObjectType] = list[ObjectType]()
-        # the elements for the next run (the "list" of the slides), initially the first M input elements:
-        self.pending: list[ObjectType] = list(
+        # main memory: the heap in the first heap_size places, the list behind it; None marks an empty place.
+        # Initially it holds the first M input elements (all of them if there are fewer), all in the list:
+        self._memory: list[ObjectType | None] = list(
             itertools.islice(self.input_data, number_of_tuples_in_main_memory)
         )
+        if any(element is None for element in self._memory):
+            raise ValueError(ReplacementSelection._NONE_ELEMENT_MESSAGE)
+        # the number of places at the front of memory that hold the heap of the current run:
+        self._heap_size: int = 0
         # the number of the current run, from 0 on (-1 until the first run starts):
-        self.run: int = -1
+        self._run: int = -1
+
+    @property
+    def memory(self) -> list[ObjectType | None]:
+        """A copy of main memory: the heap in the first ``heap_size`` places, then the list; None marks an empty
+        place."""
+        return list(self._memory)
+
+    @property
+    def heap_size(self) -> int:
+        """The number of places at the front of memory that hold the heap of the current run."""
+        return self._heap_size
+
+    @property
+    def heap(self) -> list[ObjectType]:
+        """A copy of the heap of the current run, in level order: the first ``heap_size`` places of memory."""
+        # a place of the heap is never empty:
+        return cast(list[ObjectType], self._memory[: self._heap_size])
+
+    @property
+    def pending(self) -> list[ObjectType]:
+        """A copy of the list (the slides' "list"): the elements behind the heap that wait for the next run, in
+        memory order (newest element first once a run has started; before run 0, the first M input elements in
+        reading order); empty places are left out."""
+        return [
+            element
+            for element in self._memory[self._heap_size :]
+            if element is not None
+        ]
+
+    @property
+    def run(self) -> int:
+        """The number of the current run, from 0 on (-1 until the first run starts)."""
+        return self._run
 
     def start_next_run(self) -> bool:
-        """If the heap is empty and the list (``pending``) is not, bulk-loads the list into the heap and starts the
-        next run. ``__next__`` calls it whenever the heap is empty; it is public so that a caller can call it first
-        and look at the new heap before the run's first output.
+        """If the heap is empty and the list (``pending``) is not, moves the list's elements to the front of memory,
+        in their memory order, closing the empty places before them, bulk-loads them there into the heap and starts
+        the next run. ``__next__`` calls it whenever the heap is empty; it is public so that a caller can call it
+        first and look at the new heap before the run's first output.
 
         @return: True if a run was started, False if nothing changed (the heap still holds elements, or the list is
         empty).
         """
-        # a new run starts only when the current one is over (empty heap) and elements wait for it:
-        if self.heap or not self.pending:
+        # a new run starts only when the current one is over (empty heap):
+        if self._heap_size > 0:
             return False
-        # the list becomes the new run's heap, and an empty list collects the elements for the run after it:
-        self.heap, self.pending = self.pending, list[ObjectType]()
-        # turn the list into a heap, in linear time:
-        bulkload(self.heap)
-        self.run += 1
+        # the list's elements move to the front, in their memory order, closing the empty places that outputs left
+        # after the input ended; size counts the elements moved so far, so it is also the place for the next one:
+        size: int = 0
+        for position, element in enumerate(self._memory):
+            if element is not None:
+                # the element leaves its place for place size (the same place if no empty place is before it):
+                self._memory[position] = None
+                self._memory[size] = element
+                size += 1
+        # no element waits for a next run:
+        if size == 0:
+            return False
+        # the list becomes the new run's heap, in place and in linear time:
+        bulkload(self._memory, size)
+        self._heap_size = size
+        self._run += 1
         return True
 
-    def _remove_root(self) -> None:
-        """Removes the root of the heap: the heap's last element takes the root's place and moves down."""
-        # take the last element off, so the heap stays a complete tree:
-        last: ObjectType = self.heap.pop()
-        # unless it was the root itself, it takes the root's place and moves down:
-        if self.heap:
-            self.heap[0] = last
-            sift_down(self.heap, 0)
+    def _remove_root(self, newest: ObjectType | None) -> None:
+        """Removes the root of the heap: the heap's last element takes the root's place, the heap gives up its last
+        place, ``newest`` takes that place, and the new root moves down within the smaller heap.
+
+        @param newest: The element that takes the place the heap gives up, as the list's newest element, or None
+        to leave that place empty.
+        """
+        # the heap gives up its last place:
+        self._heap_size -= 1
+        last: int = self._heap_size
+        # the element in that place takes the root's place (in a heap of one element, it is the root itself):
+        self._memory[0] = self._memory[last]
+        # the place the heap gave up holds the list's newest element, or stays empty:
+        self._memory[last] = newest
+        # the new root moves down within the heap:
+        sift_down(self._memory, 0, self._heap_size)
 
     def __next__(self) -> tuple[int, ObjectType]:
         """Outputs the root of the heap and reads the next input element into memory. If the heap is empty, the next
@@ -198,28 +283,31 @@ class ReplacementSelection[ObjectType: Comparable](Iterator[tuple[int, ObjectTyp
 
         @return: The run number and the element written to that run.
         @raise StopIteration: when heap and list are both empty.
+        @raise ValueError: if the next input element is None; memory stays as it was.
         """
         # an empty heap ends the run: start the next one, or stop if the list is empty too:
-        if not self.heap and not self.start_next_run():
+        if self._heap_size == 0 and not self.start_next_run():
             raise StopIteration
-        # the root, the smallest element of the heap, is the run's next output:
-        output: ObjectType = self.heap[0]
-        # read the next input element into the place the output frees:
+        # the root, the smallest element of the heap, is the run's next output (a place of the heap is never empty):
+        output: ObjectType = cast(ObjectType, self._memory[0])
+        # read the next input element; it takes the root's place or the place the heap gives up (below):
         try:
             next_element: ObjectType = next(self.input_data)
         except StopIteration:
-            # no input is left: the heap shrinks:
-            self._remove_root()
-            return self.run, output
+            # no input is left: the heap shrinks, and the place it gives up stays empty:
+            self._remove_root(None)
+            return self._run, output
+        if next_element is None:
+            raise ValueError(ReplacementSelection._NONE_ELEMENT_MESSAGE)
         if next_element < output:
-            # the next element is smaller than the output, so it waits in the list for the next run:
-            self._remove_root()
-            self.pending.append(next_element)
+            # the next element is smaller than the output, so it waits in the list for the next run: the heap gives up
+            # its last place, and the next element takes it as the list's newest element:
+            self._remove_root(next_element)
         else:
             # the next element still fits into this run: it takes the root's place and moves down:
-            self.heap[0] = next_element
-            sift_down(self.heap, 0)
-        return self.run, output
+            self._memory[0] = next_element
+            sift_down(self._memory, 0, self._heap_size)
+        return self._run, output
 
     def __iter__(self) -> Iterator[tuple[int, ObjectType]]:
         """Returns the iterator object."""
@@ -244,8 +332,8 @@ class RunGenerator[ObjectType: Comparable]:
         @param input_data: The input data to create runs from.
         @param number_of_tuples_in_main_memory: The number of tuples that can be stored in memory.
         @param replacement_selection: Make the runs by replacement selection instead of sorting chunks. Then
-        ``create_runs`` raises a ValueError if ``number_of_tuples_in_main_memory`` is less than 1; chunk sorting does
-        not check it.
+        ``create_runs`` raises a ValueError if ``number_of_tuples_in_main_memory`` is less than 1 or if an input
+        element is None; chunk sorting does not check either.
         """
 
         self.queue_factory: QueueFactory = queue_factory
@@ -268,7 +356,7 @@ class RunGenerator[ObjectType: Comparable]:
         """Writes the output of replacement selection to one new queue per run.
 
         @return: A RunGenerationResult with the metadata of all runs and the number of elements written.
-        @raise ValueError: if ``number_of_tuples_in_main_memory`` is less than 1.
+        @raise ValueError: if ``number_of_tuples_in_main_memory`` is less than 1, or if an input element is None.
         """
         runs_metadata: list[RunMetadata] = list[RunMetadata]()
         selection: ReplacementSelection[ObjectType] = ReplacementSelection(
@@ -298,7 +386,8 @@ class RunGenerator[ObjectType: Comparable]:
         runs by replacement selection instead (see :class:`ReplacementSelection`).
 
         @return: A RunGenerationResult with the metadata of all runs and the number of elements written.
-        @raise ValueError: with ``replacement_selection``, if ``number_of_tuples_in_main_memory`` is less than 1.
+        @raise ValueError: with ``replacement_selection``, if ``number_of_tuples_in_main_memory`` is less than 1 or
+        if an input element is None.
         """
         if self.replacement_selection:
             return self._create_runs_by_replacement_selection()
@@ -476,7 +565,8 @@ class ExternalMergeSort[ObjectType: Comparable](Iterator):
         fan_in + 1, which is one tuple per input run plus one for the output run.
         @param fan_in: The fan-in of the merge sort. Must be at least 2.
         @param replacement_selection: Make the runs by replacement selection instead of sorting chunks. Then
-        ``create_runs`` raises a ValueError if ``number_of_tuples_in_main_memory`` is less than 1.
+        ``create_runs`` raises a ValueError if ``number_of_tuples_in_main_memory`` is less than 1 or if an input
+        element is None.
         @raise ValueError: if fan_in is less than 2.
 
         """
