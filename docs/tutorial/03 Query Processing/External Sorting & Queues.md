@@ -15,6 +15,10 @@ beyond memory, so the algorithm can be written as if everything were in memory.
 
 - **Notebook:** [`External-Merge-Sort.ipynb`](../../../notebooks/External-Merge-Sort.ipynb) — starts from a
   main-memory sort and builds up to the external, run-and-merge version.
+- **Notebook:** [`Replacement-Selection-Playground.ipynb`](../../../notebooks/Replacement-Selection-Playground.ipynb)
+  — follow run generation by replacement selection on your own input, step by step: main memory as one array, with
+  the heap at its front drawn as a tree, its maintenance comparison by comparison and swap by swap, the linear bulk
+  load included, the list for the next run behind it, and the output runs.
 - **Implementation:** [`system/query_processing/sorting.py`](../../../system/query_processing/sorting.py) and the
   queues in [`system/query_processing/queues/`](../../../system/query_processing/queues/) — `external_queues.py`
   (spill-to-disk), `list_queues.py` (in-memory), and `queue_factories.py`.

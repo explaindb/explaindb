@@ -75,6 +75,7 @@ EXPECTED_PACKING: dict[int, list[str]] = {
         "Bit-Sequences-in-Pandas.ipynb",
         "Z-Order-Curve.ipynb",
         "MVCC-Playground.ipynb",
+        "Replacement-Selection-Playground.ipynb",
     ],
     3: [
         "Bitmaps-and-Bloom-Filters.ipynb",
@@ -133,7 +134,7 @@ class AssignNotebooksTest(unittest.TestCase):
     def test_discover_returns_bare_names_that_resolve_weights(self) -> None:
         """Discovery yields bare names so ``notebook_weights.tsv`` keys match."""
         notebooks = self.module.discover_notebooks()
-        self.assertEqual(len(notebooks), 18)
+        self.assertEqual(len(notebooks), 19)
         self.assertIn("Christmas-Tree.ipynb", notebooks)
         # Bare names, not paths -- otherwise weight lookup silently defaults.
         self.assertFalse(any("/" in name for name in notebooks))
@@ -150,7 +151,7 @@ class AssignNotebooksTest(unittest.TestCase):
             printed.extend(self._slice_for(index))
 
         # No notebook assigned twice and every one assigned exactly once.
-        self.assertEqual(len(printed), 18)
+        self.assertEqual(len(printed), 19)
         self.assertEqual(set(printed), set(self.module.discover_notebooks()))
 
     def test_weights_cover_exactly_the_notebooks(self) -> None:
