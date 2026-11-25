@@ -365,6 +365,84 @@ class BitmapIndexTests(unittest.TestCase):
                 {0, 1, 2},
             )
 
+    def test_range_encoded_index_stores_the_bit_positions_of_non_integer_values(self):
+        """For string values, the bit sequence of each key in a range-encoded bitmap index
+        holds the bit positions of all values whose key is smaller than or equal to it,
+        and point and range queries map these positions back to the values.
+        """
+        data: list[tuple[int, str]] = [
+            (30, "carol"),
+            (10, "alice"),
+            (20, "bob"),
+            (10, "dave"),
+        ]
+
+        bit_sequence_type: Type[UncompressedBitSequence]
+        for bit_sequence_type in [IntegerBitSequence, BitListBitSequence]:
+            compression_type: Type[CompressedBitSequence] | None
+            for compression_type in [WAHBitSequence, None]:
+                with self.subTest(
+                    bit_sequence_type=bit_sequence_type,
+                    compression_type=compression_type,
+                ):
+                    # bulkload the pairs; the values get the bit positions in the order
+                    # they first appear (carol 0, alice 1, bob 2, dave 3):
+                    index: RangeEncodedBitmapIndex[int, str] = RangeEncodedBitmapIndex(
+                        bit_sequence_type, compression_type
+                    )
+                    index.bulkload(iter(data))
+                    self.assertEqual(
+                        index.position_to_value, ["carol", "alice", "bob", "dave"]
+                    )
+
+                    # the bit sequence of each key holds the positions of the values of
+                    # all keys up to and including it:
+                    self.assertEqual(index[10].as_set(), {1, 3})
+                    self.assertEqual(index[20].as_set(), {1, 2, 3})
+                    self.assertEqual(index[30].as_set(), {0, 1, 2, 3})
+
+                    # point and range queries map the positions back to the values:
+                    self.assertEqual(set(index.get(10)), {"alice", "dave"})
+                    self.assertEqual(set(index.get(20)), {"bob"})
+                    self.assertEqual(
+                        set(index.get_all_in_range(15, 30)), {"bob", "carol"}
+                    )
+
+    def test_range_encoded_index_stores_the_bit_positions_of_integer_values_that_differ_from_their_positions(
+        self,
+    ):
+        """For integer values that differ from their bit positions, the bit sequence of
+        each key in a range-encoded bitmap index holds the bit positions of all values
+        whose key is smaller than or equal to it, and point queries map these positions
+        back to the values.
+        """
+        data: list[tuple[int, int]] = [(1, 1), (2, 0)]
+
+        bit_sequence_type: Type[UncompressedBitSequence]
+        for bit_sequence_type in [IntegerBitSequence, BitListBitSequence]:
+            compression_type: Type[CompressedBitSequence] | None
+            for compression_type in [WAHBitSequence, None]:
+                with self.subTest(
+                    bit_sequence_type=bit_sequence_type,
+                    compression_type=compression_type,
+                ):
+                    # bulkload the pairs; value 1 gets bit position 0 and value 0 gets
+                    # bit position 1:
+                    index: RangeEncodedBitmapIndex[int, int] = RangeEncodedBitmapIndex(
+                        bit_sequence_type, compression_type
+                    )
+                    index.bulkload(iter(data))
+                    self.assertEqual(index.position_to_value, [1, 0])
+
+                    # key 1 holds only the position of value 1, key 2 the positions of
+                    # both values:
+                    self.assertEqual(index[1].as_set(), {0})
+                    self.assertEqual(index[2].as_set(), {0, 1})
+
+                    # point queries map the positions back to the values:
+                    self.assertEqual(set(index.get(1)), {1})
+                    self.assertEqual(set(index.get(2)), {0})
+
     def test_unsorted_bit_sequence_list(self):
         """
         Check the correctness of an unsorted bit-sequence list

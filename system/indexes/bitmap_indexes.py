@@ -365,18 +365,18 @@ class RangeEncodedBitmapIndex[Key: _Comparable, Value](SortedBitmapIndex[Key, Va
 
     def _fill_up_range_for_key(self, key: Key) -> None:
         """
-        Inserts a value to all keys which are greater than the current key
+        Sets every bit that is set in the key's bit sequence also in the bit sequences of all greater keys.
+        :param key: The key whose bits are copied.
         """
         # Get index for the key
         key_index: int = self.key_to_index[key]
 
-        # Go through all values that are set for a given key
-        for value in self.key_bit_sequence_list[key_index][1]:
-            # Go through all keys that are greater/equal and the value to the key bit_sequence
+        # Go through the positions of all bits that are set for the given key; iterating a bit sequence yields
+        # these positions, not the values
+        for position in self.key_bit_sequence_list[key_index][1]:
+            # Set this bit in the bit sequences of the key and of all greater keys
             for index in range(key_index, len(self.key_bit_sequence_list)):
-                self.key_bit_sequence_list[index][1].set_bit(
-                    self.value_to_position[value]
-                )
+                self.key_bit_sequence_list[index][1].set_bit(position)
 
     def get_equal(self, key: Key) -> BitSequence:
         """See :meth:`BitmapIndex.get_equal`.
