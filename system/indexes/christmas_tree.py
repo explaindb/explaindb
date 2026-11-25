@@ -281,10 +281,10 @@ class ChristmasTree[Key, Value](RadixTrie[Key, Value]):
         """A factory for creating leaf nodes in a Christmas tree."""
 
         def new_instance(
-            self, parent_descriptor, left_sibling=None
+            self, parent_descriptor, previous_leaf
         ) -> RadixTrie[Key, Value].LeafNode[Key, Value]:
-            """Create a new instance of the leaf node."""
-            return ChristmasTree.LeafNode[Key, Value](parent_descriptor, left_sibling)
+            """See :meth:`RadixTrie.LeafFactory.new_instance`."""
+            return ChristmasTree.LeafNode[Key, Value](parent_descriptor, previous_leaf)
 
     def __init__(
         self,
