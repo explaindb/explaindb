@@ -30,7 +30,7 @@ from system.indexes.bit_sequences import (
     IntegerBitSequence,
 )
 from system.data_classes import Address
-from system.interfaces.bit_sequence import BitSequence
+from system.interfaces.bit_sequence import UncompressedBitSequence
 
 
 class BloomFilterTests(unittest.TestCase):
@@ -70,7 +70,7 @@ class BloomFilterTests(unittest.TestCase):
             Address(1, "bc", "bs", 2),
             Address(4, "cc", "cs", 3),
         ]
-        bit_sequence_type: type[BitSequence]
+        bit_sequence_type: type[UncompressedBitSequence]
         for bit_sequence_type in [
             BitListBitSequence,
             IntegerBitSequence,

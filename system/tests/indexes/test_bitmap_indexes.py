@@ -79,7 +79,7 @@ class BitmapIndexTests(unittest.TestCase):
         )
 
         # Check for cities
-        city_index: index_type = index_type(bit_sequence_type, compression_type)
+        city_index: BitmapIndex = index_type(bit_sequence_type, compression_type)
 
         city_index.bulkload(city_bulkload)
 
@@ -209,7 +209,9 @@ class BitmapIndexTests(unittest.TestCase):
         )
 
         # Check for house numbers
-        house_number_index: index_type = index_type(bit_sequence_type, compression_type)
+        house_number_index: BitmapIndex = index_type(
+            bit_sequence_type, compression_type
+        )
 
         house_number_index.bulkload(house_number_bulkload)
 
@@ -318,7 +320,7 @@ class BitmapIndexTests(unittest.TestCase):
                 BitListBitSequence,
             ]:
                 # Check for house numbers
-                house_number_index: index_type = index_type(
+                house_number_index: BitmapIndex = index_type(
                     bit_sequence_type, compression_type
                 )
 

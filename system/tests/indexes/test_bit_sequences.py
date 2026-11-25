@@ -113,19 +113,19 @@ class BitSequenceTests(unittest.TestCase):
             IntegerBitSequence,
             BitListBitSequence,
         ]:
-            bit_sequence_1: bit_sequence_type = (
+            bit_sequence_1: UncompressedBitSequence = (
                 bit_sequence_type.create_all_false_bit_sequence(5)
             )
             i: int
             for i in [1, 3]:
                 bit_sequence_1.set_bit(i)
-            bit_sequence_2: bit_sequence_type = (
+            bit_sequence_2: UncompressedBitSequence = (
                 bit_sequence_type.create_all_false_bit_sequence(5)
             )
             i: int
             for i in [1, 4]:
                 bit_sequence_2.set_bit(i)
-            bit_sequence_3: bit_sequence_type = (
+            bit_sequence_3: UncompressedBitSequence = (
                 bit_sequence_type.create_all_false_bit_sequence(5)
             )
             i: int
@@ -161,7 +161,7 @@ class BitSequenceTests(unittest.TestCase):
             IntegerBitSequence,
             BitListBitSequence,
         ]:
-            compressed_bit_sequence: bit_sequence_type = (
+            compressed_bit_sequence: UncompressedBitSequence = (
                 bit_sequence_type.create_all_false_bit_sequence(4)
             )
             i: int
@@ -175,7 +175,7 @@ class BitSequenceTests(unittest.TestCase):
         bit_list: list[int],
         number_of_bits: int,
     ) -> tuple[UncompressedBitSequence, WAHBitSequence]:
-        bit_sequence: bit_sequence_type = (
+        bit_sequence: UncompressedBitSequence = (
             bit_sequence_type.create_all_false_bit_sequence(number_of_bits)
         )
         for bit in bit_list:
@@ -250,7 +250,7 @@ class BitSequenceTests(unittest.TestCase):
             ]
 
             (
-                test_bits_different_merged_fills,
+                _,
                 compressed_bit_sequence,
             ) = self._create_bit_sequence_and_compressed_bit_sequence(
                 bit_sequence_type, test_bits_different_merged_fills, 33
@@ -347,7 +347,7 @@ class BitSequenceTests(unittest.TestCase):
             self.assertEqual(52, compressed_bit_sequence.get_number_of_bits())
 
             # Check with only 0's
-            empty_bit_sequence: bit_sequence_type = (
+            empty_bit_sequence: UncompressedBitSequence = (
                 bit_sequence_type.create_all_false_bit_sequence(1000)
             )
             compressed_bit_sequence = WAHBitSequence.compress_bit_sequence(

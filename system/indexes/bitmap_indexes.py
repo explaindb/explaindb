@@ -25,7 +25,7 @@ from abc import ABC
 from system.interfaces.indexing.bitmap_indexes import (
     BitmapIndex,
 )
-from typing import Type, Iterator
+from typing import Any, Protocol, Type, Iterator
 from system.interfaces.bit_sequence import (
     BitSequence,
     UncompressedBitSequence,
@@ -34,7 +34,14 @@ from system.interfaces.bit_sequence import (
 from system.indexes.bit_sequences import IntegerBitSequence
 
 
-class SortedBitmapIndex[Key, Value](BitmapIndex[Key, Value], ABC):
+class _Comparable(Protocol):
+    """A key type whose values can be ordered with ``<``, e.g. ``str`` or ``int``: sorted and range-encoded
+    bitmap indexes keep their keys in sorted order."""
+
+    def __lt__(self, other: Any, /) -> bool: ...
+
+
+class SortedBitmapIndex[Key: _Comparable, Value](BitmapIndex[Key, Value], ABC):
     """
     Abstract base class for a sorted bitmap index.
     """
@@ -81,15 +88,18 @@ class SortedBitmapIndex[Key, Value](BitmapIndex[Key, Value], ABC):
         """
         # Go through each stored bit sequence
         for idx in range(len(self.key_bit_sequence_list)):
+            # the bit sequences are compressed once, after the bulkload, so they are still uncompressed:
+            bit_sequence: BitSequence = self.key_bit_sequence_list[idx][1]
+            assert isinstance(bit_sequence, UncompressedBitSequence)
             # Update the tuple stored by reusing the existing key, and compressing the bit sequence
             self.key_bit_sequence_list[idx] = (
                 self.key_bit_sequence_list[idx][0],
-                self.compression_type.compress_bit_sequence(
-                    self.key_bit_sequence_list[idx][1]
-                ),
+                self.compression_type.compress_bit_sequence(bit_sequence),
             )
 
-    def bulkload(self, data: Iterator[tuple[Key, Value]], key_prefix: str = "") -> None:
+    def bulkload(
+        self, input_data: Iterator[tuple[Key, Value]], key_prefix: str = ""
+    ) -> None:
         """See :meth:`Index.bulkload`.
 
         After the base bulkload, sorts the key/bit-sequence list by key (raising
@@ -97,7 +107,7 @@ class SortedBitmapIndex[Key, Value](BitmapIndex[Key, Value], ABC):
         key-to-index map to reflect the sorted order.
         """
         # Bulkload bit sequences
-        super().bulkload(data, key_prefix)
+        super().bulkload(input_data, key_prefix)
 
         # Check whether key is sortable
         if not BitmapIndex.key_is_sortable(self.key_bit_sequence_list[0][0]):
@@ -189,9 +199,12 @@ class UnsortedBitmapIndex[Key, Value](BitmapIndex[Key, Value], ABC):
         """
         # Go through each stored bit sequence
         for key in self.bit_sequence_map:
+            # the bit sequences are compressed once, after the bulkload, so they are still uncompressed:
+            bit_sequence: BitSequence = self.bit_sequence_map[key]
+            assert isinstance(bit_sequence, UncompressedBitSequence)
             # Compress the bit sequence for each key
             self.bit_sequence_map[key] = self.compression_type.compress_bit_sequence(
-                self.bit_sequence_map[key]
+                bit_sequence
             )
 
     def get_number_of_bits(self) -> int:
@@ -233,13 +246,15 @@ class EqualityEncodedBitmapIndex[Key, Value](BitmapIndex[Key, Value], ABC):
     Implements an equality encoded bitmap index structure.
     """
 
-    def bulkload(self, data: Iterator[tuple[Key, Value]], key_prefix: str = "") -> None:
+    def bulkload(
+        self, input_data: Iterator[tuple[Key, Value]], key_prefix: str = ""
+    ) -> None:
         """See :meth:`Index.bulkload`.
 
         After the base bulkload, compresses all bit sequences in one pass if
         compression is enabled (cheaper than inserting into compressed sequences).
         """
-        super().bulkload(data, key_prefix)
+        super().bulkload(input_data, key_prefix)
 
         # We could also directly insert and compress, which causes notable overhead, thus we first bulkload the
         # uncompressed bit sequences, and compress them afterward.
@@ -265,7 +280,7 @@ class EqualityEncodedBitmapIndex[Key, Value](BitmapIndex[Key, Value], ABC):
         return self.get_smaller(key) | self.get_equal(key)
 
 
-class SortedEqualityEncodedBitmapIndex[Key, Value](
+class SortedEqualityEncodedBitmapIndex[Key: _Comparable, Value](
     EqualityEncodedBitmapIndex[Key, Value], SortedBitmapIndex[Key, Value]
 ):
     """
@@ -312,19 +327,23 @@ class UnsortedEqualityEncodedBitmapIndex[Key, Value](
 
         # Go through each stored and check whether it is smaller
         for stored_key in self.bit_sequence_map:
-            if stored_key < key:
+            # the keys of an unsorted index need not be sortable, so the type checker cannot verify `<`;
+            # get_smaller only calls this method after checking that the key is sortable:
+            if stored_key < key:  # pyright: ignore[reportOperatorIssue]
                 final_result |= self.bit_sequence_map[stored_key]
 
         return final_result
 
 
-class RangeEncodedBitmapIndex[Key, Value](SortedBitmapIndex[Key, Value]):
+class RangeEncodedBitmapIndex[Key: _Comparable, Value](SortedBitmapIndex[Key, Value]):
     """
     Implements range encoded bitmap index structure. Each bit_sequence contains all values whose keys are less or equal to the
     keys represented by the bit_sequence.
     """
 
-    def bulkload(self, data: Iterator[tuple[Key, Value]], key_prefix: str = "") -> None:
+    def bulkload(
+        self, input_data: Iterator[tuple[Key, Value]], key_prefix: str = ""
+    ) -> None:
         """See :meth:`Index.bulkload`.
 
         Range-encoded variant: after building the sorted bitmap, propagates each
@@ -333,7 +352,7 @@ class RangeEncodedBitmapIndex[Key, Value](SortedBitmapIndex[Key, Value]):
         if enabled.
         """
         # Create a regular sorted bitmap
-        super().bulkload(data, key_prefix)
+        super().bulkload(input_data, key_prefix)
 
         # Fill up the range for all greater keys
         for key, _ in reversed(self.key_bit_sequence_list):

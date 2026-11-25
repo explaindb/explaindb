@@ -37,7 +37,7 @@ class BitSequence(ABC):
         """
         self.represented_number_of_bits = represented_number_of_bits
 
-    def __add__(self, other: BitSequence) -> BitSequence:
+    def __add__(self, other: BitSequence) -> Self:
         """
         Combine two BitSequences, i.e., compute their union.
         :param other: The other bit-sequence.
@@ -45,7 +45,7 @@ class BitSequence(ABC):
         """
         return self | other
 
-    def __sub__(self, other: BitSequence) -> BitSequence:
+    def __sub__(self, other: BitSequence) -> Self:
         """
         Subtracts other from self, i.e., computes self & not other.
         :param other: The other bit-sequence.
@@ -99,7 +99,7 @@ class BitSequence(ABC):
         """
 
     @abstractmethod
-    def __eq__(self, other: BitSequence) -> bool:
+    def __eq__(self, other: object) -> bool:
         """
         Checks two bit-sequences for equality.
         :param other: The other bit-sequence.
@@ -107,14 +107,14 @@ class BitSequence(ABC):
         """
 
     @abstractmethod
-    def __and__(self, other: BitSequence) -> BitSequence:
+    def __and__(self, other: BitSequence) -> Self:
         """
         Returns the bitwise & between this and the other bit-sequence
         :return: The bitwise & as a bit-sequence.
         """
 
     @abstractmethod
-    def __or__(self, other: BitSequence) -> BitSequence:
+    def __or__(self, other: BitSequence) -> Self:
         """
         Returns the bitwise | between this and the other bit-sequence
         :return: The bitwise | as a bit-sequence.
@@ -128,7 +128,7 @@ class BitSequence(ABC):
         """
 
     @abstractmethod
-    def __invert__(self) -> BitSequence:
+    def __invert__(self) -> Self:
         """
         Returns the bitwise inversion/negation of this bit-sequence
         :return: The bitwise ~ as a bit-sequence.
@@ -318,9 +318,12 @@ class BitSequence(ABC):
         """
         # `self` is always a concrete BitSequence subclass, and every subclass
         # overrides SetBitsIterator with a concrete nested class, so this never
-        # instantiates the abstract base iterator.
+        # instantiates the abstract base iterator; calling self.SetBitsIterator
+        # directly would make the type checker report an abstract class, so the
+        # variable's type `type[...]` tells it that it may hold a concrete subclass:
+        iterator_type: type[BitSequence.SetBitsIterator] = self.SetBitsIterator
         # pylint: disable-next=abstract-class-instantiated
-        return self.SetBitsIterator(self)
+        return iterator_type(self)
 
     class SetBitsReverseIterator(ABC, Iterator[int]):
         """
@@ -348,9 +351,12 @@ class BitSequence(ABC):
         :return: An iterator to iterate through all set bits.
         """
         # See __iter__: the concrete subclass always provides a concrete
-        # SetBitsReverseIterator, so the abstract base is never instantiated.
+        # SetBitsReverseIterator, so the abstract base is never instantiated:
+        iterator_type: type[BitSequence.SetBitsReverseIterator] = (
+            self.SetBitsReverseIterator
+        )
         # pylint: disable-next=abstract-class-instantiated
-        return self.SetBitsReverseIterator(self)
+        return iterator_type(self)
 
 
 class UncompressedBitSequence(BitSequence, ABC):
@@ -361,7 +367,7 @@ class UncompressedBitSequence(BitSequence, ABC):
     @abstractmethod
     def _perform_binary_operation(
         self, other: BitSequence, operation: Callable
-    ) -> UncompressedBitSequence:
+    ) -> Self:
         """
         Applies a bitwise binary operation between this and the other bit-sequence, position by position.
         :param other: The other bit-sequence.
@@ -369,19 +375,20 @@ class UncompressedBitSequence(BitSequence, ABC):
         :return: The result of the operation as an uncompressed bit-sequence.
         """
 
-    def __and__(self, other: UncompressedBitSequence) -> UncompressedBitSequence:
+    def __and__(self, other: BitSequence) -> Self:
         """See :meth:`BitSequence.__and__`."""
         return self._perform_binary_operation(other, lambda x, y: x & y)
 
-    def __or__(self, other: UncompressedBitSequence) -> UncompressedBitSequence:
+    def __or__(self, other: BitSequence) -> Self:
         """See :meth:`BitSequence.__or__`."""
         return self._perform_binary_operation(other, lambda x, y: x | y)
 
-    def __xor__(self, other: UncompressedBitSequence) -> UncompressedBitSequence:
+    def __xor__(self, other: BitSequence) -> UncompressedBitSequence:
         """See :meth:`BitSequence.__xor__`."""
         return self._perform_binary_operation(other, lambda x, y: x ^ y)
 
     @staticmethod
+    @abstractmethod
     def create_all_false_bit_sequence(
         number_of_bits: int = 0,
     ) -> UncompressedBitSequence:

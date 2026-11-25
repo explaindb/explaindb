@@ -22,7 +22,7 @@
 
 from __future__ import annotations
 from abc import ABC, abstractmethod
-from typing import Type, Iterator
+from typing import Any, Type, Iterator
 from system.interfaces.bit_sequence import BitSequence, CompressedBitSequence
 from system.indexes.bit_sequences import IntegerBitSequence, UncompressedBitSequence
 from system.interfaces.indexing.Index import Index, PointQueryMixIn, RangeQueryMixIn
@@ -119,7 +119,9 @@ class BitmapIndex[Key, Value](
             "Show Operation is not supported by this bitmap index."
         )
 
-    def bulkload(self, data: Iterator[tuple[Key, Value]], key_prefix: str = "") -> None:
+    def bulkload(
+        self, input_data: Iterator[tuple[Key, Value]], key_prefix: str = ""
+    ) -> None:
         """See :meth:`Index.bulkload`.
 
         Builds the value-to-position and position-to-value maps from the data and
@@ -134,7 +136,7 @@ class BitmapIndex[Key, Value](
         contained_values: set[Value] = set()
 
         # Iterate through all key/value pairs and insert them into the index
-        for key, value in data:
+        for key, value in input_data:
             # Add new value to the list of known values
             if value not in contained_values:
                 self.value_to_position[value] = len(contained_values)
@@ -294,7 +296,7 @@ class BitmapIndex[Key, Value](
         return ~self.get_smaller(key)
 
     @staticmethod
-    def key_is_sortable(key: Key) -> bool:
+    def key_is_sortable(key: Any) -> bool:
         """
         Checks whether the key can be sorted.
         :param key: The key.

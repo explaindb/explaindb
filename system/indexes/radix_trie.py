@@ -34,7 +34,7 @@ class KeyMapping[Key, Value](ABC):
     """Maps a key to a value"""
 
     @abstractmethod
-    def map(self, key: Key, level: int, descriptor: Descriptor = None) -> int:
+    def map(self, key: Key, level: int, descriptor: Descriptor | None = None) -> int:
         """Maps the given key to a bucket at the given level.
 
         @param key: The key to map.
@@ -50,7 +50,7 @@ class PrefixDigitMapping(KeyMapping[str, int]):
     On each level we take one character of the key and map it to a bucket.
     """
 
-    def map(self, key: str, level: int, descriptor: Descriptor = None) -> int:
+    def map(self, key: str, level: int, descriptor: Descriptor | None = None) -> int:
         """See :meth:`KeyMapping.map`.
 
         The key is a string of decimal digits; returns the digit at position ``level``, so the key must be longer
@@ -65,7 +65,9 @@ class PrefixDigitMapping(KeyMapping[str, int]):
 class RadixTrie[Key, Value](KeyValueStore[Key, Value], Drawable):
     """A simple implementation of a radix trie data structure."""
 
-    class AbstractNode(KeyValueStore[Key, Value], Drawable, ABC):
+    # the nodes and factories have type parameters of their own, so that they can be made outside of a trie, e.g. as
+    # RadixTrie.InnerNodeFactory[str, int](); they are named K and V, as Key and Value would shadow those of RadixTrie:
+    class AbstractNode[K, V](KeyValueStore[K, V], Drawable, ABC):
         """Abstract node of a radix trie. A node is itself a valid key-value store: it is either an inner node
         that routes keys to children by radix, or a leaf node that stores the key-value pairs.
         """
@@ -74,14 +76,15 @@ class RadixTrie[Key, Value](KeyValueStore[Key, Value], Drawable):
             """Create a new abstract node. Sets a node counter to 0"""
             self.count: int = 0
 
-        def get(self, key: Key, level: int = 0) -> Iterator[Value]:
+        @abstractmethod
+        def get(self, key: K, level: int = 0) -> Iterator[V]:
             """See :meth:`PointQueryMixIn.get`.
 
             The extra ``level`` parameter is the current depth of this node in the trie. Overridden by
             concrete node types.
             """
 
-        def put(self, key: Key, value: Value, level: int = 0) -> None | PutInfo:
+        def put(self, key: K, value: V, level: int = 0) -> None | PutInfo:
             """See :meth:`Index.put`.
 
             The extra ``level`` parameter is the current depth of this node in the trie. Overridden by
@@ -92,14 +95,14 @@ class RadixTrie[Key, Value](KeyValueStore[Key, Value], Drawable):
             """See :meth:`Index.size`."""
             return self.count
 
-        def flush(self, key: Key | None = None) -> None:
+        def flush(self, key: K | None = None) -> None:
             """See :meth:`Index.flush`.
 
             Not supported for trie nodes: always raises ``NotImplementedError``.
             """
             raise NotImplementedError
 
-        def delete(self, key: Key, value: Value = None) -> None:
+        def delete(self, key: K, value: V = None) -> None:
             """See :meth:`Index.delete`.
 
             Not supported for trie nodes: always raises ``NotImplementedError``.
@@ -122,15 +125,16 @@ class RadixTrie[Key, Value](KeyValueStore[Key, Value], Drawable):
         ):
             """Draw this instance on the given canvas."""
 
-    class InnerNode[Key, Value](AbstractNode[Key, Value]):
+    class InnerNode[K, V](AbstractNode[K, V]):
         """Inner node of a radix trie. Holds a list of children and routes each key to the matching child by
         computing its radix (either via the key mapping or via the child descriptors).
         """
 
         def __init__(
             self,
-            key_mapping: KeyMapping[Key, Value] = None,
-            parent_descriptor: Descriptor = None,  # not needed for the index but for the viz
+            key_mapping: KeyMapping[K, V] | None = None,
+            # not needed for the index but for the viz:
+            parent_descriptor: Descriptor | None = None,
         ):
             """Creates a new inner node.
 
@@ -148,7 +152,7 @@ class RadixTrie[Key, Value](KeyValueStore[Key, Value], Drawable):
                 )
             self.parent_descriptor = parent_descriptor
 
-            self.key_mapping: KeyMapping[Key, Value] = key_mapping
+            self.key_mapping: KeyMapping[K, V] | None = key_mapping
             self.children: list[RadixTrie.AbstractNode] = list[RadixTrie.AbstractNode]()
 
         def show(self, indent: str = "") -> None:
@@ -190,7 +194,7 @@ class RadixTrie[Key, Value](KeyValueStore[Key, Value], Drawable):
                     y_offset=y_offset,
                 )
 
-        def _get_radix(self, key: Key, level: int = 0) -> int:
+        def _get_radix(self, key: K, level: int = 0) -> int:
             """Get the radix for the given key at the given level."""
             radix: int | None = None
             if self.key_mapping:
@@ -198,12 +202,15 @@ class RadixTrie[Key, Value](KeyValueStore[Key, Value], Drawable):
                 radix = self.key_mapping.map(key, level)
             else:
                 # use descriptors to find the correct child:
+                assert (
+                    self.children_descriptors is not None
+                ), "an inner node without key mapping needs a descriptor"
                 # loop over all children descriptors:
                 for i in range(len(self.children_descriptors)):
                     # check for containment
                     if self.children_descriptors[i].contains(key):
                         # first match wins:
-                        radix: int = i
+                        radix = i
                         break
 
                 if radix is None:
@@ -211,7 +218,7 @@ class RadixTrie[Key, Value](KeyValueStore[Key, Value], Drawable):
 
             return radix
 
-        def get(self, key: Key, level: int = 0) -> Iterator[Value]:
+        def get(self, key: K, level: int = 0) -> Iterator[V]:
             """See :meth:`PointQueryMixIn.get`.
 
             Computes the radix for the key at this level and delegates the lookup to the matching child at the
@@ -220,7 +227,7 @@ class RadixTrie[Key, Value](KeyValueStore[Key, Value], Drawable):
             radix: int = self._get_radix(key, level)
             return self.children[radix].get(key, level + 1)
 
-        def put(self, key: Key, value: Value, level: int = 0) -> None | PutInfo:
+        def put(self, key: K, value: V, level: int = 0) -> None | PutInfo:
             """See :meth:`Index.put`.
 
             Computes the radix for the key at this level and delegates the insertion to the matching child at
@@ -229,15 +236,15 @@ class RadixTrie[Key, Value](KeyValueStore[Key, Value], Drawable):
             radix: int = self._get_radix(key, level)
             return self.children[radix].put(key, value, level + 1)
 
-    class LeafNode[Key, Value](AbstractNode[Key, Value]):
+    class LeafNode[K, V](AbstractNode[K, V]):
         """Leaf node of a radix trie. Stores the key-value pairs and is chained to its left sibling so that all
         leaves form a sequence for ISAM-style scanning.
         """
 
         def __init__(
             self,
-            parent_descriptor: Descriptor = None,
-            left_sibling: RadixTrie.LeafNode[Key, Value] | None = None,
+            parent_descriptor: Descriptor | None = None,
+            left_sibling: RadixTrie.LeafNode[K, V] | None = None,
         ):
             """Create a new leaf node.
             @param parent_descriptor: The parent descriptor. THis is technically not needed but required for the
@@ -248,8 +255,8 @@ class RadixTrie[Key, Value](KeyValueStore[Key, Value], Drawable):
             """
             super().__init__()
             self.parent_descriptor = parent_descriptor
-            self.values: list[tuple[Key, Value]] = list[tuple[Key, Value]]()
-            self.left_sibling: RadixTrie.LeafNode[Key, Value] | None = left_sibling
+            self.values: list[tuple[K, V]] = list[tuple[K, V]]()
+            self.left_sibling: RadixTrie.LeafNode[K, V] | None = left_sibling
 
         def show(self, indent: str = "") -> None:
             """See :meth:`Index.show`.
@@ -268,13 +275,16 @@ class RadixTrie[Key, Value](KeyValueStore[Key, Value], Drawable):
             y_offset: int = 0,
         ):
             """Draw this instance on the given canvas. This only works if the key is of type Drawable."""
-            key: Drawable
-
             for key, _ in self.values:
+                assert isinstance(key, Drawable), "only drawable keys can be drawn"
                 key.draw(canvas, canvas_height, x_offset, y_offset)
 
             if self.left_sibling is not None:
                 # draw ISAM line, this corresponds to space filling curve over the sub-descriptors!:
+                assert (
+                    self.parent_descriptor is not None
+                    and self.left_sibling.parent_descriptor is not None
+                ), "only leaves with a descriptor can be drawn"
                 x_from: int = x_offset + self.left_sibling.parent_descriptor.center().x
                 y_from: int = canvas_height - (
                     y_offset + self.left_sibling.parent_descriptor.center().y
@@ -291,7 +301,7 @@ class RadixTrie[Key, Value](KeyValueStore[Key, Value], Drawable):
                 canvas.line_to(x_to, y_to)
                 canvas.stroke()
 
-        def put(self, key: Key, value: Value, level: int = 0) -> None | PutInfo:
+        def put(self, key: K, value: V, level: int = 0) -> None | PutInfo:
             """See :meth:`Index.put`.
 
             Appends the (key, value) pair to this leaf and increments its element count; duplicates are kept.
@@ -299,7 +309,7 @@ class RadixTrie[Key, Value](KeyValueStore[Key, Value], Drawable):
             self.count += 1
             self.values.append((key, value))
 
-        def get(self, key: Key, level: int = 0) -> Iterator[Value]:
+        def get(self, key: K, level: int = 0) -> Iterator[V]:
             """See :meth:`PointQueryMixIn.get`.
 
             Scans this leaf and yields the value of every stored pair whose key equals the search key.
@@ -308,35 +318,35 @@ class RadixTrie[Key, Value](KeyValueStore[Key, Value], Drawable):
                 if k == key:
                     yield v
 
-    class InnerNodeFactory[Key, Value]:
+    class InnerNodeFactory[K, V]:
         """A factory that creates new RadixTrie.InnerNode instances."""
 
         def new_instance(
             self,
-            key_mapping: KeyMapping[Key, Value] = None,
-            new_descriptor: Descriptor = None,
-        ) -> RadixTrie.InnerNode[Key, Value]:
+            key_mapping: KeyMapping[K, V] | None = None,
+            new_descriptor: Descriptor | None = None,
+        ) -> RadixTrie.InnerNode[K, V]:
             """Creates and returns a new :class:`RadixTrie.InnerNode`.
 
             @param key_mapping: the key mapping to pass to the new inner node.
             @param new_descriptor: the descriptor of the region covered by the new inner node.
             @return: the newly created inner node.
             """
-            return RadixTrie.InnerNode[Key, Value](key_mapping, new_descriptor)
+            return RadixTrie.InnerNode[K, V](key_mapping, new_descriptor)
 
-    class LeafFactory[Key, Value]():
+    class LeafFactory[K, V]():
         """A factory that creates new RadixTrie.LeafNode instances."""
 
         def new_instance(
             self, parent_descriptor, previous_leaf
-        ) -> RadixTrie.LeafNode[Key, Value]:
+        ) -> RadixTrie.LeafNode[K, V]:
             """Creates and returns a new :class:`RadixTrie.LeafNode`.
 
             @param parent_descriptor: the descriptor of the region covered by the new leaf.
             @param previous_leaf: the leaf to the left of the new leaf, used to chain leaves for ISAM.
             @return: the newly created leaf node.
             """
-            return RadixTrie.LeafNode[Key, Value](parent_descriptor, previous_leaf)
+            return RadixTrie.LeafNode[K, V](parent_descriptor, previous_leaf)
 
     def __init__(
         self,
@@ -346,7 +356,7 @@ class RadixTrie[Key, Value](KeyValueStore[Key, Value], Drawable):
             Key, Value
         ](),
         leaf_factory: RadixTrie.LeafFactory[Key, Value] = LeafFactory[Key, Value](),
-        descriptor: Descriptor = None,
+        descriptor: Descriptor | None = None,
         number_of_inner_node_levels: int = 0,
     ):
         """Creates a radix trie and eagerly builds its fixed node structure.
@@ -365,14 +375,14 @@ class RadixTrie[Key, Value](KeyValueStore[Key, Value], Drawable):
             inner_node_factory
         )
         self.leaf_factory: RadixTrie.LeafFactory[Key, Value] = leaf_factory
-        self.descriptor: Descriptor = descriptor
+        self.descriptor: Descriptor | None = descriptor
         self.number_of_inner_node_levels: int = number_of_inner_node_levels
 
         # element count for the entire trie:
         self.count: int = 0
 
-        # root node:
-        self.root: RadixTrie.AbstractNode[Key, Value] | None = None
+        # root node, set by _build_trie:
+        self.root: RadixTrie.AbstractNode[Key, Value]
 
         self.node_count: int = self._build_trie()
 
@@ -391,10 +401,8 @@ class RadixTrie[Key, Value](KeyValueStore[Key, Value], Drawable):
 
         if self.number_of_inner_node_levels == 0:
             # no inner nodes, simply create a leaf node and return:
-            self.root: RadixTrie.AbstractNode[Key, Value] = (
-                self.leaf_factory.new_instance(
-                    parent_descriptor=self.descriptor, previous_leaf=None
-                )
+            self.root = self.leaf_factory.new_instance(
+                parent_descriptor=self.descriptor, previous_leaf=None
             )
             node_count = 1
             return node_count
@@ -403,20 +411,18 @@ class RadixTrie[Key, Value](KeyValueStore[Key, Value], Drawable):
 
         # dictionary to store nodes to process at each level:
         # helper structure to break up the recursion into a level-wise construction of the trie:
-        nodes_to_process: dict[int, list[RadixTrie.AbstractNode[Key, Value]]] = dict[
-            int, list[RadixTrie.AbstractNode[Key, Value]]
+        nodes_to_process: dict[int, list[RadixTrie.InnerNode[Key, Value]]] = dict[
+            int, list[RadixTrie.InnerNode[Key, Value]]
         ]()
 
         # get the root node:
-        self.root: RadixTrie.AbstractNode[Key, Value] = (
-            self.inner_node_factory.new_instance(
-                key_mapping=self.key_mapping, new_descriptor=self.descriptor
-            )
+        self.root = self.inner_node_factory.new_instance(
+            key_mapping=self.key_mapping, new_descriptor=self.descriptor
         )
         node_count += 1
 
         # add the root node to the list of nodes to process at level 0:
-        nodes_to_process[0] = list[RadixTrie.AbstractNode[Key, Value]]([self.root])
+        nodes_to_process[0] = list[RadixTrie.InnerNode[Key, Value]]([self.root])
 
         # level-wise construction (expansion) of the trie:
         for trie_level in range(1, self.number_of_inner_node_levels):
@@ -512,6 +518,7 @@ class RadixTrie[Key, Value](KeyValueStore[Key, Value], Drawable):
         y_offset: int = 0,
     ):
         """Draw the radix trie on the given canvas."""
+        assert self.descriptor is not None, "only a trie with a descriptor can be drawn"
         self.descriptor.draw(canvas, canvas_height, x_offset, y_offset)
         self.root.draw(canvas, canvas_height, x_offset, y_offset)
         # display(canvas)

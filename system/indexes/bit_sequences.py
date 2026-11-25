@@ -28,7 +28,7 @@ from system.interfaces.bit_sequence import (
     UncompressedBitSequence,
     CompressedBitSequence,
 )
-from typing import Callable, Type, Iterator
+from typing import Callable, Type, Iterator, Self
 
 
 class IntegerBitSequence(UncompressedBitSequence):
@@ -55,7 +55,7 @@ class IntegerBitSequence(UncompressedBitSequence):
         )
         self.number: int = number
 
-    def __eq__(self, other: IntegerBitSequence) -> bool:
+    def __eq__(self, other: object) -> bool:
         """See :meth:`BitSequence.__eq__`.
 
         Equal iff ``other`` is an ``IntegerBitSequence`` with the same backing
@@ -64,13 +64,15 @@ class IntegerBitSequence(UncompressedBitSequence):
         return isinstance(other, IntegerBitSequence) and other.number == self.number
 
     def _perform_binary_operation(
-        self, other: IntegerBitSequence, operation: Callable
-    ) -> IntegerBitSequence:
+        self, other: BitSequence, operation: Callable
+    ) -> Self:
         """See :meth:`UncompressedBitSequence._perform_binary_operation`.
 
-        Applies ``operation`` directly to the two backing integers; the result
-        represents ``max(len(self), len(other))`` bits.
+        Applies ``operation`` directly to the two backing integers, so ``other``
+        must be an ``IntegerBitSequence``, too; the result represents
+        ``max(len(self), len(other))`` bits.
         """
+        assert isinstance(other, IntegerBitSequence), "not an integer bit sequence"
         return type(self)(
             operation(self.number, other.number), max(len(self), len(other))
         )
@@ -88,7 +90,7 @@ class IntegerBitSequence(UncompressedBitSequence):
             self.number &= (1 << updated_represented_number_of_bits) - 1
         self.represented_number_of_bits = updated_represented_number_of_bits
 
-    def __invert__(self) -> BitSequence:
+    def __invert__(self) -> Self:
         """See :meth:`BitSequence.__invert__`.
 
         XORs the backing integer with a mask of all ones spanning the
@@ -112,12 +114,14 @@ class IntegerBitSequence(UncompressedBitSequence):
         """See :meth:`BitSequence.__contains__`."""
         return (self.number & 1 << index) != 0
 
-    def contains_bit_sequence(self, other: IntegerBitSequence) -> bool:
+    def contains_bit_sequence(self, other: BitSequence) -> bool:
         """See :meth:`BitSequence.contains_bit_sequence`.
 
-        Uses a bitwise AND: ``other`` is contained iff ANDing both backing
-        integers yields ``other``'s integer.
+        Uses a bitwise AND: ``other``, which must be an ``IntegerBitSequence``,
+        too, is contained iff ANDing both backing integers yields ``other``'s
+        integer.
         """
+        assert isinstance(other, IntegerBitSequence), "not an integer bit sequence"
         return self.number & other.number == other.number
 
     def all_bits_set_to_false(self) -> bool:
@@ -175,19 +179,18 @@ class IntegerBitSequence(UncompressedBitSequence):
         )
 
     @staticmethod
-    def create_all_false_bit_sequence(max_len: int = 0) -> IntegerBitSequence:
-        """See :meth:`BitSequence.create_all_false_bit_sequence`.
+    def create_all_false_bit_sequence(number_of_bits: int = 0) -> IntegerBitSequence:
+        """See :meth:`BitSequence.create_all_false_bit_sequence`."""
+        return IntegerBitSequence(0, number_of_bits)
 
-        :param max_len: The number of bits in the bit-sequence.
-        """
-        return IntegerBitSequence(0, max_len)
-
-    def intersects(self, other: IntegerBitSequence) -> bool:
+    def intersects(self, other: BitSequence) -> bool:
         """See :meth:`BitSequence.intersects`.
 
         Uses a bitwise AND: the sequences intersect iff ANDing their backing
-        integers is non-zero.
+        integers is non-zero, so ``other`` must be an ``IntegerBitSequence``,
+        too.
         """
+        assert isinstance(other, IntegerBitSequence), "not an integer bit sequence"
         return (self.number & other.number) != 0
 
     def bit_count(self) -> int:
@@ -197,7 +200,7 @@ class IntegerBitSequence(UncompressedBitSequence):
         """
         return self.number.bit_count()
 
-    def get_least_significant_bit(self) -> IntegerBitSequence:
+    def get_least_significant_bit(self) -> Self:
         """See :meth:`BitSequence.get_least_significant_bit`.
 
         Isolates the lowest set bit via the two's-complement identity
@@ -207,7 +210,7 @@ class IntegerBitSequence(UncompressedBitSequence):
         # 2-complements would be 110100, and thus 001100 & 110100 = 000100, which is the least significant bit
         return type(self)(self.number & -self.number, len(self))
 
-    def get_most_significant_bit(self) -> IntegerBitSequence:
+    def get_most_significant_bit(self) -> Self:
         """See :meth:`BitSequence.get_most_significant_bit`.
 
         Uses ``int.bit_length()`` to locate the highest set bit.
@@ -301,7 +304,7 @@ class BitListBitSequence(UncompressedBitSequence):
             raise ValueError("Number of bits do not match with the passed bit list!")
         super().__init__(bits_in_passed_list)
 
-    def __eq__(self, other: BitListBitSequence) -> bool:
+    def __eq__(self, other: object) -> bool:
         """See :meth:`BitSequence.__eq__`.
 
         Equal iff ``other`` is a ``BitListBitSequence`` with an identical
@@ -317,7 +320,7 @@ class BitListBitSequence(UncompressedBitSequence):
         """See :meth:`BitSequence.__setitem__`."""
         self.bit_list[index] = value
 
-    def intersects(self, other: BitListBitSequence) -> bool:
+    def intersects(self, other: BitSequence) -> bool:
         """See :meth:`BitSequence.intersects`.
 
         Scans the overlapping prefix of both lists for a shared set bit.
@@ -381,8 +384,8 @@ class BitListBitSequence(UncompressedBitSequence):
         self.represented_number_of_bits = updated_represented_number_of_bits
 
     def _get_largest_and_smallest_set(
-        self, other: BitListBitSequence
-    ) -> tuple[BitListBitSequence, BitListBitSequence]:
+        self, other: BitSequence
+    ) -> tuple[BitSequence, BitSequence]:
         """
         Computes the smallest and the largest bit-sequence, and returns them as a tuple. The first element of the tuple is the
         smallest bit-sequence and the second is the largest bit-sequence.
@@ -393,7 +396,7 @@ class BitListBitSequence(UncompressedBitSequence):
         return (self, other) if len(self) < len(other) else (other, self)
 
     def _perform_binary_operation(
-        self, other: BitListBitSequence, operation: Callable
+        self, other: BitSequence, operation: Callable
     ) -> BitListBitSequence:
         """See :meth:`UncompressedBitSequence._perform_binary_operation`.
 
@@ -430,7 +433,7 @@ class BitListBitSequence(UncompressedBitSequence):
         """See :meth:`BitSequence.__contains__`."""
         return self[index]
 
-    def contains_bit_sequence(self, other: BitListBitSequence) -> bool:
+    def contains_bit_sequence(self, other: BitSequence) -> bool:
         """See :meth:`BitSequence.contains_bit_sequence`.
 
         Checks that every set bit of ``other`` is also set in self.
@@ -442,12 +445,12 @@ class BitListBitSequence(UncompressedBitSequence):
 
     @staticmethod
     def create_all_false_bit_sequence(
-        represented_number_of_bits: int = 0,
+        number_of_bits: int = 0,
     ) -> BitListBitSequence:
         """See :meth:`BitSequence.create_all_false_bit_sequence`."""
         return BitListBitSequence(
             bit_list=BitListBitSequence._create_all_false_bit_list(),
-            represented_number_of_bits=represented_number_of_bits,
+            represented_number_of_bits=number_of_bits,
         )
 
     @staticmethod
@@ -561,7 +564,7 @@ class BitListBitSequence(UncompressedBitSequence):
             self.curr_bit_idx -= 1
             return next_result
 
-    def __invert__(self) -> BitSequence:
+    def __invert__(self) -> BitListBitSequence:
         """See :meth:`BitSequence.__invert__`.
 
         Negates every entry of the boolean list.
@@ -868,12 +871,13 @@ class WAHBitSequence(CompressedBitSequence):
 
         # Traverse through all bit sequence chunks
         while upper_bit_sequence_idx < len(bit_sequence):
-            word_list_creator.add_from_uncompressed_bit_sequence(
-                bit_sequence.get_bit_sequence_for_range(
-                    lower_bit_sequence_idx,
-                    upper_bit_sequence_idx,
-                )
+            # a range of an uncompressed bit sequence is uncompressed, too:
+            chunk: BitSequence = bit_sequence.get_bit_sequence_for_range(
+                lower_bit_sequence_idx,
+                upper_bit_sequence_idx,
             )
+            assert isinstance(chunk, UncompressedBitSequence)
+            word_list_creator.add_from_uncompressed_bit_sequence(chunk)
 
             # We switch to a new chunk in the uncompressed bit sequence, i.e., the new lower end of the range starts
             # right after the previous upper end, whereas the new upper end has to be increased by the number of bits
@@ -893,13 +897,13 @@ class WAHBitSequence(CompressedBitSequence):
                 + (len(bit_sequence) % (WAHBitSequence.WORD_LENGTH - 1))
             )
 
-            word_list_creator.add_uncompressed_bit_sequence_as_literal(
-                bit_sequence.get_bit_sequence_for_range(
-                    lower_idx=lower_bit_sequence_idx,
-                    upper_idx=upper_bit_sequence_idx,
-                    represented_number_of_bits=WAHBitSequence.WORD_LENGTH - 1,
-                )
+            last_chunk: BitSequence = bit_sequence.get_bit_sequence_for_range(
+                lower_idx=lower_bit_sequence_idx,
+                upper_idx=upper_bit_sequence_idx,
+                represented_number_of_bits=WAHBitSequence.WORD_LENGTH - 1,
             )
+            assert isinstance(last_chunk, UncompressedBitSequence)
+            word_list_creator.add_uncompressed_bit_sequence_as_literal(last_chunk)
 
         # Bit sequence is compressed now
         return WAHBitSequence(
@@ -908,14 +912,14 @@ class WAHBitSequence(CompressedBitSequence):
             words=word_list_creator.get_resulting_word_list(),
         )
 
-    def __eq__(self, other: WAHBitSequence) -> bool:
+    def __eq__(self, other: object) -> bool:
         """See :meth:`BitSequence.__eq__`.
 
         Equal iff ``other`` is a ``WAHBitSequence`` with an identical word list.
         """
         return isinstance(other, WAHBitSequence) and self.words == other.words
 
-    def __and__(self, other: WAHBitSequence) -> WAHBitSequence:
+    def __and__(self, other: BitSequence) -> WAHBitSequence:
         """See :meth:`BitSequence.__and__`.
 
         Operates directly on the compressed word lists.
@@ -924,7 +928,7 @@ class WAHBitSequence(CompressedBitSequence):
             other, lambda x, y: x & y, WAHBitSequence.and_literal_fill
         )
 
-    def __or__(self, other: WAHBitSequence) -> WAHBitSequence:
+    def __or__(self, other: BitSequence) -> WAHBitSequence:
         """See :meth:`BitSequence.__or__`.
 
         Operates directly on the compressed word lists.
@@ -933,7 +937,7 @@ class WAHBitSequence(CompressedBitSequence):
             other, lambda x, y: x | y, WAHBitSequence.or_literal_fill
         )
 
-    def __xor__(self, other: WAHBitSequence) -> WAHBitSequence:
+    def __xor__(self, other: BitSequence) -> WAHBitSequence:
         """See :meth:`BitSequence.__xor__`.
 
         Operates directly on the compressed word lists.
@@ -1019,7 +1023,7 @@ class WAHBitSequence(CompressedBitSequence):
 
     def _perform_binary_operation(
         self,
-        other: WAHBitSequence,
+        other: BitSequence,
         operation: Callable,
         literal_fill_operation: Callable,
     ) -> WAHBitSequence:
@@ -1047,6 +1051,7 @@ class WAHBitSequence(CompressedBitSequence):
         # uncompressed bit sequence. For this, another index is established. In order to manage both indices for both
         # operands, a dedicated index helper class, defined below, is utilized.
 
+        assert isinstance(other, WAHBitSequence), "other must be WAH-compressed"
         assert len(self) == len(
             other
         ), "Both compressed bit sequences must have the same length"

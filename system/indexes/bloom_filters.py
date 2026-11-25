@@ -51,6 +51,14 @@ class BloomFilter:
         def __iter__(self) -> Self:
             return self
 
+        @abstractmethod
+        def __next__(self) -> int:
+            """Returns the next hash value of the key.
+
+            @return: A bit position in ``[0, number_of_available_bits)``.
+            @raise StopIteration: Once one value has been returned per hash function.
+            """
+
     class RNGHashIterator(HashIterator):
         """
         Iterator making use of RNGs to create pseudo hash values. NEVER USE THIS IN A PRODUCTION SYSTEM!!
@@ -71,11 +79,8 @@ class BloomFilter:
             self.evaluated_hash_functions: int = 0
 
         def __next__(self):
-            """Returns the next pseudo hash value in ``[0, number_of_available_bits)``.
-
-            Raises :class:`StopIteration` once one value has been produced per hash function. Consecutive
-            values come from the RNG seeded with the key, so the same key always yields the same sequence of
-            positions.
+            """See :meth:`BloomFilter.HashIterator.__next__`. Consecutive values come from the RNG seeded with
+            the key, so the same key always yields the same sequence of positions.
             """
             # If all hash functions have been evaluated, stop the iteration
             if self.evaluated_hash_functions == self.number_of_hash_functions:
