@@ -29,6 +29,8 @@ The drawing sets no fixed text colour: text, outlines and arrows use the colour 
 (``currentColor``), and the pages are filled with translucent tints, so it reads on light and dark pages alike.
 Every value is escaped. Each part carries a ``class`` and ``data-*`` attributes that name what it shows, so that
 tests can read the tree's structure from the SVG.
+
+:func:`merge_tree_text` returns the same tree as text to print, one line per run, with the runs numbered from 1.
 """
 
 from __future__ import annotations
@@ -562,3 +564,86 @@ def merge_tree_svg[ObjectType: Comparable](
         levels.bottom + MARGIN,
         title or "merge tree",
     )
+
+
+def _pages_text(values: Sequence[object], page_size: int) -> str:
+    """The values in pages, each page in brackets with its values separated by commas: ``[1,4] [4,5]``.
+
+    @param values: the values, in their order
+    @param page_size: the number of values on a page
+    @return: the pages, separated by spaces; empty without values
+    """
+    return " ".join(f"[{label}]" for label in page_labels(values, page_size))
+
+
+def _run_line[ObjectType: Comparable](run: Run[ObjectType], page_size: int) -> str:
+    """The line of a run in :func:`merge_tree_text`: its number, counted from 1, and its pages.
+
+    @param run: the run
+    @param page_size: the number of values on a page
+    @return: the line, e.g. ``    run 1: [1,4] [4,5]``
+    """
+    return f"    run {run.number + 1}: {_pages_text(run.elements, page_size)}"
+
+
+def _run_names[ObjectType: Comparable](runs: Sequence[Run[ObjectType]]) -> str:
+    """The runs a merge reads, by their numbers counted from 1, in ascending order: ``run 1``, ``runs 1 and 2``,
+    ``runs 1, 2 and 3``, or ``no runs``.
+
+    @param runs: the runs, in any order
+    @return: their names
+    """
+    numbers: list[str] = [
+        str(number + 1) for number in sorted(run.number for run in runs)
+    ]
+    if not numbers:
+        return "no runs"
+    if len(numbers) == 1:
+        return f"run {numbers[0]}"
+    return f"runs {', '.join(numbers[:-1])} and {numbers[-1]}"
+
+
+def merge_tree_text[ObjectType: Comparable](
+    counts: SortCounts[ObjectType], page_size: int = 2, title: str = ""
+) -> str:
+    """The merge tree of one sort as text, to print: one line per run, each page in brackets:
+
+    .. code-block:: text
+
+        quicksort:
+          PASS 0 writes 9 runs:
+            run 1: [1,4] [4,5]
+            ...
+          PASS 1 merges runs 1, 2 and 3 into
+            run 10: [1,2] [2,4] [4,5] [5,5] [5,5] [6,7]
+          ...
+          PASS 2 merges runs 10, 11 and 12 into the result (not written):
+            result: [1,1] [1,1] [2,2] ...
+
+    The runs are numbered from 1 in the order they were written (:attr:`Run.number` + 1): those of pass 0 first,
+    then the outputs of the merges. A merge names the runs it reads in ascending order of their numbers. The merges
+    come in the order the sort did them; as the sort always merges the shortest runs first, a merge of a higher pass
+    may come before one of a lower pass.
+
+    @param counts: what the sort did, from :func:`sort_counted`
+    @param page_size: the number of values on a page, 2 as on the slides
+    @param title: the first line, followed by a colon and printed as given; none if empty
+    @return: the lines, separated by newlines, without a newline at the end
+    @raise ValueError: if page_size is less than 1 (raised by :func:`page_labels`, which also splits the empty result)
+    """
+    lines: list[str] = [f"{title}:"] if title else []
+    # pass 0 and the runs it wrote:
+    runs: int = len(counts.runs)
+    lines.append(f"  PASS 0 writes {runs} run{'' if runs == 1 else 's'}:")
+    lines.extend(_run_line(run, page_size) for run in counts.runs)
+    # every merge before the final merge, then the run it wrote:
+    for merge in counts.merges:
+        lines.append(f"  PASS {merge.level} merges {_run_names(merge.inputs)} into")
+        lines.append(_run_line(merge.output, page_size))
+    # the final merge and its result, without a space at the end of an empty result:
+    final: FinalMerge[ObjectType] = counts.final_merge
+    lines.append(
+        f"  PASS {final.level} merges {_run_names(final.inputs)} into the result (not written):"
+    )
+    lines.append(f"    result: {_pages_text(counts.output, page_size)}".rstrip())
+    return "\n".join(lines)

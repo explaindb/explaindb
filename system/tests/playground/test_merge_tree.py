@@ -21,7 +21,7 @@
 # Test modules use self-documenting method/class names and module-level
 # fixtures, so pylint's naming and docstring checks are relaxed here.
 # pylint: disable=invalid-name,missing-class-docstring,missing-function-docstring
-"""Tests for the merge tree of an external merge sort, drawn as SVG: read back by parsing the SVG."""
+"""Tests for the merge tree of an external merge sort, drawn as SVG (read back by parsing it) and printed as text."""
 
 from __future__ import annotations
 
@@ -37,6 +37,7 @@ from typing import Any
 from system.playground.merge_tree import (
     MAX_VALUES,
     merge_tree_svg,
+    merge_tree_text,
     page_labels,
 )
 from system.playground.sort_counting import Merge, Run, SortCounts, sort_counted
@@ -974,6 +975,261 @@ class PageLabelsTest(unittest.TestCase):
             ["1,1,2,3", "3,4,4,4", "5,6,6,6", "7,7,8,9"],
             labels(groups(root, "result")[0]),
         )
+
+
+class MergeTreeTextTest(unittest.TestCase):
+    """The merge tree of a sort printed as text: one line per pass 0 and per merge, then one line per run it writes,
+    with the runs numbered from 1 in the order they were written."""
+
+    # the 18 pages of the small example's sorted output, the same with both run generations:
+    SMALL_EXAMPLE_RESULT: str = (
+        "[1,1] [1,1] [2,2] [2,2] [2,3] [4,4] [4,4] [4,4] [5,5] "
+        "[5,5] [5,5] [5,6] [6,6] [6,6] [7,7] [8,8] [8,9] [9,9]"
+    )
+
+    def test_small_example_with_quicksort(self) -> None:
+        """The small example sorted with quicksort (M = 4, F = 3) prints its title, the 9 runs of pass 0 as runs 1 to
+        9, the three merges of pass 1, each with the runs it reads and the run it writes (runs 10 to 12), and the
+        final merge of pass 2 into the result, every run as its pages of two.
+
+        Would fail if the runs were numbered from 0, as :class:`Run` numbers them, if a merge named other runs than
+        those it read, or if a line were indented differently.
+        """
+        expected: str = "\n".join(
+            [
+                "quicksort:",
+                "  PASS 0 writes 9 runs:",
+                "    run 1: [1,4] [4,5]",
+                "    run 2: [2,5] [5,7]",
+                "    run 3: [2,5] [5,6]",
+                "    run 4: [1,2] [8,9]",
+                "    run 5: [2,4] [6,8]",
+                "    run 6: [1,5] [6,7]",
+                "    run 7: [2,4] [8,9]",
+                "    run 8: [1,3] [4,9]",
+                "    run 9: [4,5] [6,6]",
+                "  PASS 1 merges runs 1, 2 and 3 into",
+                "    run 10: [1,2] [2,4] [4,5] [5,5] [5,5] [6,7]",
+                "  PASS 1 merges runs 4, 5 and 6 into",
+                "    run 11: [1,1] [2,2] [4,5] [6,6] [7,8] [8,9]",
+                "  PASS 1 merges runs 7, 8 and 9 into",
+                "    run 12: [1,2] [3,4] [4,4] [5,6] [6,8] [9,9]",
+                "  PASS 2 merges runs 10, 11 and 12 into the result (not written):",
+                f"    result: {self.SMALL_EXAMPLE_RESULT}",
+            ]
+        )
+        self.assertEqual(
+            expected, merge_tree_text(SMALL_EXAMPLE_CHUNKS, title="quicksort")
+        )
+
+    def test_small_example_with_replacement_selection(self) -> None:
+        """The small example sorted with replacement selection (M = 4, F = 3) prints its 3 runs of pass 0 and the
+        final merge of pass 1, which names its runs in ascending order, ``runs 1, 2 and 3``, although it first read
+        them in the order 3, 2, 1.
+
+        Would fail if a merge's runs were printed in the order the merge first read them.
+        """
+        # the final merge read its runs in another order than ascending, so that the text tells the two apart:
+        numbers: list[int] = [
+            run.number for run in SMALL_EXAMPLE_SELECTION.final_merge.inputs
+        ]
+        self.assertNotEqual(sorted(numbers), numbers)
+        # the text, with the runs in ascending order:
+        expected: str = "\n".join(
+            [
+                "replacement selection:",
+                "  PASS 0 writes 3 runs:",
+                "    run 1: [1,2] [4,4] [5,5] [5,5] [5,6] [7,9]",
+                "    run 2: [1,2] [2,2] [4,5] [6,6] [7,8] [8,8] [9]",
+                "    run 3: [1,1] [2,3] [4,4] [4,5] [6,6] [9]",
+                "  PASS 1 merges runs 1, 2 and 3 into the result (not written):",
+                f"    result: {self.SMALL_EXAMPLE_RESULT}",
+            ]
+        )
+        self.assertEqual(
+            expected,
+            merge_tree_text(SMALL_EXAMPLE_SELECTION, title="replacement selection"),
+        )
+
+    def test_merges_of_two_runs_one_of_them_written_by_a_merge(self) -> None:
+        """20 ascending values (M = 4, F = 2, quicksort) without a title print no title line, the 5 runs of pass 0,
+        the two merges of pass 1 into runs 6 and 7, the merge of pass 2 that reads run 5 of pass 0 and run 6 of pass 1
+        into run 8, and the final merge of pass 3; the two runs of a merge are joined by ``and``.
+
+        Would fail if a line were printed for the empty title, if a merge's output were numbered by its position among
+        the merges instead of among all runs written, or if two runs were joined by a comma.
+        """
+        expected: str = "\n".join(
+            [
+                "  PASS 0 writes 5 runs:",
+                "    run 1: [0,1] [2,3]",
+                "    run 2: [4,5] [6,7]",
+                "    run 3: [8,9] [10,11]",
+                "    run 4: [12,13] [14,15]",
+                "    run 5: [16,17] [18,19]",
+                "  PASS 1 merges runs 1 and 2 into",
+                "    run 6: [0,1] [2,3] [4,5] [6,7]",
+                "  PASS 1 merges runs 3 and 4 into",
+                "    run 7: [8,9] [10,11] [12,13] [14,15]",
+                "  PASS 2 merges runs 5 and 6 into",
+                "    run 8: [0,1] [2,3] [4,5] [6,7] [16,17] [18,19]",
+                "  PASS 3 merges runs 7 and 8 into the result (not written):",
+                "    result: [0,1] [2,3] [4,5] [6,7] [8,9] [10,11] [12,13] [14,15] [16,17] [18,19]",
+            ]
+        )
+        self.assertEqual(expected, merge_tree_text(TWENTY))
+
+    def test_every_merge_names_its_runs_in_ascending_order(self) -> None:
+        """In the text of 39 ascending values (M = 4, F = 3, quicksort), the first merge, which first read run 10 and
+        then runs 1 and 2, names them ``runs 1, 2 and 10``, in ascending order of their numbers, like every other
+        merge.
+
+        Would fail if only the final merge's runs were sorted, or if the runs were sorted by the text of their numbers
+        (``1, 10 and 2``).
+        """
+        # the first merge read its runs in another order than ascending:
+        numbers: list[int] = [run.number for run in FAR_APART.merges[0].inputs]
+        self.assertNotEqual(sorted(numbers), numbers)
+        # the line of pass 0 and the line of every merge:
+        self.assertEqual(
+            [
+                "  PASS 0 writes 10 runs:",
+                "  PASS 1 merges runs 1, 2 and 10 into",
+                "  PASS 1 merges runs 3, 4 and 5 into",
+                "  PASS 1 merges runs 6, 7 and 8 into",
+                "  PASS 2 merges runs 9 and 11 into",
+                "  PASS 3 merges runs 12, 13 and 14 into the result (not written):",
+            ],
+            [
+                line
+                for line in merge_tree_text(FAR_APART).split("\n")
+                if line.startswith("  PASS")
+            ],
+        )
+
+    def test_merges_in_the_order_the_sort_did_them(self) -> None:
+        """23 values sorted with replacement selection (M = 4, F = 2) make runs of 4, 5, 7, 6 and 1 values; as the sort
+        merges the shortest runs first, its merge of pass 2 comes before its second merge of pass 1, and the text
+        prints the merges in this order, so that the run numbers rise from line to line.
+
+        Would fail if the merges were printed grouped by pass.
+        """
+        values: tuple[int, ...] = (
+            9, 2, 5, 9, 0, 4, 3, 1, 7, 0, 0, 1, 5, 8, 0, 3, 0, 2, 0, 2, 2, 4, 0,
+        )  # fmt: skip
+        counts: SortCounts[int] = sort_counted(values, 4, 2, True)
+        # the sort did a merge of pass 2 before one of pass 1:
+        self.assertEqual([1, 2, 1], [merge.level for merge in counts.merges])
+        # the merges and their output runs, in the order the sort did them:
+        self.assertEqual(
+            [
+                "  PASS 1 merges runs 1 and 5 into",
+                "    run 6: [0,2] [5,9] [9]",
+                "  PASS 2 merges runs 2 and 6 into",
+                "    run 7: [0,0] [1,2] [3,4] [5,7] [9,9]",
+                "  PASS 1 merges runs 3 and 4 into",
+                "    run 8: [0,0] [0,0] [0,1] [2,2] [2,3] [4,5] [8]",
+                "  PASS 3 merges runs 7 and 8 into the result (not written):",
+            ],
+            merge_tree_text(counts).split("\n")[6:13],
+        )
+
+    def test_a_single_run(self) -> None:
+        """8 ascending values sorted with replacement selection (M = 4, F = 2) make one run: pass 0 writes ``1 run``,
+        and the final merge of pass 1 merges ``run 1`` into the result.
+
+        Would fail if a single run were named in the plural (``1 runs``, ``runs 1``).
+        """
+        expected: str = "\n".join(
+            [
+                "  PASS 0 writes 1 run:",
+                "    run 1: [0,1] [2,3] [4,5] [6,7]",
+                "  PASS 1 merges run 1 into the result (not written):",
+                "    result: [0,1] [2,3] [4,5] [6,7]",
+            ]
+        )
+        self.assertEqual(expected, merge_tree_text(sort_counted(range(8), 4, 2, True)))
+
+    def test_empty_input(self) -> None:
+        """The empty input prints that pass 0 writes 0 runs, that the final merge of pass 1 merges no runs, and the
+        result as ``    result:``, without pages and without a space at the end of the line.
+
+        Would fail if the missing runs were printed as an empty name (``merges  into``), or if the empty result's line
+        ended with a space.
+        """
+        expected: str = "\n".join(
+            [
+                "  PASS 0 writes 0 runs:",
+                "  PASS 1 merges no runs into the result (not written):",
+                "    result:",
+            ]
+        )
+        self.assertEqual(expected, merge_tree_text(sort_counted((), 4, 2, False)))
+
+    def test_pages_of_three(self) -> None:
+        """With pages of three values, every run of 20 ascending values and the result are printed in pages of three,
+        the last page of each holding the values left, e.g. ``[0,1,2] [3]`` for run 1.
+
+        Would fail if the page size given were ignored, or if the last, shorter page of a run were dropped.
+        """
+        # the lines of the runs and of the result, which hold the pages:
+        self.assertEqual(
+            [
+                "    run 1: [0,1,2] [3]",
+                "    run 2: [4,5,6] [7]",
+                "    run 3: [8,9,10] [11]",
+                "    run 4: [12,13,14] [15]",
+                "    run 5: [16,17,18] [19]",
+                "    run 6: [0,1,2] [3,4,5] [6,7]",
+                "    run 7: [8,9,10] [11,12,13] [14,15]",
+                "    run 8: [0,1,2] [3,4,5] [6,7,16] [17,18,19]",
+                "    result: [0,1,2] [3,4,5] [6,7,8] [9,10,11] [12,13,14] [15,16,17] [18,19]",
+            ],
+            [
+                line
+                for line in merge_tree_text(TWENTY, page_size=3).split("\n")
+                if line.startswith("    ")
+            ],
+        )
+
+    def test_page_size_below_1_is_rejected(self) -> None:
+        """A page size of 0 or less raises a ValueError that names the page size, for 20 ascending values and for the
+        empty input, which has no values to split into pages.
+
+        Would fail if a page size below 1 were accepted for the empty input, or if the error came from somewhere else,
+        e.g. from ``range`` with a step of 0.
+        """
+        cases: dict[str, SortCounts[int]] = {
+            "20 ascending": TWENTY,
+            "empty input": sort_counted((), 4, 2, False),
+        }
+        for name, counts in cases.items():
+            for page_size in (0, -1):
+                with self.subTest(case=name, page_size=page_size):
+                    with self.assertRaisesRegex(
+                        ValueError, "page_size must be at least 1"
+                    ):
+                        merge_tree_text(counts, page_size=page_size)
+
+    def test_a_title_adds_only_its_line(self) -> None:
+        """A title adds the line ``title:`` in front of the text and changes none of the other lines; the title is
+        printed as given, also with ``<``, ``&`` and ``"``.
+
+        Would fail if the title changed the indentation of the lines below it, if a title line were printed without a
+        title, or if the title were escaped as in the SVG.
+        """
+        title: str = 'Merge <b>& "tree"'
+        cases: dict[str, SortCounts[int]] = {
+            "20 ascending": TWENTY,
+            "small example, replacement selection": SMALL_EXAMPLE_SELECTION,
+            "empty input": sort_counted((), 4, 2, False),
+        }
+        for name, counts in cases.items():
+            with self.subTest(case=name):
+                self.assertEqual(
+                    f"{title}:\n" + merge_tree_text(counts),
+                    merge_tree_text(counts, title=title),
+                )
 
 
 class TitleAndEscapingTest(unittest.TestCase):
