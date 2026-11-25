@@ -26,7 +26,7 @@ import itertools
 import math
 from collections.abc import Callable, Iterator
 from dataclasses import dataclass, field
-from typing import Literal
+from typing import Literal, cast
 
 from system.query_processing.predicates import WHERE_Clause
 from system.stores.MVCC import TransactionAbortedException, TransactionalKeyValueStore
@@ -381,7 +381,8 @@ def committed_state(store: TransactionalKeyValueStore) -> dict[str, Row]:
         if entry.committed and isinstance(
             entry.committed[-1], VersionedKeyValueStore.UpdateEntry
         ):
-            state[object_id] = entry.committed[-1].value
+            # a schedule stores only Rows (the store's versions hold any object):
+            state[object_id] = cast(Row, entry.committed[-1].value)
     return state
 
 
@@ -404,12 +405,16 @@ def execute_operation(
         record.TA_id = store.begin_transaction()
         return f"begin (ts {record.TA_id})"
     if operation == "abort":
+        # the transaction's begin set TA_id:
+        assert record.TA_id is not None, f"{record.name} has not begun"
         # the transaction gives up on its own: the store removes its work-in-progress versions; like any aborted
         # transaction it is left out of the serial replay:
         store.abort_transaction(record.TA_id)
         record.aborted = True
         return "abort"
     if operation == "commit":
+        # the transaction's begin set TA_id:
+        assert record.TA_id is not None, f"{record.name} has not begun"
         try:
             # runs the validation phase; on a conflict the store aborts the transaction:
             store.commit_transaction(record.TA_id)
@@ -431,12 +436,12 @@ def execute_operation(
             if operation.a_equals is None
             else WHERE_Clause("a", "==", operation.a_equals)
         )
-        # the store returns (object_id, object)-pairs in its own order; sorted, they can be compared with the
-        # result of the same read in the serial replay:
+        # the store returns (object_id, object)-pairs in its own order (a schedule stores only Rows); sorted, they can
+        # be compared with the result of the same read in the serial replay:
         result: ReadResult = tuple(
             sorted(
                 (
-                    StoredObject(object_id, row)
+                    StoredObject(object_id, cast(Row, row))
                     for object_id, row in store.read_objects(record.TA_id, where)
                 ),
                 key=lambda stored: stored.object_id,
@@ -447,10 +452,15 @@ def execute_operation(
             ExecutedDataOperation(operation, result, position)
         )
         return f"{operation} → {format_read_result(result)}"
-    # a write creates a work-in-progress version, visible to other transactions only after the commit:
+    # a write creates a work-in-progress version, visible to other transactions only after the commit (an update
+    # always names its key and row, a delete its key):
     if operation.kind == "update":
+        assert (
+            operation.key is not None and operation.row is not None
+        ), f"{operation} needs a key and a row"
         store.update_object(operation.key, operation.row, record.TA_id)
     elif operation.kind == "delete":
+        assert operation.key is not None, f"{operation} needs a key"
         store.delete_object(operation.key, record.TA_id)
     else:
         raise ValueError(f"unknown operation {operation}")
@@ -602,10 +612,12 @@ def first_difference(
                         serial=expected,
                     )
             elif data_operation.kind == "update":
-                # an update inserts the object if it does not exist:
+                # an update inserts the object if it does not exist; it always names its key and row:
+                assert data_operation.key is not None and data_operation.row is not None
                 state[data_operation.key] = data_operation.row
             elif data_operation.kind == "delete":
-                # deleting an object that does not exist (any more) changes nothing:
+                # deleting an object that does not exist (any more) changes nothing; a delete always names its key:
+                assert data_operation.key is not None
                 state.pop(data_operation.key, None)
             else:
                 raise ValueError(f"unknown data operation {data_operation}")
@@ -694,12 +706,17 @@ def overlapping_committed_writers(records: list[TransactionRecord]) -> bool:
     writers: list[TransactionRecord] = [
         record for record in records if record.committed and record.wrote
     ]
-    # two transactions overlapped in time if each one started before the other one ended:
-    return any(
-        t_i.first_position < t_j.last_position
-        and t_j.first_position < t_i.last_position
-        for t_i, t_j in itertools.combinations(writers, 2)
-    )
+    for t_i, t_j in itertools.combinations(writers, 2):
+        # both committed, so both ran operations and have their first and last position set:
+        assert t_i.first_position is not None and t_i.last_position is not None
+        assert t_j.first_position is not None and t_j.last_position is not None
+        # two transactions overlapped in time if each one started before the other one ended:
+        if (
+            t_i.first_position < t_j.last_position
+            and t_j.first_position < t_i.last_position
+        ):
+            return True
+    return False
 
 
 def two_commits_during_writer(records: list[TransactionRecord]) -> bool:
@@ -715,13 +732,20 @@ def two_commits_during_writer(records: list[TransactionRecord]) -> bool:
     for record in records:
         # only a writer that reached its commit was validated:
         if record.wrote and (record.committed or record.aborted_at_commit):
-            # the other committed writers whose commit (their last operation) falls into record's run:
+            # it ran operations, so its first and last position are set:
+            assert (
+                record.first_position is not None and record.last_position is not None
+            )
+            # the other committed writers whose commit (their last operation) falls into record's run (a committed
+            # transaction ran operations, so its last position is set; the `is not None` test is only there for the
+            # type checker):
             intervening: int = sum(
                 1
                 for other in records
                 if other is not record
                 and other.committed
                 and other.wrote
+                and other.last_position is not None
                 and record.first_position < other.last_position < record.last_position
             )
             # its validation had to take (at least) two other commits into account:

@@ -343,7 +343,7 @@ class NextOperationsTest(unittest.TestCase):
         self.assertEqual(
             {1: ["begin"]}, next_operations(schedule_of((1, "begin"), (1, "commit")))
         )
-        four = schedule_of(*((n, "begin") for n in (1, 2, 3, 4)))
+        four = schedule_of((1, "begin"), (2, "begin"), (3, "begin"), (4, "begin"))
         self.assertEqual([0, 1, 2, 3], sorted(next_operations(four)))
         self.assertEqual(
             {0: ["begin"], 1: list(RUNNING_OPERATIONS)},
@@ -365,9 +365,9 @@ class MvccPlaygroundTest(unittest.TestCase):
         # the store directly after the mode, and the controls directly after the store:
         store_index: int = children.index(playground.store)
         self.assertIs(playground.mode, children[store_index - 1])
-        self.assertIn(
-            "<b>Edit schedule</b>", children[store_index + 1].children[0].value
-        )
+        controls: widgets.Widget = children[store_index + 1]
+        assert isinstance(controls, widgets.Box)
+        self.assertIn("<b>Edit schedule</b>", controls.children[0].value)
         # the transactions and the verdict come last, without the store:
         self.assertIs(playground.state, children[-1])
         self.assertNotIn("<b>Store</b>", playground.state.value)
@@ -1103,6 +1103,8 @@ class MvccPlaygroundTest(unittest.TestCase):
             f"<td>a==1: at read {t_1.checksums[0].at_read[:8]}</td>",
             playground.state.value,
         )
+        # T2 has not committed, so its read has a checksum now:
+        assert t_2.checksums[0].now is not None
         self.assertIn(
             f'<span style="background:{STATUS_COLOURS["aborted"]}">a==1: at read '
             f"{t_2.checksums[0].at_read[:8]} · now {t_2.checksums[0].now[:8]}</span>",

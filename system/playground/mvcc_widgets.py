@@ -420,7 +420,8 @@ class MvccPlayground:  # pylint: disable=too-many-instance-attributes
         if self.scenario.value == OWN:
             self.description.value = ""
             return
-        scenario: Scenario = CHOICES[self.scenario.value]
+        # the dropdown's other values are positions in CHOICES:
+        scenario: Scenario = CHOICES[cast(int, self.scenario.value)]
         self.initial_state = scenario.initial_state
         self.schedule = list(scenario.schedule)
         self.description.value = html.escape(scenario.description)
@@ -432,12 +433,12 @@ class MvccPlayground:  # pylint: disable=too-many-instance-attributes
         # a second click may arrive before the browser has disabled the button, when nothing is offered any more:
         if self.transaction.value is None or self.operation.value is None:
             return
+        # the key dropdown always shows one of KEYS:
+        key: str = cast(str, self.key.value)
         self.schedule.append(
             ScheduledOperation(
                 self.transaction.value,
-                make_operation(
-                    self.operation.value, self.key.value, self.a.value, self.b.value
-                ),
+                make_operation(self.operation.value, key, self.a.value, self.b.value),
             )
         )
         self.position = len(self.schedule)
@@ -469,7 +470,7 @@ class MvccPlayground:  # pylint: disable=too-many-instance-attributes
             # description, see load_scenario):
             if edited:
                 self.scenario.value = OWN
-            choices: dict[int, list[str]] = next_operations(self.schedule)
+            choices: dict[int, list[str]] = next_operations(tuple(self.schedule))
             # a transaction that may only begin does not exist yet:
             offer(
                 self.transaction,
@@ -482,9 +483,15 @@ class MvccPlayground:  # pylint: disable=too-many-instance-attributes
                     for index in sorted(choices)
                 ],
             )
+            # no transaction is offered once all MAX_TRANSACTIONS transactions have begun and ended, and then no
+            # operation either:
             offer(
                 self.operation,
-                [(kind, kind) for kind in choices.get(self.transaction.value, [])],
+                (
+                    [(kind, kind) for kind in choices.get(self.transaction.value, [])]
+                    if self.transaction.value is not None
+                    else []
+                ),
             )
             self.add_button.disabled = not choices
             self.remove_button.disabled = not self.schedule
@@ -492,8 +499,9 @@ class MvccPlayground:  # pylint: disable=too-many-instance-attributes
             # (before the browser disables it) before its start:
             self.position = max(0, min(self.position, len(self.schedule)))
             schedule: Schedule = tuple(self.schedule)
+            # the mode buttons' values are the modes:
             run_state: RunState = run_to(
-                schedule, self.initial_state, self.mode.value, self.position
+                schedule, self.initial_state, cast(Mode, self.mode.value), self.position
             )
             # an error stops the run: going further would show the same, so the position stays at the error:
             if run_state.verdict.kind == "error":
@@ -570,12 +578,13 @@ class MvccPlayground:  # pylint: disable=too-many-instance-attributes
             f"45px repeat({max(1, len(run_state.transactions))}, 300px)"
             + (" minmax(250px, 1fr)" if why else "")
         )
-        old: tuple[widgets.Widget, ...] = self.grid.children
+        old: tuple[widgets.DOMWidget, ...] = self.grid.children
         self.grid.children = children
         # the widgets of the previous grid stay open in the kernel and the browser until they are closed, with the
         # layout and style widgets each one has:
         for widget in old:
             widget.layout.close()
-            if hasattr(widget, "style"):
-                widget.style.close()
+            style: widgets.Widget | None = getattr(widget, "style", None)
+            if style is not None:
+                style.close()
             widget.close()

@@ -2293,8 +2293,9 @@ class SwapTest(unittest.TestCase):
         heap: list[Element] = [
             at(frame.heap, place) for place in range(len(frame.heap))
         ]
-        # a pair, as the caller checked that something is compared:
+        # a pair, as the caller checked that something is compared (the assert lets the type checker see it):
         self.assertEqual(2, len(frame.compared), where)
+        assert len(frame.compared) == 2
         first, second = frame.compared[0], frame.compared[-1]
         # the start of the caption, which names the sinking element, and the rest:
         start, found = frame.caption.split(": ", 1)

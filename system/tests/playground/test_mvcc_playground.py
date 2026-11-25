@@ -50,6 +50,7 @@ from system.playground.mvcc_scenarios import SCENARIOS, Scenario, schedule_of
 from system.playground.schedules import (
     DataOperation,
     Difference,
+    Operation,
     Row,
     Schedule,
     StoredObject,
@@ -332,18 +333,16 @@ class VerdictTest(unittest.TestCase):
         """
         # T1 to T4 all begin, then all read all objects, then each in turn updates x and commits:
         transactions: tuple[int, ...] = (1, 2, 3, 4)
-        schedule: Schedule = schedule_of(
+        operations: list[tuple[int, Operation]] = [
             *((n, "begin") for n in transactions),
             *((n, DataOperation("read")) for n in transactions),
             *(
-                operation
+                (n, operation)
                 for n in transactions
-                for operation in (
-                    (n, DataOperation("update", "x", Row(1, n))),
-                    (n, "commit"),
-                )
+                for operation in (DataOperation("update", "x", Row(1, n)), "commit")
             ),
-        )
+        ]
+        schedule: Schedule = schedule_of(*operations)
         # run to the end without validation: not serializable, with MAX_ORDER_LINES (6) lines of orders that differ
         # plus one line that counts the others:
         result: RunState = run_to(schedule, INITIAL_X, "no validation", len(schedule))
@@ -465,7 +464,7 @@ class ExplanationTest(unittest.TestCase):
         the read and now.
         """
         # per case: the scenario, the mode, and the explanation expected at the position of the commit that fails:
-        for name, mode, expected in (
+        cases: tuple[tuple[str, Mode, dict[int, str]], ...] = (
             (
                 "lost update",
                 "method 1",
@@ -490,7 +489,8 @@ class ExplanationTest(unittest.TestCase):
                     "and T1's read a==1 would now return y (without T1's own writes)"
                 },
             ),
-        ):
+        )
+        for name, mode, expected in cases:
             with self.subTest(scenario=name, mode=mode):
                 # run the scenario to its end; the failed commit is the only operation explained:
                 s: Scenario = scenario_named(name)
@@ -580,7 +580,7 @@ class ExplanationTest(unittest.TestCase):
             (2, "commit"),
         )
         # per method, the explanation of T2's failed commit (position 8): method 1 names read a==1, method 2 names y:
-        for mode, expected in (
+        cases: tuple[tuple[Mode, str], ...] = (
             (
                 "method 1",
                 "validation: read a==1 now returns {x: (a=1, b=0), y: (a=1, b=2)}, but in the snapshot of T2's begin "
@@ -591,7 +591,8 @@ class ExplanationTest(unittest.TestCase):
                 "validation: T1 wrote y and committed after T2 began, "
                 "and T2's read a==1 returned y (without T2's own writes)",
             ),
-        ):
+        )
+        for mode, expected in cases:
             with self.subTest(mode=mode):
                 result: RunState = run_to(schedule, initial_state, mode, len(schedule))
                 self.assertEqual({8: expected}, result.explanations)
@@ -1118,7 +1119,7 @@ class ExplanationTest(unittest.TestCase):
         raised a KeyError instead. Checked with method 1 and with snapshot isolation.
         """
         s: Scenario = scenario_named("serial")
-        for mode in ["method 1", "snapshot isolation"]:
+        for mode in ("method 1", "snapshot isolation"):
             with self.subTest(mode=mode):
                 # position 2 is T1's insert of y, which succeeds:
                 with self.assertRaisesRegex(AssertionError, "no reason found"):

@@ -153,7 +153,8 @@ def state_of(playground: ReplacementSelectionPlayground) -> State:
         playground.error.value,
         generator_disabled(playground),
         disabled(playground),
-        playground.preset.value,
+        # the preset dropdown's values are names:
+        cast(str, playground.preset.value),
         playground.text.value,
         playground.memory.value,
     )

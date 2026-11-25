@@ -59,7 +59,7 @@ class RailElement(ABC):
 class Gate(RailElement):
     """A gate has a position ("left" or "right") and two children RailElements (left and right)."""
 
-    def __init__(self, left: RailElement = None, right: RailElement = None):
+    def __init__(self, left: RailElement, right: RailElement):
         """Creates a gate with a random initial position and two child elements.
 
         :param left: the child reached when the position is ``"left"``.
