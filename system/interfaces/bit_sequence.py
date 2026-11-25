@@ -22,7 +22,7 @@
 
 from __future__ import annotations
 from abc import ABC, abstractmethod
-from typing import Callable, Iterator
+from typing import Callable, Iterator, Self
 
 
 class BitSequence(ABC):
@@ -304,7 +304,7 @@ class BitSequence(ABC):
             :param bit_sequence: The bit sequence to iterate.
             """
 
-        def __iter__(self):
+        def __iter__(self) -> Self:
             return self
 
         @abstractmethod
@@ -334,7 +334,7 @@ class BitSequence(ABC):
             :param bit_sequence: The bit_sequence to iterate.
             """
 
-        def __iter__(self):
+        def __iter__(self) -> Self:
             return self
 
         @abstractmethod

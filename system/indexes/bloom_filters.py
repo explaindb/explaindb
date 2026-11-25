@@ -21,7 +21,7 @@
 """Bloom filter implementation for approximate set-membership tests."""
 
 from system.interfaces.bit_sequence import UncompressedBitSequence
-from typing import Any, Type
+from typing import Any, Self, Type
 import math
 from abc import ABC, abstractmethod
 import random
@@ -48,7 +48,7 @@ class BloomFilter:
             :param number_of_available_bits: The number of bits in the bloom filter.
             """
 
-        def __iter__(self):
+        def __iter__(self) -> Self:
             return self
 
     class RNGHashIterator(HashIterator):

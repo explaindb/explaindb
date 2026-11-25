@@ -22,7 +22,7 @@
 
 from __future__ import annotations
 from system.indexes.bit_sequences import IntegerBitSequence
-from typing import Iterator
+from typing import Iterator, Self
 
 
 class Problem(IntegerBitSequence):
@@ -105,7 +105,7 @@ class Problem(IntegerBitSequence):
                 IntegerBitSequence.SetBitsIterator(problem)
             )
 
-        def __iter__(self):
+        def __iter__(self) -> Self:
             return self
 
         def __next__(self) -> Problem:
@@ -146,7 +146,7 @@ class Problem(IntegerBitSequence):
                 Problem.SetBitsReverseIterator(problem)
             )
 
-        def __iter__(self):
+        def __iter__(self) -> Self:
             return self
 
         def __next__(self) -> Problem:
@@ -217,7 +217,7 @@ class Problem(IntegerBitSequence):
             # any duplicates
             self.stop_problem = stop_problem if stop_problem is not None else Problem()
 
-        def __iter__(self):
+        def __iter__(self) -> Self:
             return self
 
         def __next__(self) -> Problem:
