@@ -924,6 +924,18 @@ class WAHBitSequence(CompressedBitSequence):
             words=word_list_creator.get_resulting_word_list(),
         )
 
+    @staticmethod
+    def create_all_false_bit_sequence(number_of_bits: int = 0) -> WAHBitSequence:
+        """See :meth:`BitSequence.create_all_false_bit_sequence`.
+
+        Compresses an all-false :class:`IntegerBitSequence` of the given length, so the words are
+        :class:`IntegerBitSequence` objects; for another word type, compress an all-false sequence of
+        that type with :meth:`compress_bit_sequence`.
+        """
+        return WAHBitSequence.compress_bit_sequence(
+            IntegerBitSequence.create_all_false_bit_sequence(number_of_bits)
+        )
+
     def __eq__(self, other: object) -> bool:
         """See :meth:`BitSequence.__eq__`.
 

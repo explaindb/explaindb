@@ -419,6 +419,7 @@ class CompressedBitSequence(BitSequence, ABC):
         """
 
     @staticmethod
+    @abstractmethod
     def create_all_false_bit_sequence(
         number_of_bits: int = 0,
     ) -> CompressedBitSequence:

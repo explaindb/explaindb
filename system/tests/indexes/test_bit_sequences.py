@@ -461,6 +461,50 @@ class BitSequenceTests(unittest.TestCase):
         for bit_sequence_type in [IntegerBitSequence, BitListBitSequence]:
             test_for_different_types(bit_sequence_type)
 
+    def test_wah_create_all_false_bit_sequence(self):
+        """
+        The all-false WAH sequence of n bits is a WAHBitSequence of n bits with no bit set whose inversion has all n
+        bits set, equal to the compressed all-false integer bit sequence of n bits; at word length 4, seven bits become
+        one 0-fill word counting two fills followed by an all-zero literal word.
+        """
+        # create the all-false sequence at each word length and size and compare it with the compressed
+        # all-false integer bit sequence (WAH equality compares only the words, so check the length separately):
+        for word_length in [64, 4]:
+            for number_of_bits in [0, 3, 63, 200]:
+                with self.subTest(
+                    word_length=word_length, number_of_bits=number_of_bits
+                ):
+                    WAHBitSequence.WORD_LENGTH = word_length
+                    result: WAHBitSequence = (
+                        WAHBitSequence.create_all_false_bit_sequence(number_of_bits)
+                    )
+                    expected: WAHBitSequence = WAHBitSequence.compress_bit_sequence(
+                        IntegerBitSequence.create_all_false_bit_sequence(number_of_bits)
+                    )
+                    self.assertIsInstance(result, WAHBitSequence)
+                    self.assertEqual(len(result), number_of_bits)
+                    self.assertEqual(result.as_set(), set())
+                    self.assertEqual(result, expected)
+
+                    # inverting sets every bit the words cover, so all n bits must come back (a missing
+                    # fill would leave a gap):
+                    self.assertEqual((~result).as_set(), set(range(number_of_bits)))
+
+        # create seven all-false bits at word length 4 (three bits per word):
+        WAHBitSequence.WORD_LENGTH = 4
+        result = WAHBitSequence.create_all_false_bit_sequence(7)
+        self.assertIsInstance(result, WAHBitSequence)
+        self.assertEqual(len(result.words), 2)
+
+        # the first word is a 0-fill word counting two fills (bit 3 marks a fill, bit 2 unset means it
+        # repeats 0-bits, bits 0 and 1 hold the count 2):
+        self.assertTrue(WAHBitSequence.is_fill(result.words[0]))
+        self.assertEqual(result.words[0].as_set(), {1, 3})
+
+        # the second word is an all-zero literal word holding the seventh bit:
+        self.assertFalse(WAHBitSequence.is_fill(result.words[1]))
+        self.assertEqual(result.words[1].as_set(), set())
+
     def test_iterating_sparse_wah_does_not_overflow_recursion(self):
         """
         Iterating a sparse WAH bitmap must not overflow Python's recursion limit.
