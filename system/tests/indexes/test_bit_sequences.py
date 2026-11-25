@@ -185,6 +185,31 @@ class BitSequenceTests(unittest.TestCase):
         self.assertEqual(len(empty_list_bit_sequence), 0)
         self.assertEqual(empty_list_bit_sequence, bit_sequence)
 
+    def test_significant_bits_without_set_bits(self) -> None:
+        """Asking a bit sequence without set bits for its least or most significant bit returns a new bit sequence
+        of the same type and length without set bits."""
+        bit_sequence_type: type[UncompressedBitSequence]
+        for bit_sequence_type in [IntegerBitSequence, BitListBitSequence]:
+            # create a bit sequence of five bits, none of them set:
+            sequence: UncompressedBitSequence = (
+                bit_sequence_type.create_all_false_bit_sequence(5)
+            )
+
+            # both methods return a new, empty bit sequence of the same type and length:
+            for method in [
+                sequence.get_least_significant_bit,
+                sequence.get_most_significant_bit,
+            ]:
+                with self.subTest(
+                    bit_sequence_type=bit_sequence_type.__name__,
+                    method=method.__name__,
+                ):
+                    result = method()
+                    self.assertIs(type(result), bit_sequence_type)
+                    self.assertEqual(len(result), 5)
+                    self.assertEqual(result.as_set(), set())
+                    self.assertIsNot(result, sequence)
+
     def _create_bit_sequence_and_compressed_bit_sequence(
         self,
         bit_sequence_type: type[UncompressedBitSequence],

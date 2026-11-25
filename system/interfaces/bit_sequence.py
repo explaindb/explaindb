@@ -256,14 +256,18 @@ class BitSequence(ABC):
     @abstractmethod
     def get_least_significant_bit(self) -> BitSequence:
         """
-        Returns a bit sequence only containing the least significant bit of this bit sequence.
+        Returns a bit sequence only containing the least significant bit of this bit sequence. The returned bit
+        sequence has the same length as this one; if no bit is set in this bit sequence, none is set in the returned
+        one either.
         :return: The bit sequence only containing the least significant bit of this bit sequence.
         """
 
     @abstractmethod
     def get_most_significant_bit(self) -> BitSequence:
         """
-        Returns a bit sequence only containing the most significant bit of this bit sequence.
+        Returns a bit sequence only containing the most significant bit of this bit sequence. The returned bit
+        sequence has the same length as this one; if no bit is set in this bit sequence, none is set in the returned
+        one either.
         :return: The bit sequence only containing the most significant bit of this bit sequence.
         """
 

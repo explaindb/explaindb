@@ -215,6 +215,11 @@ class IntegerBitSequence(UncompressedBitSequence):
 
         Uses ``int.bit_length()`` to locate the highest set bit.
         """
+        # without set bits there is no most significant bit, and the shift below would fail
+        # (`1 << -1`), so the result has no bit set either:
+        if self.number == 0:
+            return type(self)(0, len(self))
+
         # The bit length represents how many bits are utilized to represent a number, e.g., for 01111, we have a
         # bit length of 4, meaning the most significant bit 3 is at position (bit_length - 1), which is the number of
         # times we need to bitshift 1 to the left.
@@ -355,6 +360,8 @@ class BitListBitSequence(UncompressedBitSequence):
             # First bit is the least significant bit, return after
             result_bit_list.set_bit(bit)
             return result_bit_list
+        # no bit is set, so the result keeps all bits unset:
+        return result_bit_list
 
     def get_most_significant_bit(self) -> BitListBitSequence:
         """See :meth:`BitSequence.get_most_significant_bit`.
@@ -368,6 +375,8 @@ class BitListBitSequence(UncompressedBitSequence):
             # First bit is the most significant bit, return after
             result_bit_list.set_bit(bit)
             return result_bit_list
+        # no bit is set, so the result keeps all bits unset:
+        return result_bit_list
 
     def update_represented_number_of_bits(
         self, updated_represented_number_of_bits: int
