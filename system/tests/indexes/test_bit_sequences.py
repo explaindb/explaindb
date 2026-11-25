@@ -169,6 +169,22 @@ class BitSequenceTests(unittest.TestCase):
                 compressed_bit_sequence.set_bit(i)
             test_iteration(compressed_bit_sequence)
 
+    def test_bit_list_bit_sequence_without_arguments_is_empty(self) -> None:
+        """
+        A BitListBitSequence created without arguments or from an empty list represents zero bits.
+        """
+        # create a bit-list sequence without arguments: it has no bits and equals the default all-false sequence:
+        bit_sequence: BitListBitSequence = BitListBitSequence()
+        self.assertEqual(len(bit_sequence), 0)
+        self.assertEqual(
+            bit_sequence, BitListBitSequence.create_all_false_bit_sequence()
+        )
+
+        # an empty list without a number of bits gives the same empty sequence:
+        empty_list_bit_sequence: BitListBitSequence = BitListBitSequence([])
+        self.assertEqual(len(empty_list_bit_sequence), 0)
+        self.assertEqual(empty_list_bit_sequence, bit_sequence)
+
     def _create_bit_sequence_and_compressed_bit_sequence(
         self,
         bit_sequence_type: type[UncompressedBitSequence],

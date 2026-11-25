@@ -286,11 +286,14 @@ class BitListBitSequence(UncompressedBitSequence):
     ):
         """
         :param bit_list: The list of bits.
-        :param represented_number_of_bits: The number of bits represented by the bit list.
+        :param represented_number_of_bits: The number of bits represented by the bit list. If None, the length of
+            ``bit_list``, or 0 if no or an empty bit list is given.
         """
         if not bit_list:
             self.bit_list = BitListBitSequence._create_all_false_bit_list(
                 represented_number_of_bits
+                if represented_number_of_bits is not None
+                else 0
             )
         else:
             self.bit_list = bit_list
