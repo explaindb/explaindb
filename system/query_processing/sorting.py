@@ -24,7 +24,7 @@ import heapq
 import itertools
 import logging
 from dataclasses import dataclass
-from typing import Any, Iterable, Iterator, Protocol, cast
+from typing import Any, Iterable, Iterator, Protocol, Self, cast
 
 from system.interfaces.queues import (
     QueueFactory,
@@ -88,6 +88,7 @@ class Comparable(Protocol):
 
     def __lt__(self, other: Any, /) -> bool:
         """Whether this element comes before ``other``."""
+        ...
 
 
 def sift_down[ObjectType: Comparable](
@@ -109,6 +110,8 @@ def sift_down[ObjectType: Comparable](
     # without size, the whole list is the heap:
     if size is None:
         size = len(heap)
+    # the first size places hold elements, never None (only the places behind them may be empty):
+    heap = cast(list[ObjectType], heap)
     # walk down, one level per round, until the element has no smaller child:
     while True:
         # the left child of the position (the right child, if there is one, follows it):
@@ -309,7 +312,7 @@ class ReplacementSelection[ObjectType: Comparable](Iterator[tuple[int, ObjectTyp
             sift_down(self._memory, 0, self._heap_size)
         return self._run, output
 
-    def __iter__(self) -> Iterator[tuple[int, ObjectType]]:
+    def __iter__(self) -> Self:
         """Returns the iterator object."""
         return self
 
@@ -432,12 +435,12 @@ class RunGenerator[ObjectType: Comparable]:
         return RunGenerationResult(runs_metadata, elements_written)
 
 
-class SingleStreamMerge[ObjectType](Iterator):
+class SingleStreamMerge[ObjectType: Comparable](Iterator):
     """Merges k sorted input streams into a single sorted output stream. This is a single merge, not a recursive
     merge. As this implementation is lazy/demand-driven it can also be used for the final merge of a recursive merge.
     """
 
-    class HeapEntry[ObjectType]:
+    class HeapEntry[ValueType: Comparable]:
         """HeapEntry is a helper class to store the value of an element and the read queue it came from. It is used
         to store the smallest element (=highest priority) of each run in the heap."""
 
@@ -449,9 +452,9 @@ class SingleStreamMerge[ObjectType](Iterator):
             self.queue = queue
             # iterator rewiring:
             self.iterator = iter(queue)
-            self.value: ObjectType = self.iterator.__next__()
+            self.value: ValueType = self.iterator.__next__()
 
-        def __lt__(self, other: ObjectType):
+        def __lt__(self, other: Self) -> bool:
             """Less than operator to compare heap entries by their value. Override less than operator of value to have
             other sort orders
 
@@ -508,7 +511,7 @@ class SingleStreamMerge[ObjectType](Iterator):
         # finally, establish heap property:
         heapq.heapify(self.heap)
 
-    def __next__(self) -> object:
+    def __next__(self) -> ObjectType:
         """Returns the next smallest element across all runs: takes the head of the heap, advances that run's
         iterator and re-heapifies, or drops the run (closing its queue) once it is exhausted.
         """
@@ -517,7 +520,7 @@ class SingleStreamMerge[ObjectType](Iterator):
             raise StopIteration
 
         # get the smallest element from the heap without removing it:
-        smallest_heap_entry: SingleStreamMerge.HeapEntry = self.heap[0]
+        smallest_heap_entry: SingleStreamMerge.HeapEntry[ObjectType] = self.heap[0]
         value: ObjectType = smallest_heap_entry.value
 
         try:
@@ -536,7 +539,7 @@ class SingleStreamMerge[ObjectType](Iterator):
 
         return value
 
-    def __iter__(self) -> Iterator:
+    def __iter__(self) -> Self:
         """Returns the iterator object. Required to be able to loop over the merged, sorted output."""
 
         return self
@@ -581,8 +584,8 @@ class ExternalMergeSort[ObjectType: Comparable](Iterator):
 
         # heap to keep track of the runs:
         self.heap: list[RunMetadata] = list[RunMetadata]()
-        # final merge iterator:
-        self.final_merge: Iterator | None = None
+        # final merge iterator, None until merge() sets it:
+        self.final_merge: Iterator[ObjectType] | None = None
 
     def create_runs(self) -> None:
         """phase 0: create runs for the input data."""
@@ -710,7 +713,7 @@ class ExternalMergeSort[ObjectType: Comparable](Iterator):
         )
 
         # set the final merge to be the online merge:
-        self.final_merge: Iterable = ssm
+        self.final_merge = ssm
 
         assert len(self.heap) <= self.fan_in
         # post: runs were merged, now we have <= self.fan_in runs left in the heap
@@ -718,9 +721,12 @@ class ExternalMergeSort[ObjectType: Comparable](Iterator):
     def __next__(self) -> ObjectType:
         """Returns the next element in the sorted runs. This is the online merge."""
 
+        assert (
+            self.final_merge is not None
+        ), "merge() must run before the sorted output is read"
         return self.final_merge.__next__()
 
-    def __iter__(self) -> Iterator:
+    def __iter__(self) -> Self:
         """Returns the iterator object. Required to be able to loop over the merged, sorted output."""
 
         return self
