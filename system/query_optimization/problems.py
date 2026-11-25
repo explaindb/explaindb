@@ -84,12 +84,12 @@ class Problem(IntegerBitSequence):
         return self.number.bit_length() - 1
 
     @staticmethod
-    def create_all_false_bit_sequence(represented_number_of_bits: int = 0) -> Problem:
+    def create_all_false_bit_sequence(number_of_bits: int = 0) -> Problem:
         """See :meth:`BitSequence.create_all_false_bit_sequence`.
 
         Returns the empty problem (no relation selected) as a :class:`Problem`.
         """
-        return Problem(0, represented_number_of_bits)
+        return Problem(0, number_of_bits)
 
     class SingletonIterator:
         """
@@ -114,7 +114,8 @@ class Problem(IntegerBitSequence):
                 next(self.key_iterator), len(self.problem)
             )
 
-    def __iter__(self) -> Iterator[Problem]:
+    # unlike the base class, a problem yields singleton problems instead of integer positions (hence the ignore):
+    def __iter__(self) -> Iterator[Problem]:  # type: ignore[override]
         """See :meth:`BitSequence.__iter__`.
 
         Yields each set bit as a singleton :class:`Problem` instead of as an
@@ -155,7 +156,8 @@ class Problem(IntegerBitSequence):
                 next(self.key_reverse_iterator), len(self.problem)
             )
 
-    def __reversed__(self) -> Iterator[Problem]:
+    # as in __iter__, a problem yields singleton problems instead of integer positions (hence the ignore):
+    def __reversed__(self) -> Iterator[Problem]:  # type: ignore[override]
         """See :meth:`BitSequence.__reversed__`.
 
         Yields each set bit as a singleton :class:`Problem`, from the most to the

@@ -23,9 +23,14 @@
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
+from typing import TYPE_CHECKING
 
 from system.query_optimization.cardinality_table import CardinalityTable
 from system.query_optimization.problems import Problem
+
+# imported for type checking only, as the planning module itself imports this module:
+if TYPE_CHECKING:
+    from system.interfaces.query_optimization.planning import PlanTable
 
 
 class CostFunction(ABC):

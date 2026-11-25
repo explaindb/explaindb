@@ -119,7 +119,7 @@ class PlanTable(ABC):
         """
 
     @abstractmethod
-    def get_costs_for_problem(self, problem: Problem):
+    def get_costs_for_problem(self, problem: Problem) -> int:
         """
         Returns the current best costs for the problem.
         :param problem: The problem.
