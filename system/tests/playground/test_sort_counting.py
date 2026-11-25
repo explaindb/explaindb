@@ -35,7 +35,7 @@ from dataclasses import astuple, dataclass, field
 from typing import Any
 from unittest import mock
 
-from system.interfaces.queues import QueueFactory
+from system.interfaces.queues import QueueFactory, ReadWriteQueue
 from system.playground.sort_counting import (
     Comparison,
     CountingInput,
@@ -168,6 +168,13 @@ class NotedSort:
         return tuple(positions[id(queue)] for queue in queues)
 
 
+def as_counting_queue(queue: ReadWriteQueue[int]) -> CountingQueue[int]:
+    """Returns the queue as the :class:`CountingQueue` it is: the sorts of these tests make all their queues with a
+    :class:`CountingQueueFactory`."""
+    assert isinstance(queue, CountingQueue)
+    return queue
+
+
 def sort_and_note_merges(
     values: Iterable[int], memory: int, fan_in: int, replacement_selection: bool
 ) -> NotedSort:
@@ -186,7 +193,7 @@ def sort_and_note_merges(
             number_of_tuples_in_main_memory: int,
         ) -> None:
             """Notes the input queues, then initializes the merge, which reads the first element of each."""
-            noted.append([run.queue for run in run_infos])
+            noted.append([as_counting_queue(run.queue) for run in run_infos])
             super().__init__(run_infos, queue_factory, number_of_tuples_in_main_memory)
 
     factory: CountingQueueFactory[int] = CountingQueueFactory[int]()
@@ -207,7 +214,7 @@ def sort_and_note_merges(
         phase_0=phase_0,
         merges=noted[:-1],
         final_merge=noted[-1],
-        heap=[metadata.queue for metadata in sort.heap],
+        heap=[as_counting_queue(metadata.queue) for metadata in sort.heap],
     )
 
 
@@ -215,7 +222,7 @@ def merge_output_queue_first(sort: ExternalMergeSort[int]) -> None:
     """Merges the two smallest runs on the sort's heap into a new run, as the sort does with F = 2, but asks the
     queue factory for the output queue before the merge reads its input runs."""
     # the output queue first:
-    queue: CountingQueue[int] = sort.queue_factory.get_queue_instance()
+    queue: ReadWriteQueue[int] = sort.queue_factory.get_queue_instance()
     # then the merge, which reads the first element of each input run when it is made:
     inputs: list[RunMetadata] = [heapq.heappop(sort.heap), heapq.heappop(sort.heap)]
     for element in SingleStreamMerge(
@@ -1260,10 +1267,12 @@ class MergeOrderTest(unittest.TestCase):
                     )
                     # every input was first read between the making of the queue before the output and the output's:
                     for queue in inputs:
+                        assert queue.first_read is not None
                         self.assertLess(queues[index - 1].made, queue.first_read)
                         self.assertLess(queue.first_read, output.made)
                 # the final merge's inputs were first read after the last queue was made:
                 for queue in noted.final_merge:
+                    assert queue.first_read is not None
                     self.assertLess(queues[-1].made, queue.first_read)
 
     def test_found_merges_are_those_the_sort_made(self) -> None:

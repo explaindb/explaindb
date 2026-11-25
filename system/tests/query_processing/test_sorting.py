@@ -1244,6 +1244,7 @@ class ReplacementSelectionTest(unittest.TestCase):
         A None among the first M elements that went unnoticed would count as an empty place and be missing from the
         runs.
         """
+        # None is not an int, so pyright flags the inputs below; the test passes them on purpose:
         # a None among the first M = 4 elements (at the front, in the middle, in the last place, alone):
         cases: list[list[int | None]] = [
             [None, 3, 1],
@@ -1254,11 +1255,15 @@ class ReplacementSelectionTest(unittest.TestCase):
         for values in cases:
             with self.subTest(values=values):
                 with self.assertRaisesRegex(ValueError, "an input element is None"):
-                    ReplacementSelection[int](values, 4)
+                    ReplacementSelection[int](
+                        values, 4  # pyright: ignore[reportArgumentType]
+                    )
 
         # a None read later, with M = 2: the first next() takes the root 1 as its output, reads None and raises
         # before it returns 1; memory stays [1, 3]:
-        rs: ReplacementSelection[int] = ReplacementSelection[int]([3, 1, None], 2)
+        rs: ReplacementSelection[int] = ReplacementSelection[int](
+            [3, 1, None], 2  # pyright: ignore[reportArgumentType]
+        )
         with self.assertRaisesRegex(ValueError, "an input element is None"):
             next(rs)
         self.assertEqual((rs.memory, rs.heap_size), ([1, 3], 2))
@@ -1266,7 +1271,9 @@ class ReplacementSelectionTest(unittest.TestCase):
         # inside the external merge sort, a None read after the first M elements:
         with self.assertRaisesRegex(ValueError, "an input element is None"):
             ExternalMergeSort[int](
-                input_data=iter([30, 20, 10, 40, None]),
+                input_data=iter(
+                    [30, 20, 10, 40, None]  # pyright: ignore[reportArgumentType]
+                ),
                 queue_factory=ListQueueFactory[int](),
                 number_of_tuples_in_main_memory=4,
                 fan_in=2,

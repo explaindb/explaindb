@@ -49,6 +49,8 @@ class Relation(Operator):
         """
         # iterate over each tuple in list
         for tup in self.data:
+            # the operator pushes to its parent, so it cannot be the root of the QEP:
+            assert self.parent is not None
             # push current tuple to parent operator
             self.parent.interpret_next(tup)
 
@@ -67,7 +69,7 @@ class Relation(Operator):
         """
         # leaf/source operator: no child operator to close
 
-    def compile(self, emit: str = None) -> str:
+    def compile(self, emit: str | None = None) -> str:
         """See :meth:`Operator.compile`.
 
         Not supported for in-memory relations.
@@ -84,7 +86,7 @@ class Scan(Operator):
     Scan operator to iterate over the given number of tuples in the underlying storage file.
     """
 
-    def __init__(self, file: str, num_tuples: int = math.inf) -> None:
+    def __init__(self, file: str, num_tuples: int | float = math.inf) -> None:
         """Create a scan operator over a pickled storage file.
 
         :param file: Path to the storage file holding the pickled tuples.
@@ -109,6 +111,8 @@ class Scan(Operator):
             # nosemgrep: python.lang.security.deserialization.pickle.avoid-pickle
             for tup in pickle.load(f):
                 if i < self.num_tuples:
+                    # the operator pushes to its parent, so it cannot be the root of the QEP:
+                    assert self.parent is not None
                     # push current tuple to parent operator
                     self.parent.interpret_next(tup)
                     # increment iteration counter
@@ -132,11 +136,13 @@ class Scan(Operator):
         """
         # leaf/source operator: no child operator to close
 
-    def compile(self, emit: str = None) -> str:
+    def compile(self, emit: str | None = None) -> str:
         """See :meth:`Operator.compile`.
 
         Emits a loop over the pickled file, optionally bounded by ``num_tuples``.
         """
+        # only a sink at the root of the QEP compiles without code to emit:
+        assert emit is not None
         if self.num_tuples == math.inf:
             return f"with open('{self.file}', 'rb') as f:\n    for tup in pickle.load(f):\n        {self.indent_emit_(emit, 2)}"
         return (
@@ -156,6 +162,9 @@ class Filter(Operator):
     """
     Filter operator to select tuples according to the given predicate.
     """
+
+    # the list with the one child operator, never None as __init__ always sets it:
+    children: list[Operator]
 
     def __init__(self, child: Operator, pred: str):
         """Create a filter operator over a single child.
@@ -184,6 +193,8 @@ class Filter(Operator):
         # only pass predicates written in code, never user input:
         # nosemgrep: python.lang.security.audit.eval-detected.eval-detected
         if eval(self.pred, {}, tup):
+            # the operator pushes to its parent, so it cannot be the root of the QEP:
+            assert self.parent is not None
             # push current tuple to parent operator
             self.parent.interpret_next(tup)
 
@@ -195,11 +206,13 @@ class Filter(Operator):
         # close child operator
         self.children[0].interpret_close()
 
-    def compile(self, emit: str = None) -> str:
+    def compile(self, emit: str | None = None) -> str:
         """See :meth:`Operator.compile`.
 
         Wraps the child's compiled code in an ``if`` guarding on the predicate.
         """
+        # only a sink at the root of the QEP compiles without code to emit:
+        assert emit is not None
         compiled_pred = re.sub("([a-zA-Z]+)", r"tup['\1']", self.pred)
         return self.children[0].compile(
             f"if {compiled_pred}:\n    {self.indent_emit_(emit)}"
@@ -215,6 +228,9 @@ class SHJ(Operator):
     """
     Simple-hash join operator to join the two children inputs according to the given join attributes.
     """
+
+    # the list with the left and the right child operator, never None as __init__ always sets it:
+    children: list[Operator]
 
     def __init__(
         self,
@@ -265,6 +281,8 @@ class SHJ(Operator):
         else:
             # probe hash table for current tuple and iterate over results
             for tup2 in self.ht.get(tup[self.right_attr], []):
+                # the operator pushes to its parent, so it cannot be the root of the QEP:
+                assert self.parent is not None
                 # merge current tuple with probed result and push it to parent operator
                 self.parent.interpret_next(tup | tup2)
 
@@ -277,12 +295,14 @@ class SHJ(Operator):
         self.children[0].interpret_close()
         self.children[1].interpret_close()
 
-    def compile(self, emit: str = None) -> str:
+    def compile(self, emit: str | None = None) -> str:
         """See :meth:`Operator.compile`.
 
         Emits the build loop over the left child followed by the probe loop over
         the right child.
         """
+        # only a sink at the root of the QEP compiles without code to emit:
+        assert emit is not None
         return (
             "ht = dict()\n"
             + self.children[0].compile(
@@ -305,6 +325,9 @@ class SemiJ(Operator):
     """
     (Left) Semi-join operator to reduce the first input relation based on the join results according to the given join attributes with the second input relation.
     """
+
+    # the list with the left and the right child operator, never None as __init__ always sets it:
+    children: list[Operator]
 
     def __init__(
         self,
@@ -355,6 +378,8 @@ class SemiJ(Operator):
         else:
             # probe hash table for current tuple
             if self.ht.get(tup[self.left_attr], []):
+                # the operator pushes to its parent, so it cannot be the root of the QEP:
+                assert self.parent is not None
                 # push matching tuple to parent operator
                 self.parent.interpret_next(tup)
 
@@ -367,7 +392,7 @@ class SemiJ(Operator):
         self.children[0].interpret_close()
         self.children[1].interpret_close()
 
-    def compile(self, emit: str = None) -> str:
+    def compile(self, emit: str | None = None) -> str:
         """See :meth:`Operator.compile`.
 
         Not supported for the semi-join operator.
@@ -389,6 +414,9 @@ class Print(Operator):
     # Sink operator: it is a query-plan root, invoked with no argument, so
     # compile() and dump() intentionally drop the base emit/indent parameter.
     # pylint: disable=arguments-differ
+
+    # the list with the one child operator, never None as __init__ always sets it:
+    children: list[Operator]
 
     def __init__(self, child: Operator):
         """Create a print operator over a single child.
@@ -422,7 +450,7 @@ class Print(Operator):
         # close child operator
         self.children[0].interpret_close()
 
-    def compile(self):
+    def compile(self):  # pyright: ignore[reportIncompatibleMethodOverride]
         """See :meth:`Operator.compile`.
 
         Sink operator: emits the child's code with a leading ``import pickle`` and
@@ -433,7 +461,7 @@ class Print(Operator):
             "print(tuple(tup.values()))"
         )
 
-    def dump(self):
+    def dump(self):  # pyright: ignore[reportIncompatibleMethodOverride]
         """See :meth:`Operator.dump`.
 
         Sink operator: takes no ``indent`` argument.
@@ -450,6 +478,9 @@ class Collect(Operator):
     # Sink operator: it is a query-plan root, invoked with no argument, so
     # compile() and dump() intentionally drop the base emit/indent parameter.
     # pylint: disable=arguments-differ
+
+    # the list with the one child operator, never None as __init__ always sets it:
+    children: list[Operator]
 
     def __init__(self, child: Operator):
         """Create a collect operator over a single child.
@@ -485,7 +516,7 @@ class Collect(Operator):
         # close child operator
         self.children[0].interpret_close()
 
-    def compile(self):
+    def compile(self):  # pyright: ignore[reportIncompatibleMethodOverride]
         """See :meth:`Operator.compile`.
 
         Sink operator: emits the child's code collecting each tuple into a
@@ -496,7 +527,7 @@ class Collect(Operator):
             "result.append(tuple(tup.values()))"
         )
 
-    def dump(self):
+    def dump(self):  # pyright: ignore[reportIncompatibleMethodOverride]
         """See :meth:`Operator.dump`.
 
         Sink operator: takes no ``indent`` argument.
@@ -513,6 +544,9 @@ class Count(Operator):
     # Sink operator: it is a query-plan root, invoked with no argument, so
     # compile() and dump() intentionally drop the base emit/indent parameter.
     # pylint: disable=arguments-differ
+
+    # the list with the one child operator, never None as __init__ always sets it:
+    children: list[Operator]
 
     def __init__(self, child: Operator):
         """Create a count operator over a single child.
@@ -548,7 +582,7 @@ class Count(Operator):
         # close child operator
         self.children[0].interpret_close()
 
-    def compile(self):
+    def compile(self):  # pyright: ignore[reportIncompatibleMethodOverride]
         """See :meth:`Operator.compile`.
 
         Sink operator: emits the child's code incrementing a ``num_tuples``
@@ -559,7 +593,7 @@ class Count(Operator):
             "num_tuples += 1"
         )
 
-    def dump(self):
+    def dump(self):  # pyright: ignore[reportIncompatibleMethodOverride]
         """See :meth:`Operator.dump`.
 
         Sink operator: takes no ``indent`` argument.

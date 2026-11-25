@@ -24,6 +24,7 @@
 """Tests for query-plan code generation and operator execution."""
 
 import pickle
+from typing import Any
 
 from system.data_classes import *
 from faker import Faker
@@ -87,7 +88,8 @@ class MyTest(unittest.TestCase):
             res1 = query_plan.result
 
             code = query_plan.compile()
-            loc = {"result": None}
+            # the generated code binds ``result`` to a list of tuples:
+            loc: dict[str, Any] = {"result": None}
             exec(code, {}, loc)
             res2 = loc["result"]
 

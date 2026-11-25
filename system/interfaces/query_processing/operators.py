@@ -32,7 +32,7 @@ class Operator(ABC):
     Abstract operator interface to construct QEPs.
     """
 
-    def __init__(self, parent: Self | None, children: list[Self] | None):
+    def __init__(self, parent: "Operator | None", children: "list[Operator] | None"):
         """Initialize the operator as a node in a QEP operator tree.
 
         :param parent: Parent operator that consumes the tuples pushed by this operator, or ``None`` for the root.
@@ -73,10 +73,10 @@ class Operator(ABC):
         raise NotImplementedError
 
     @abstractmethod
-    def compile(self, emit: str = None) -> str:
+    def compile(self, emit: str | None = None) -> str:
         """
         Compiler: Compiles the QEP rooted at `self` into Python code.
-        :param emit: Parent code to emit.
+        :param emit: Parent code to emit, or ``None`` at the root of the QEP.
         :return: Compiled QEP.
         """
         raise NotImplementedError

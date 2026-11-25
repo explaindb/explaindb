@@ -70,6 +70,7 @@ class QueryableComponent(ABC):
         @return: The result of the query as an iterator of objects. The objects can be of any type.
         """
 
+    @abstractmethod
     def prepare_query(self, query: str, parameters: list[str]) -> int:
         """Prepare a query to be executed multiple times with different parameters.
 
@@ -105,7 +106,7 @@ class QueryableComponent(ABC):
         # the transaction id of the transaction that is executing the query
         # if not provided, the query is executed as a separate transaction
         # i.e. it will automatically be wrapped into a transaction
-        TA_ID: int = None
+        TA_ID: int | None = None
 
     def execute_prepared_queries(
         self, queries: dict[int, QueryEntry]
