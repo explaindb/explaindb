@@ -56,8 +56,7 @@ class ListQueue[ObjectType](ReadWriteQueue[ObjectType], Iterator):
         self.buffer.append(entry)
 
     def __iter__(self) -> Self:
-        """Restarts reading at the first element and returns the queue itself as its iterator. Required to be able to
-        loop over the contents of the queue."""
+        """See :meth:`ReadQueue.__iter__`."""
         self.read_position = 0
         return self
 

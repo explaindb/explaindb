@@ -73,9 +73,7 @@ class ExternalQueue[ObjectType](ReadWriteQueue[ObjectType]):
         self.current_read_seek = 0
 
     def __iter__(self) -> Self:
-        """Returns the iterator object. Required to be able to loop over the contents of the queue.
-        Rewinds reading to the first element of the queue, see :meth:`reset`.
-        """
+        """See :meth:`ReadQueue.__iter__`. Rewinds reading with :meth:`reset`."""
         self.reset()
 
         return self

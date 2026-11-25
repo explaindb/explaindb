@@ -21,17 +21,25 @@
 """Abstract queue interfaces (read, write, read-write) and the queue factory."""
 
 from abc import ABC, abstractmethod
-from typing import Iterator
+from typing import Iterator, Self
 
 
 class ReadQueue[ObjectType](ABC, Iterator):
     """ReadQueue is an API for queues you can read data from. This is an Iterator that can directly be used in for-loops."""
 
     @abstractmethod
+    def __iter__(self) -> Self:
+        """Restarts reading at the first element of the queue and returns the queue itself as its iterator, so a
+        for-loop or list() reads all elements from the first one on. As the queue is its own iterator, it has only
+        one read position: two loops over the same queue at the same time share it, and starting a new loop
+        restarts a loop already in progress.
+
+        @return The queue itself."""
+
+    @abstractmethod
     def __next__(self) -> ObjectType:
         """Returns the next element of the queue and advances the read position; the element stays in the queue.
-        Calling iter() on the queue restarts reading at the first element. Raises StopIteration once all elements
-        have been read.
+        Raises StopIteration once all elements have been read. To restart reading, see :meth:`__iter__`.
 
         @return The next element of the queue."""
 

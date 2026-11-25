@@ -30,7 +30,7 @@ from faker import Faker
 from system.data_classes import Person
 import unittest
 
-from system.interfaces.queues import ReadWriteQueue, QueueFactory
+from system.interfaces.queues import ReadQueue, ReadWriteQueue, QueueFactory
 from system.query_processing.queues.queue_factories import (
     ExternalQueueFactory,
     ListQueueFactory,
@@ -111,6 +111,33 @@ class QueueTest(unittest.TestCase):
 
                 # close the queue:
                 queue.close()
+
+    def test_read_queue_without_iter_cannot_be_created(self) -> None:
+        """A ReadQueue subclass that implements every method except __iter__ cannot be created, as the interface
+        declares __iter__ abstract."""
+
+        # a queue that implements all abstract methods of ReadQueue except __iter__:
+        class QueueWithoutIter(ReadQueue[int]):
+            """ReadQueue that leaves out __iter__."""
+
+            def __next__(self) -> int:
+                """See :meth:`ReadQueue.__next__`."""
+                raise StopIteration
+
+            def pop(self) -> int:
+                """See :meth:`ReadQueue.pop`."""
+                raise NotImplementedError
+
+            def close(self) -> None:
+                """See :meth:`ReadQueue.close`."""
+
+            def set_memory_limit(self, memory_limit: int) -> None:
+                """Does nothing; the test never calls it."""
+
+        # creating it fails, and the error names the missing __iter__:
+        with self.assertRaisesRegex(TypeError, "__iter__"):
+            # pylint: disable-next=abstract-class-instantiated
+            QueueWithoutIter()  # type: ignore[abstract]
 
     def test_list_queue_reset_rewinds_reading(self) -> None:
         """reset() on a ListQueue rewinds reading to the first element and keeps the contents and the size."""
