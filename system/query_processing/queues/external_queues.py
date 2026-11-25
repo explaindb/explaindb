@@ -22,13 +22,14 @@
 
 import pickle
 import tempfile
+from typing import Self
 
 from system.interfaces.queues import (
     ReadWriteQueue,
 )
 
 
-class ExternalQueue[ObjectType](ReadWriteQueue):
+class ExternalQueue[ObjectType](ReadWriteQueue[ObjectType]):
     """ExternalQueue is a disk-backed read-write queue that buffers elements in memory and spills to a
     temporary file once the buffer is full."""
 
@@ -71,7 +72,7 @@ class ExternalQueue[ObjectType](ReadWriteQueue):
         self.element_read_position_in_buffer = 0
         self.current_read_seek = 0
 
-    def __iter__(self):
+    def __iter__(self) -> Self:
         """Returns the iterator object. Required to be able to loop over the contents of the queue.
         Rewinds reading to the first element of the queue, see :meth:`reset`.
         """

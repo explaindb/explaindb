@@ -20,7 +20,7 @@
 
 """In-memory list-backed queue implementation."""
 
-from typing import Iterator
+from typing import Iterator, Self
 
 
 from system.interfaces.queues import ReadWriteQueue
@@ -55,7 +55,7 @@ class ListQueue[ObjectType](ReadWriteQueue[ObjectType], Iterator):
         """See :meth:`WriteQueue.insert`."""
         self.buffer.append(entry)
 
-    def __iter__(self) -> Iterator[ObjectType]:
+    def __iter__(self) -> Self:
         """Restarts reading at the first element and returns the queue itself as its iterator. Required to be able to
         loop over the contents of the queue."""
         self.read_position = 0
