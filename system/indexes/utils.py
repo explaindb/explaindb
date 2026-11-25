@@ -24,7 +24,7 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
-from typing import Iterator
+from typing import Any, Iterator
 
 from ipycanvas import Canvas
 
@@ -110,8 +110,11 @@ class Descriptor(Drawable):
         self.contains() with any child descriptor, it must return True."""
 
     @abstractmethod
-    def contains[Key](self, key: Key) -> bool:
-        """Return whether the given key is contained in this Descriptor."""
+    def contains(self, key: Any) -> bool:
+        """Return whether the given key is contained in this Descriptor.
+
+        Which keys a descriptor takes depends on its domain, e.g. a :class:`Triangle` takes points (:class:`Vector`).
+        """
 
     @abstractmethod
     def center[T](self) -> T:
@@ -201,10 +204,10 @@ class Triangle(Descriptor):
         canvas.stroke()
         canvas.global_alpha = 1.0
 
-    def contains[Vector](self, point: Vector) -> bool:
+    def contains(self, key: Vector) -> bool:
         """See :meth:`Descriptor.contains`.
 
-        Point-in-triangle test: the point is contained iff it lies on the same side of all three edges, which
+        Point-in-triangle test: the point ``key`` is contained iff it lies on the same side of all three edges, which
         is checked via the sign of the cross products.
         """
 
@@ -225,9 +228,9 @@ class Triangle(Descriptor):
         # check if the point is on the same side of the lines AB, BC, and CA
         # as the triangle's vertices A, B, and C
         return (
-            sign(self.A, self.A + self.AB, point) >= 0  # AB
-            and sign(self.A + self.AB, self.A + self.AC, point) >= 0  # BC
-            and sign(self.A + self.AC, self.A, point) >= 0  # CA
+            sign(self.A, self.A + self.AB, key) >= 0  # AB
+            and sign(self.A + self.AB, self.A + self.AC, key) >= 0  # BC
+            and sign(self.A + self.AC, self.A, key) >= 0  # CA
         )
 
     def __str__(self) -> str:
