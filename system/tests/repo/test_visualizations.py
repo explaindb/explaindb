@@ -88,7 +88,8 @@ PLAYWRIGHT_AVAILABLE: bool = importlib.util.find_spec("playwright") is not None
 
 # without the dependency group browser-tests, pylint cannot find playwright:
 # pylint: disable=import-error
-if PLAYWRIGHT_AVAILABLE:
+# the type checker always takes the import, so that it knows these names as Playwright's and never as None:
+if TYPE_CHECKING or PLAYWRIGHT_AVAILABLE:
     from playwright.sync_api import Error, expect, sync_playwright
 else:
     # the tests that open a browser are skipped, so these are never used:
@@ -2836,7 +2837,10 @@ class BTreePageTest(_PageTestCase):
 
         # only the last put adds a level; the new root holds the one key that moved up from the old root:
         self.assertEqual([4, 4, 4, 5], [height(tree) for tree in self.trees])
-        self.assertEqual(1, len(self.trees[-1]["keys"]))
+        # a tree of height 5 has an inner node as its root, a dict:
+        root: Tree = self.trees[-1]
+        assert isinstance(root, dict)
+        self.assertEqual(1, len(root["keys"]))
 
         # the stage shows the height of the tree on screen, at the start and at the end of the film:
         stage = self.page.get_by_test_id("stage")
