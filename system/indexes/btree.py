@@ -25,7 +25,8 @@ from __future__ import (
 )  # postponed evaluation of annotations https://peps.python.org/pep-0563/
 
 import copy
-from typing import cast, Iterator
+from collections.abc import Sequence
+from typing import Any, cast, Iterator, Protocol
 from abc import ABC, abstractmethod
 from itertools import count
 from dataclasses import dataclass
@@ -37,6 +38,15 @@ from typing import Optional
 
 import bisect
 import graphviz
+
+
+class _OrderedKey(Protocol):
+    """A key that a :class:`BPlusTree` can order, e.g. an ``int`` or a ``str``: the tree sorts its keys, finds them
+    by binary search and compares them with ``<``, ``>`` and ``>=``."""
+
+    def __lt__(self, other: Any, /) -> bool: ...
+    def __gt__(self, other: Any, /) -> bool: ...
+    def __ge__(self, other: Any, /) -> bool: ...
 
 
 @dataclass
@@ -134,7 +144,7 @@ def _nodes_reached_once(root: BPlusTree.AbstractNode) -> list[BPlusTree.Abstract
     return nodes
 
 
-class BPlusTree[Key, Value](AbstractBTree[Key, Value]):
+class BPlusTree[Key: _OrderedKey, Value](AbstractBTree[Key, Value]):
     """A simple, educational B+tree implementation with support for inserts, splits, as well as
     point, and range queries.
     Deletes and merges are not supported.
@@ -152,7 +162,8 @@ class BPlusTree[Key, Value](AbstractBTree[Key, Value]):
         # class variable, node counter used to assign unique ids to nodes:
         _ids: count[int] = count(0)
 
-        # the keys of the node, set by Inner and Leaf (a CountingLeaf has none):
+        # the keys of the node, set by Inner and Leaf (a CountingLeaf has none); declared only here in the class body,
+        # not in __init__, as pyright otherwise does not resolve Key outside the tree, e.g. in `leaf.keys[0] = 31`:
         keys: list[Key]
 
         def __init__(self, capacity: int):
@@ -260,7 +271,10 @@ class BPlusTree[Key, Value](AbstractBTree[Key, Value]):
         """
 
         def __init__(
-            self, capacity: int, keys: list[Key], children: list[BPlusTree.AbstractNode]
+            self,
+            capacity: int,
+            keys: list[Key],
+            children: Sequence[BPlusTree.AbstractNode],
         ):
             """Initializes an inner node with a given capacity, its keys, and its children.
 
@@ -276,9 +290,9 @@ class BPlusTree[Key, Value](AbstractBTree[Key, Value]):
 
             assert sorted(keys) == keys, "keys need to be sorted"
 
-            # assign keys and children
-            self.keys: list[Key] = copy.copy(keys)
-            self.children: list[BPlusTree.AbstractNode] = copy.copy(children)
+            # assign keys (declared in AbstractNode) and children
+            self.keys = copy.copy(keys)
+            self.children: list[BPlusTree.AbstractNode] = list(children)
 
         def show(self) -> None:
             """Shows the content of the inner node."""
@@ -497,6 +511,9 @@ class BPlusTree[Key, Value](AbstractBTree[Key, Value]):
     class Leaf(AbstractNode):
         """Leaf node of a b-tree. Leaf nodes have keys and values."""
 
+        # the values of the leaf, one per key; declared in the class body like AbstractNode.keys:
+        values: list[Value]
+
         def __init__(
             self,
             capacity: int,
@@ -518,11 +535,11 @@ class BPlusTree[Key, Value](AbstractBTree[Key, Value]):
                     len(keys) <= capacity
                 ), "number of leaf entries exceeds max capacity"
 
-            self.keys: list[Key] = (
+            self.keys = (
                 keys if keys is not None else []
             )  # use `None` as default to avoid shared mutable default arguments
 
-            self.values: list[Value] = (
+            self.values = (
                 values if values is not None else []
             )  # use `None` as default to avoid shared mutable default arguments
 
@@ -666,7 +683,7 @@ class BPlusTree[Key, Value](AbstractBTree[Key, Value]):
 
             # scan this leaf and check whether we have to continue scanning with next leaf:
             continue_scan: bool = self._scan_leaf(max_key, result, pos)
-            next_leaf: BPlusTree.Leaf = self.next
+            next_leaf: BPlusTree.Leaf | None = self.next
 
             # keep on scanning the next leaf until we reach the end of the range:
             while continue_scan and next_leaf:
@@ -955,18 +972,19 @@ class BPlusTree[Key, Value](AbstractBTree[Key, Value]):
         # last inner before leaf level?:
         if type(node.children[0]) == BPlusTree.Leaf:
             return {node}
-        # more inner nodes:
+        # more inner nodes; as all leaves lie at the same depth (Inv3), all children are inner nodes, too:
         inner_nodes: set[BPlusTree.Inner] = set()
-        child: BPlusTree.Inner
         for child in node.children:
-            inner_nodes.update(self._get_lastlevel_inner_nodes(child))
+            inner_nodes.update(
+                self._get_lastlevel_inner_nodes(cast(BPlusTree.Inner, child))
+            )
         return inner_nodes
 
     def convert_to_counting_leaf_tree(self) -> None:
         """Keeps all inner nodes but replaces all leaves with CountingLeafs."""
 
         # get root node:
-        node: BPlusTree[Key, Value].AbstractNode = self.root
+        node: BPlusTree.AbstractNode = self.root
 
         inner_nodes = None
         # get all inner nodes before the leaf level:

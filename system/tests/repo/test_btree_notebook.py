@@ -68,6 +68,7 @@ def leaf_entries(node: BPlusTree.AbstractNode) -> list[tuple[int, int]]:
         return [entry for child in node.children for entry in leaf_entries(child)]
 
     # a leaf holds its pairs itself:
+    assert isinstance(node, BPlusTree.Leaf), f"not a leaf: {type(node).__name__}"
     return list(zip(node.keys, node.values))
 
 

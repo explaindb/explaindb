@@ -37,6 +37,7 @@ import hashlib
 import json
 import re
 from pathlib import Path
+from typing import TypedDict
 
 # Anchored to this file so discovery works regardless of the caller's cwd.
 REPO_ROOT: Path = Path(__file__).resolve().parents[3]
@@ -44,7 +45,15 @@ B_TREE_PAGE: Path = REPO_ROOT / "visualizations" / "b-tree.html"
 
 # a tree as plain data, as the page writes it into data-trees: a leaf is the list of its keys, an inner node a dict
 # {"keys": [...], "children": [...]}:
-type Tree = list[int] | dict[str, list[int] | list[Tree]]
+type Tree = list[int] | PlainInnerNode
+
+
+class PlainInnerNode(TypedDict):
+    """An inner node of a :data:`Tree` as plain data: its keys and the subtrees of its children."""
+
+    keys: list[int]
+    children: list[Tree]
+
 
 # a tree as the page's START writes it: an inner node is the list of its subtrees, a leaf the list of its keys; unlike
 # Tree, without the keys of the inner nodes:
