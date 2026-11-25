@@ -652,7 +652,7 @@ class RenderFailureTest(unittest.TestCase):
         @return: the voice segments
         """
         assert frames_to is not None and frames_to.stdin is not None
-        for _ in range(3):
+        for _frame_number in range(3):
             frames_to.stdin.write(self.frame)
         return [self.segment]
 
@@ -698,7 +698,7 @@ class RenderFailureTest(unittest.TestCase):
             does."""
             assert frames_to is not None and frames_to.stdin is not None
             # ffmpeg begins its picture once it has looked at 5 s of frames:
-            for _ in range(6 * tool.FPS):
+            for _frame_number in range(6 * tool.FPS):
                 frames_to.stdin.write(self.frame)
             frames_to.stdin.flush()
 
@@ -732,7 +732,7 @@ class RenderFailureTest(unittest.TestCase):
         ) -> list[Segment]:
             """Writes frames of 1 MiB until ffmpeg reads no more."""
             assert frames_to is not None and frames_to.stdin is not None
-            for _ in range(1000):
+            for _mebibyte in range(1000):
                 frames_to.stdin.write(bytes(1 << 20))
             raise AssertionError("ffmpeg read 1000 MiB of frames")
 
@@ -1467,10 +1467,11 @@ class OpenedPageTest(unittest.TestCase):  # pylint: disable=too-many-public-meth
             "ANGLE (Apple, Apple Software Renderer, OpenGL 4.1)",
         ]
         refused: list[tuple[str | None, str]] = [
-            (None, r"^WebGL draws without a GPU: ")
-        ] + [
-            (name, rf"^WebGL draws without a GPU: {re.escape(name)}$")
-            for name in software
+            (None, r"^WebGL draws without a GPU: "),
+            *[
+                (name, rf"^WebGL draws without a GPU: {re.escape(name)}$")
+                for name in software
+            ],
         ]
         for renderer, reason in refused:
             with self.subTest(renderer=renderer):

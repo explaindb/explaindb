@@ -138,9 +138,17 @@ class _CILoader(yaml.SafeLoader):  # pylint: disable=too-many-ancestors
     """A safe YAML loader that also reads GitLab's ``!reference`` tag (as the plain list it contains)."""
 
 
-_CILoader.add_constructor(
-    "!reference", lambda loader, node: loader.construct_sequence(node)
-)
+def _construct_reference(loader: _CILoader, node: yaml.SequenceNode) -> list[Any]:
+    """Returns the plain list that a ``!reference`` tag contains.
+
+    @param loader: the loader that reads the tag
+    @param node: the sequence node of the tag
+    @return: the list of its items
+    """
+    return loader.construct_sequence(node)
+
+
+_CILoader.add_constructor("!reference", _construct_reference)
 
 
 @functools.cache

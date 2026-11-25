@@ -45,8 +45,12 @@ class PyDBMS(DBMS):
         @param persistence_layer: The persistence layer to use for durability
         @param query_optimizer: The query optimizer to use
         """
+        # the store and the query optimizer may be None here (test_DBMS builds a PyDBMS without them), while the
+        # base class requires both, as its methods use them:
         super().__init__(
-            QEP_queryable_indexed_ACID_store, persistence_layer, query_optimizer
+            QEP_queryable_indexed_ACID_store,  # pyright: ignore[reportArgumentType]
+            persistence_layer,
+            query_optimizer,  # pyright: ignore[reportArgumentType]
         )
 
         # dict for prepared queries: query_id -> query

@@ -43,8 +43,12 @@ _DOCS_API = os.path.join(
 if _DOCS_API not in sys.path:
     sys.path.insert(0, _DOCS_API)
 
-import conf  # noqa: E402  (the Sphinx config module, holding the autodoc hook)
-from javadoc import find_residual_tags, javadoc_to_rest  # noqa: E402
+# pyright does not know the sys.path entry added above, so it cannot resolve these two imports:
+import conf  # noqa: E402  # pyright: ignore[reportMissingImports]  (the Sphinx config module, holding the autodoc hook)
+from javadoc import (  # noqa: E402  # pyright: ignore[reportMissingImports]
+    find_residual_tags,
+    javadoc_to_rest,
+)
 
 
 class JavadocToRestTest(unittest.TestCase):
@@ -431,11 +435,13 @@ class ProcessDocstringHookTest(unittest.TestCase):
             key: str
 
         # the constructor docstring, as autodoc passes it for the class, is dropped:
+        assert BaseModel.__init__.__doc__ is not None
         init_lines = prepare_docstring(BaseModel.__init__.__doc__)
         conf._process_docstring(None, "class", "Entry", Entry, None, init_lines)
         self.assertEqual(init_lines, [])
 
         # the class docstring is kept:
+        assert Entry.__doc__ is not None
         class_lines = prepare_docstring(Entry.__doc__)
         conf._process_docstring(None, "class", "Entry", Entry, None, class_lines)
         self.assertEqual(class_lines, ["A journal entry.", ""])
@@ -457,6 +463,7 @@ class ProcessDocstringHookTest(unittest.TestCase):
                 """
                 self.count = start
 
+        assert Counter.__init__.__doc__ is not None
         lines = prepare_docstring(Counter.__init__.__doc__)
         conf._process_docstring(None, "class", "Counter", Counter, None, lines)
         self.assertEqual(

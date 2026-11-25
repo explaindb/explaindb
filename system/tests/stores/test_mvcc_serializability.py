@@ -178,7 +178,7 @@ class StoreWithoutCommitTimestamp(TransactionalKeyValueStore):
 class StoreThatCrashesOnDelete(TransactionalKeyValueStore):
     """A store whose delete always raises an exception other than TransactionAbortedException."""
 
-    def delete_object(self, object_id: str, TA_id: int) -> None:
+    def delete_object(self, object_id: str, TA_id: int | None) -> None:
         """See :meth:`TransactionalKeyValueStore.delete_object`.
 
         Always raises RuntimeError.
@@ -275,7 +275,7 @@ class SerializabilityTest(ExhaustiveTestCase):
         check: ScheduleCheck = check_all_schedules(
             StoreWithoutValidation, TWO_TRANSACTIONS
         )
-        self.assertIsNotNone(check.violation)
+        assert check.violation is not None
         self.assertIn("in the serial order it returns", check.violation)
 
     def test_crash_of_store_is_reported_with_schedule(self) -> None:
@@ -283,7 +283,7 @@ class SerializabilityTest(ExhaustiveTestCase):
         check: ScheduleCheck = check_all_schedules(
             StoreThatCrashesOnDelete, TWO_TRANSACTIONS
         )
-        self.assertIsNotNone(check.violation)
+        assert check.violation is not None
         self.assertIn("delete x: raised RuntimeError: cannot delete x", check.violation)
         self.assertIn("serial order:", check.violation)
 
@@ -292,7 +292,7 @@ class SerializabilityTest(ExhaustiveTestCase):
         check: ScheduleCheck = check_all_schedules(
             StoreThatKeepsVersionsOfAbortedTransactions, TWO_TRANSACTIONS
         )
-        self.assertIsNotNone(check.violation)
+        assert check.violation is not None
         self.assertIn("work-in-progress versions left for", check.violation)
         self.assertIn(": aborted", check.violation)
         self.assertIn("serial order:", check.violation)
@@ -302,7 +302,7 @@ class SerializabilityTest(ExhaustiveTestCase):
         check: ScheduleCheck = check_all_schedules(
             StoreWithoutCommitTimestamp, TWO_TRANSACTIONS
         )
-        self.assertIsNotNone(check.violation)
+        assert check.violation is not None
         self.assertIn(
             "commit: raised RuntimeError: commit left committed_timestamp None",
             check.violation,
@@ -434,7 +434,7 @@ class SerializabilityTest(ExhaustiveTestCase):
         violation: str | None = serializability_violation(
             {"x": x}, [t_1, t_2], {"y": Row(1, 0)}
         )
-        self.assertIsNotNone(violation)
+        assert violation is not None
         self.assertIn("T2: read a==1", violation)
 
     def test_oracle_accepts_serial_schedule(self) -> None:
@@ -683,7 +683,7 @@ class OracleThreeTransactionsTest(unittest.TestCase):
             frozenset({(2, 1, 1), (1, 2, 1), (1, 1, 2)}),
         )
         check: ScheduleCheck = check_all_schedules(StoreWithoutValidation, space)
-        self.assertIsNotNone(check.violation)
+        assert check.violation is not None
         self.assertIn("in the serial order it returns", check.violation)
 
     def test_two_commits_during_writer_are_counted_on_the_store(self) -> None:

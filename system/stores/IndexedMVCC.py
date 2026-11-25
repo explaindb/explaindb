@@ -386,7 +386,7 @@ class IndexedTransactionalKeyValueStore(TransactionalKeyValueStore, IndexedACIDS
             )
 
             # check the where clause again on that version, as the index also lists values of other versions:
-            if _object is not None and where.evaluate(_object):
+            if _object is not None and where_clause.evaluate(_object):
                 yield object_id, _object
 
     def _maintain_indexes(
