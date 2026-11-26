@@ -48,12 +48,16 @@ class ACIDStore(ABC):
 
         @param TA_id: The id of the transaction to commit
         """
+        # not abstract, so that a store that does not commit transactions itself (e.g. PyDBMS) can still be created:
+        raise NotImplementedError
 
     def abort_transaction(self, TA_id: int) -> None:
         """Abort a transaction.
 
         @param TA_id: The id of the transaction to abort
         """
+        # not abstract, so that a store that does not abort transactions itself (e.g. PyDBMS) can still be created:
+        raise NotImplementedError
 
     def update_object(self, object_id: str, updated_object: object, TA_id: int) -> None:
         """Update an object.
@@ -62,6 +66,8 @@ class ACIDStore(ABC):
         @param updated_object: The updated object
         @param TA_id: The id of the transaction to update the object in
         """
+        # not abstract, so that a store that does not update objects itself (e.g. PyDBMS) can still be created:
+        raise NotImplementedError
 
     def delete_object(self, object_id: str, TA_id: int) -> None:
         """Delete an object.
@@ -69,6 +75,8 @@ class ACIDStore(ABC):
         @param object_id: The id of the object to delete
         @param TA_id: The id of the transaction to delete the object in
         """
+        # not abstract, so that a store that does not delete objects itself (e.g. PyDBMS) can still be created:
+        raise NotImplementedError
 
 
 class IndexedACIDStore(ACIDStore, ABC):

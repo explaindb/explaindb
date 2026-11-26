@@ -104,7 +104,7 @@
           "path": "system/stores/MVCC.py"
         },
         {
-          "sha256": "sha256:124647a6fcef8e8c",
+          "sha256": "sha256:1a9a0aacc126648b",
           "path": "system/interfaces/stores.py"
         },
         {

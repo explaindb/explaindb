@@ -61,6 +61,58 @@ class DBMSTests(unittest.TestCase):
         with self.assertRaises(NotImplementedError):
             dbms.begin_transaction()
 
+    def test_commit_transaction_raises_not_implemented_error(self) -> None:
+        """PyDBMS does not commit transactions itself: commit_transaction raises NotImplementedError."""
+        # a DBMS without a wrapped store and without a query optimizer:
+        dbms: DBMS = PyDBMS(
+            QEP_queryable_indexed_ACID_store=None,
+            persistence_layer=VersionedKeyValueStore(),
+            query_optimizer=None,
+        )
+
+        # it inherits commit_transaction from ACIDStore:
+        with self.assertRaises(NotImplementedError):
+            dbms.commit_transaction(0)
+
+    def test_abort_transaction_raises_not_implemented_error(self) -> None:
+        """PyDBMS does not abort transactions itself: abort_transaction raises NotImplementedError."""
+        # a DBMS without a wrapped store and without a query optimizer:
+        dbms: DBMS = PyDBMS(
+            QEP_queryable_indexed_ACID_store=None,
+            persistence_layer=VersionedKeyValueStore(),
+            query_optimizer=None,
+        )
+
+        # it inherits abort_transaction from ACIDStore:
+        with self.assertRaises(NotImplementedError):
+            dbms.abort_transaction(0)
+
+    def test_update_object_raises_not_implemented_error(self) -> None:
+        """PyDBMS does not update objects itself: update_object raises NotImplementedError."""
+        # a DBMS without a wrapped store and without a query optimizer:
+        dbms: DBMS = PyDBMS(
+            QEP_queryable_indexed_ACID_store=None,
+            persistence_layer=VersionedKeyValueStore(),
+            query_optimizer=None,
+        )
+
+        # it inherits update_object from ACIDStore:
+        with self.assertRaises(NotImplementedError):
+            dbms.update_object("A", "new value", 0)
+
+    def test_delete_object_raises_not_implemented_error(self) -> None:
+        """PyDBMS does not delete objects itself: delete_object raises NotImplementedError."""
+        # a DBMS without a wrapped store and without a query optimizer:
+        dbms: DBMS = PyDBMS(
+            QEP_queryable_indexed_ACID_store=None,
+            persistence_layer=VersionedKeyValueStore(),
+            query_optimizer=None,
+        )
+
+        # it inherits delete_object from ACIDStore:
+        with self.assertRaises(NotImplementedError):
+            dbms.delete_object("A", 0)
+
 
 if __name__ == "__main__":
     unittest.main(
