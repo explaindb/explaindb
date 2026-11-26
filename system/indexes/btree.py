@@ -969,8 +969,8 @@ class BPlusTree[Key: _OrderedKey, Value](AbstractBTree[Key, Value]):
         :param node: an inner node of the tree
         :return: A set of inner nodes of the last level of the tree.
         """
-        # last inner before leaf level?:
-        if type(node.children[0]) == BPlusTree.Leaf:
+        # last inner before leaf level? its children are leaves, or counting leaves of an earlier conversion:
+        if not isinstance(node.children[0], BPlusTree.Inner):
             return {node}
         # more inner nodes; as all leaves lie at the same depth (Inv3), all children are inner nodes, too:
         inner_nodes: set[BPlusTree.Inner] = set()
@@ -981,7 +981,10 @@ class BPlusTree[Key: _OrderedKey, Value](AbstractBTree[Key, Value]):
         return inner_nodes
 
     def convert_to_counting_leaf_tree(self) -> None:
-        """Keeps all inner nodes but replaces all leaves with CountingLeafs."""
+        """Keeps all inner nodes but replaces all leaves with CountingLeafs.
+
+        On a tree whose leaves already count, it replaces them with new CountingLeafs, whose counts start at zero.
+        """
 
         # get root node:
         node: BPlusTree.AbstractNode = self.root
