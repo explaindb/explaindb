@@ -21,6 +21,7 @@
 """Concrete query-processing operators: scan, filter, simple hash join, semi-join, print, collect, count."""
 
 import math
+import os
 import pickle
 import re
 
@@ -86,7 +87,9 @@ class Scan(Operator):
     Scan operator to iterate over the given number of tuples in the underlying storage file.
     """
 
-    def __init__(self, file: str, num_tuples: int | float = math.inf) -> None:
+    def __init__(
+        self, file: str | os.PathLike[str], num_tuples: int | float = math.inf
+    ) -> None:
         """Create a scan operator over a pickled storage file.
 
         :param file: Path to the storage file holding the pickled tuples.
@@ -143,10 +146,13 @@ class Scan(Operator):
         """
         # only a sink at the root of the QEP compiles without code to emit:
         assert emit is not None
+        # `os.fspath` turns a `pathlib.Path` into a string (the `repr` of a `Path` would be
+        # `PosixPath('...')`, which the generated code cannot run), and `!r` writes that string
+        # as a Python string literal, so quotes and backslashes in the path are escaped:
         if self.num_tuples == math.inf:
-            return f"with open('{self.file}', 'rb') as f:\n    for tup in pickle.load(f):\n        {self.indent_emit_(emit, 2)}"
+            return f"with open({os.fspath(self.file)!r}, 'rb') as f:\n    for tup in pickle.load(f):\n        {self.indent_emit_(emit, 2)}"
         return (
-            f"with open('{self.file}', 'rb') as f:\n    i = 0\n    for tup in pickle.load(f):\n        "
+            f"with open({os.fspath(self.file)!r}, 'rb') as f:\n    i = 0\n    for tup in pickle.load(f):\n        "
             f"if i < {self.num_tuples}:\n            {self.indent_emit_(emit, 3)}\n            i += 1\n        else:\n            break"
         )
 

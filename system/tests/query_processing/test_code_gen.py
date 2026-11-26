@@ -23,7 +23,10 @@
 # pylint: disable=invalid-name,missing-class-docstring,missing-function-docstring
 """Tests for query-plan code generation and operator execution."""
 
+import os
 import pickle
+import tempfile
+from pathlib import Path
 from typing import Any
 
 from system.data_classes import *
@@ -94,6 +97,61 @@ class MyTest(unittest.TestCase):
             res2 = loc["result"]
 
             self.assertListEqual(res1, res2)
+
+    def test_compiled_scan_reads_file_whose_path_contains_quotes_and_a_backslash(self):
+        """The compiled code of a scan reads its file even if the path contains quotes and a backslash.
+
+        The double quote and the backslash are there because code that only escaped the
+        single quote, used double quotes or wrote a raw string would still break on them:
+        the ``"`` would end the string literal, and the backslash followed by ``n`` would
+        become a line break. The scan also reads the file if it is given the path as a
+        ``pathlib.Path`` instead of a string.
+        """
+        with tempfile.TemporaryDirectory() as directory:
+            # pick a subdirectory name with quotes and a backslash (``\\n`` is a
+            # backslash and the letter n, not a line break); Windows forbids ``"`` in
+            # names, but its temporary path already contains backslashes as separators:
+            if os.name != "nt":
+                subdirectory: str = os.path.join(directory, 'it\'s "a" \\n dir')
+            else:
+                subdirectory = os.path.join(directory, "it's")
+            os.mkdir(subdirectory)
+
+            # write three tuples into a file in that subdirectory:
+            path: str = os.path.join(subdirectory, "persons.pkl")
+            with open(path, "wb") as f:
+                pickle.dump(
+                    [
+                        {"name": "John", "age": 30},
+                        {"name": "Jane", "age": 25},
+                        {"name": "Bob", "age": 41},
+                    ],
+                    f,
+                )
+
+            # compile and run an unbounded scan and a scan bounded to two tuples, each
+            # given the path once as a string and once as a ``pathlib.Path``; the
+            # generated code binds ``result`` to a list of tuples:
+            cases: list[tuple[str, Scan, list[tuple[str, int]]]] = [
+                ("unbounded", Scan(path), [("John", 30), ("Jane", 25), ("Bob", 41)]),
+                ("bounded", Scan(path, 2), [("John", 30), ("Jane", 25)]),
+                (
+                    "Path object",
+                    Scan(Path(path)),
+                    [("John", 30), ("Jane", 25), ("Bob", 41)],
+                ),
+                (
+                    "bounded Path object",
+                    Scan(Path(path), 2),
+                    [("John", 30), ("Jane", 25)],
+                ),
+            ]
+            for label, scan, expected in cases:
+                with self.subTest(label):
+                    code: str = Collect(scan).compile()
+                    loc: dict[str, Any] = {"result": None}
+                    exec(code, {}, loc)
+                    self.assertEqual(loc["result"], expected)
 
 
 class OperatorTest(unittest.TestCase):
