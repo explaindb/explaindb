@@ -20,7 +20,7 @@
 
 # This module exceeds pylint's 1000 lines, as it holds one test class per security property of the audit jobs.
 # pylint: disable=too-many-lines
-"""Tests of ``.gitlab-ci.yml``: which jobs run in scheduled pipelines, the audit jobs, and visualization_test."""
+"""Tests of ``.gitlab-ci.yml``: stages, jobs of scheduled pipelines, the audit jobs, and visualization_test."""
 
 import copy
 import functools
@@ -67,6 +67,11 @@ SCHEDULED_JOBS: frozenset[str] = frozenset(
         "rust_dependency_audit",
         "generated_rust_check",
     }
+)
+
+# the quick static checks of the stage check, which run before every test job:
+CHECK_JOBS: frozenset[str] = frozenset(
+    {"formatting", "type_check", "binder_requirements"}
 )
 
 # the rule that keeps a job out of scheduled pipelines; it must come first, as GitLab applies the first matching rule:
@@ -570,6 +575,63 @@ def visualization_job_problems(job: dict[str, Any]) -> list[str]:
         *problems,
         f"no command starts with {JOB_ASSIGNMENT} and runs {VISUALIZATION_TESTS}",
     ]
+
+
+def job_stages(config: dict[str, Any]) -> dict[str, str]:
+    """Returns the stage of every job of the configuration; a job without ``stage`` runs in GitLab's default ``test``.
+
+    Templates (keys starting with a dot) and :data:`RESERVED_KEYS` are not jobs.
+    """
+    return {
+        name: job.get("stage", "test")
+        for name, job in config.items()
+        if name not in RESERVED_KEYS and not name.startswith(".")
+    }
+
+
+class StageTest(unittest.TestCase):
+    """Checks that the quick static checks run in their own stage, before every test job."""
+
+    def test_check_runs_between_prepare_and_test(self) -> None:
+        """The stages are prepare, check, test and deploy, in this order."""
+        self.assertEqual(
+            ["prepare", "check", "test", "deploy"], load_ci_config()["stages"]
+        )
+
+    def test_check_holds_exactly_the_quick_checks(self) -> None:
+        """The stage check holds exactly CHECK_JOBS, none of which may fail without failing the pipeline; the audits
+        and generated_rust_check stay in test, so that they cannot stop the tests or the nightly pipeline.
+        """
+        config: dict[str, Any] = load_ci_config()
+        stages: dict[str, str] = job_stages(config)
+
+        # the jobs of the stage check are exactly the quick checks, and each of them stops the pipeline:
+        self.assertEqual(
+            CHECK_JOBS, {name for name, stage in stages.items() if stage == "check"}
+        )
+        self.assertEqual([], allow_failure_places(config, CHECK_JOBS))
+
+        # the audits and the check of the generated Rust code run in test:
+        for name in [*AUDIT_JOBS, "generated_rust_check"]:
+            self.assertEqual("test", stages[name], name)
+
+    def test_no_later_job_skips_the_checks(self) -> None:
+        """No job after the stage check has ``needs`` or ``dependencies``, which would let it start before the
+        checks pass."""
+        config: dict[str, Any] = load_ci_config()
+        later: list[str] = [
+            name
+            for name, stage in job_stages(config).items()
+            if stage in ("test", "deploy")
+        ]
+        self.assertEqual(
+            [],
+            [
+                name
+                for name in later
+                if "needs" in config[name] or "dependencies" in config[name]
+            ],
+        )
 
 
 class ScheduledPipelineTest(unittest.TestCase):

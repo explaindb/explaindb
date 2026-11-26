@@ -12,8 +12,19 @@ workflow:
       auto_cancel:
         on_new_commit: none
 
+# prepare: quick jobs every later job waits for (docs-only detection, secret and
+# SAST scans). check: quick static checks of the code (formatting, type check,
+# Binder export), which only a change to the repository can make fail; a failure
+# stops the pipeline before the slow tests take the runners. test: the tests and
+# the remaining checks. The dependency audits run here, so that a newly
+# published advisory does not stop the tests of an unrelated merge request.
+# generated_rust_check runs here as well: it fails on main and in the nightly
+# pipeline (in a merge request it only warns), and in check it would then stop
+# the tests there, including serializability_nightly. deploy: the pages, on main
+# only. system/tests/repo/test_ci_config.py checks this order.
 stages:
   - prepare
+  - check
   - test
   - deploy
 
@@ -96,7 +107,7 @@ detect-docs-only:
   interruptible: true
 
 formatting:
-  stage: test
+  stage: check
   extends: .not_in_scheduled_pipelines
   tags:
     - test
@@ -123,7 +134,7 @@ formatting:
 # --frozen, the command uses --locked, so an out-of-date uv.lock fails this job
 # as well as binder_requirements.
 type_check:
-  stage: test
+  stage: check
   extends: .not_in_scheduled_pipelines
   tags:
     - test
@@ -149,7 +160,7 @@ type_check:
 # dependency groups, so the group browser-tests (see pyproject.toml) does not
 # reach Binder; the dependency_audit job below exports all groups instead.
 binder_requirements:
-  stage: test
+  stage: check
   extends: .not_in_scheduled_pipelines
   tags:
     - test
@@ -309,8 +320,8 @@ rust_dependency_audit:
 # apply; CONTRIBUTING.md explains how to accept a false positive (see also
 # docs/changes/007-gitleaks-secret-detection).
 gitleaks_secret_detection:
-  # In the first stage: the job is quick, and if it finds a secret the test
-  # stage does not run at all.
+  # In the first stage: the job is quick, and if it finds a secret the later
+  # stages do not run at all.
   stage: prepare
   tags:
     - test
@@ -400,8 +411,8 @@ gitleaks_secret_detection:
 # accept an intentional finding (see also docs/changes/008-semgrep-sast and
 # docs/changes/025-semgrep-html-scripts).
 semgrep_sast:
-  # In the first stage: the job is quick, and if it finds something the test
-  # stage does not run at all. It needs detect-docs-only (same stage) for the
+  # In the first stage: the job is quick, and if it finds something the later
+  # stages do not run at all. It needs detect-docs-only (same stage) for the
   # DOCS_ONLY variable.
   stage: prepare
   needs:

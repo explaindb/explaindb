@@ -112,3 +112,6 @@ with its own pyright version and extra stubs, so its errors can differ from the 
 - A baseline that tolerates old errors: rejected by the user.
 
 <!-- notes below: skill never overwrites past this marker -->
+
+**Note 2026-11-26 (stage):** `type_check` runs in the new stage `check` (between `prepare` and `test`), together
+with `formatting` and `binder_requirements`: a type error stops the pipeline before the slow tests take the runners.
