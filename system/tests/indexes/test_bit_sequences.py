@@ -25,8 +25,9 @@
 
 import sys
 import unittest
-from typing import Type
+from typing import Callable, Type
 from system.interfaces.bit_sequence import (
+    BitSequence,
     UncompressedBitSequence,
 )
 from system.indexes.bit_sequences import (
@@ -209,6 +210,47 @@ class BitSequenceTests(unittest.TestCase):
                     self.assertEqual(len(result), 5)
                     self.assertEqual(result.as_set(), set())
                     self.assertIsNot(result, sequence)
+
+    def test_operations_on_bit_sequences_of_length_zero(self) -> None:
+        """Combining two bit sequences of length 0 with &, |, ^, + or - gives a bit sequence of the same type with
+        length 0 and no set bits, uncompressed as well as compressed with WAH (Word-Aligned Hybrid).
+        """
+        # the five operations, by their symbol:
+        operations: dict[str, Callable[[BitSequence, BitSequence], BitSequence]] = {
+            "&": lambda x, y: x & y,
+            "|": lambda x, y: x | y,
+            "^": lambda x, y: x ^ y,
+            "+": lambda x, y: x + y,
+            "-": lambda x, y: x - y,
+        }
+        bit_sequence_type: type[UncompressedBitSequence]
+        for bit_sequence_type in [IntegerBitSequence, BitListBitSequence]:
+            # create two bit sequences of length 0, uncompressed and compressed with WAH:
+            x, x_compressed = self._create_bit_sequence_and_compressed_bit_sequence(
+                bit_sequence_type, [], 0
+            )
+            y, y_compressed = self._create_bit_sequence_and_compressed_bit_sequence(
+                bit_sequence_type, [], 0
+            )
+            operand_pairs: list[tuple[BitSequence, BitSequence]] = [
+                (x, y),
+                (x_compressed, y_compressed),
+            ]
+
+            # every operation gives a bit sequence of the operands' type with length 0 and no set bits, equal to
+            # the operands:
+            for x_operand, y_operand in operand_pairs:
+                for symbol, operation in operations.items():
+                    with self.subTest(
+                        bit_sequence_type=bit_sequence_type.__name__,
+                        operand_type=type(x_operand).__name__,
+                        operation=symbol,
+                    ):
+                        result: BitSequence = operation(x_operand, y_operand)
+                        self.assertIs(type(result), type(x_operand))
+                        self.assertEqual(len(result), 0)
+                        self.assertEqual(result.as_set(), set())
+                        self.assertEqual(result, x_operand)
 
     def _create_bit_sequence_and_compressed_bit_sequence(
         self,

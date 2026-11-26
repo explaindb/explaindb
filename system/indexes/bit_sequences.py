@@ -1099,13 +1099,15 @@ class WAHBitSequence(CompressedBitSequence):
                 # The words of the corresponding operand
                 self.words: list[UncompressedBitSequence] = words
 
-                # How many fills of the current fill word still need to be processed
+                # how many fills of the current fill word still need to be processed; a bit sequence of
+                # length 0 has no words, so there is no current word and nothing to process:
                 self.remaining_fills: int = (
-                    0
-                    if not WAHBitSequence.is_fill(self.get_current_word())
-                    else WAHBitSequence.get_number_of_fills_represented_by_fill_word(
+                    WAHBitSequence.get_number_of_fills_represented_by_fill_word(
                         self.get_current_word()
                     )
+                    if self.index_within_bounds()
+                    and WAHBitSequence.is_fill(self.get_current_word())
+                    else 0
                 )
 
             def index_within_bounds(self) -> bool:
