@@ -33,6 +33,10 @@ class BitmapIndex[Key, Value](
 ):
     """
     Abstract base class for bitmap index structures that allow for efficient filtering.
+
+    Every loaded key/value pair gets its own bit position, i.e. one bit per row as in the textbook: the bit sequence
+    of a key has the bits of its pairs set. A value loaded under several keys, or the same pair loaded twice,
+    occupies several positions.
     """
 
     def __init__(
@@ -50,11 +54,8 @@ class BitmapIndex[Key, Value](
             bit_sequence_type
         )
 
-        # List of values. The index for a value represents its positions in the different bit sequences.
+        # Maps each bit position to the value of the key/value pair loaded at that position
         self.position_to_value: list[Value] = []
-
-        # Maps each value to its position in the bit sequences
-        self.value_to_position: dict[Value, int] = {}
 
         # The compression type to use during bulkloading, if desired
         if compression_type:
@@ -124,38 +125,32 @@ class BitmapIndex[Key, Value](
     ) -> None:
         """See :meth:`Index.bulkload`.
 
-        Builds the value-to-position and position-to-value maps from the data and
-        fills a per-key bit sequence for every distinct key, then adjusts the
-        number of bits represented by each bit sequence to the number of distinct
-        values seen.
+        Gives every loaded key/value pair the next bit position, records the pair's
+        value in the position-to-value list and sets the bit in the bit sequence of
+        the pair's key (one bit sequence per distinct key), then adjusts the number
+        of bits represented by each bit sequence to the number of loaded pairs.
 
         :param key_prefix: Reserved for subclasses that key their bit sequences by a prefix; this base
             implementation does not use it.
         """
-        # Contains all possible values for efficient duplicate checking in the value list
-        contained_values: set[Value] = set()
-
         # Iterate through all key/value pairs and insert them into the index
         for key, value in input_data:
-            # Add new value to the list of known values
-            if value not in contained_values:
-                self.value_to_position[value] = len(contained_values)
-                contained_values.add(value)
-                self.position_to_value.append(value)
+            # Give the pair the next bit position, even if its value or the whole pair was loaded before
+            self.position_to_value.append(value)
             if key not in self:
                 self._create_empty_bit_sequence_for_key(key)
-            self._insert(key, value)
+            self._insert(key, len(self.position_to_value) - 1)
 
-        # During bulkloading we do not know yet how many distinct values we will need to store, so we have to manually
+        # During bulkloading we do not know yet how many key/value pairs we will need to store, so we have to manually
         # adjust the number of bits at the end. This is necessary for some bitwise operations (e.g. inversion)
-        self._update_number_of_bits_for_bit_sequences(len(contained_values))
+        self._update_number_of_bits_for_bit_sequences(len(self.position_to_value))
 
     @abstractmethod
     def _update_number_of_bits_for_bit_sequences(self, number_of_bits: int) -> None:
         """
         Abstract method for setting number of bits all bit sequences represent. This is necessary given that during
-        the bulkloading we do not know the number of values, and thus the number of bits we have to represent in each
-        bit sequence.
+        the bulkloading we do not know the number of key/value pairs, and thus the number of bits we have to represent
+        in each bit sequence.
         :param number_of_bits: The new number of bits to represent.
         """
 
@@ -191,13 +186,13 @@ class BitmapIndex[Key, Value](
         self, use_compression_if_possible: bool = False
     ) -> BitSequence:
         """
-        Returns an empty bit_sequence with the length of the amount of values stored with this bitmap index.
+        Returns an empty bit_sequence with the length of the number of key/value pairs stored with this bitmap index.
         :param use_compression_if_possible: Returns a compressed bit sequence.
         :return: The empty bit_sequence.
         """
         uncompressed_bit_sequence: UncompressedBitSequence = (
             self.uncompressed_bit_sequence_type.create_all_false_bit_sequence(
-                len(self.value_to_position)
+                len(self.position_to_value)
             )
         )
         if use_compression_if_possible and self.use_compression:
@@ -206,22 +201,22 @@ class BitmapIndex[Key, Value](
             )
         return uncompressed_bit_sequence
 
-    def _insert(self, key: Key, value: Value) -> None:
+    def _insert(self, key: Key, position: int) -> None:
         """
-        Inserts the value into the bit_sequence representing the key.
+        Sets the bit at the given position in the bit_sequence representing the key.
         :param key: The key
-        :param value: The value
+        :param position: The bit position of the key/value pair
         """
-        if len(self[key]) < len(self.value_to_position):
+        if len(self[key]) < len(self.position_to_value):
             # Bit sequence too small
-            self[key].update_represented_number_of_bits(len(self.value_to_position))
-        self[key].set_bit(self.value_to_position[value])
+            self[key].update_represented_number_of_bits(len(self.position_to_value))
+        self[key].set_bit(position)
 
     def get(self, key: Key) -> Iterator[Value]:
         """See :meth:`PointQueryMixIn.get`.
 
         Yields the values represented by the set bits of the equal bit sequence
-        for the given key.
+        for the given key, i.e. a value once for every loaded pair with this key.
         """
         yield from self._get_values_for_bit_sequence(self.get_equal(key))
 
@@ -230,7 +225,8 @@ class BitmapIndex[Key, Value](
 
         Yields the values of the intersection (bitwise AND) of the
         greater-or-equal ``min_key`` and smaller-or-equal ``max_key`` bit
-        sequences, i.e. the values whose key lies in ``[min_key, max_key]``.
+        sequences, i.e. the values whose key lies in ``[min_key, max_key]``; a
+        value is yielded once for every loaded pair whose key lies in the range.
         """
         yield from self._get_values_for_bit_sequence(
             self.get_greater_or_equal(min_key) & self.get_smaller_or_equal(max_key)

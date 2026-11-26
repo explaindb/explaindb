@@ -385,8 +385,8 @@ class BitmapIndexTests(unittest.TestCase):
                     bit_sequence_type=bit_sequence_type,
                     compression_type=compression_type,
                 ):
-                    # bulkload the pairs; the values get the bit positions in the order
-                    # they first appear (carol 0, alice 1, bob 2, dave 3):
+                    # bulkload the pairs; each pair gets the next bit position, in load
+                    # order (carol 0, alice 1, bob 2, dave 3):
                     index: RangeEncodedBitmapIndex[int, str] = RangeEncodedBitmapIndex(
                         bit_sequence_type, compression_type
                     )
@@ -442,6 +442,144 @@ class BitmapIndexTests(unittest.TestCase):
                     # point queries map the positions back to the values:
                     self.assertEqual(set(index.get(1)), {1})
                     self.assertEqual(set(index.get(2)), {0})
+
+    def test_range_encoded_index_returns_a_value_loaded_under_several_keys_for_each_key(
+        self,
+    ):
+        """A range-encoded bitmap index returns a value loaded under several keys for each
+        of these keys, in point and range queries.
+        """
+        data: list[tuple[int, str]] = [(1, "v"), (2, "v"), (3, "w")]
+
+        bit_sequence_type: Type[UncompressedBitSequence]
+        for bit_sequence_type in [IntegerBitSequence, BitListBitSequence]:
+            compression_type: Type[CompressedBitSequence] | None
+            for compression_type in [WAHBitSequence, None]:
+                with self.subTest(
+                    bit_sequence_type=bit_sequence_type,
+                    compression_type=compression_type,
+                ):
+                    # bulkload the pairs; v is loaded under keys 1 and 2:
+                    index: RangeEncodedBitmapIndex[int, str] = RangeEncodedBitmapIndex(
+                        bit_sequence_type, compression_type
+                    )
+                    index.bulkload(iter(data))
+
+                    # a point query returns v for each of its keys:
+                    self.assertEqual(list(index.get(1)), ["v"])
+                    self.assertEqual(list(index.get(2)), ["v"])
+                    self.assertEqual(list(index.get(3)), ["w"])
+
+                    # a range query returns v also if only its greater key lies in the
+                    # range, and once per key in the range; the lower bound 0 is no
+                    # stored key:
+                    self.assertEqual(sorted(index.get_all_in_range(2, 3)), ["v", "w"])
+                    self.assertEqual(sorted(index.get_all_in_range(0, 2)), ["v", "v"])
+
+                    # each loaded pair gets its own bit position, in load order:
+                    self.assertEqual(index.position_to_value, ["v", "v", "w"])
+
+                    # the bit sequence of each key holds the positions of the pairs of
+                    # all keys up to and including it:
+                    self.assertEqual(index[1].as_set(), {0})
+                    self.assertEqual(index[2].as_set(), {0, 1})
+                    self.assertEqual(index[3].as_set(), {0, 1, 2})
+
+    def test_equality_encoded_indexes_return_a_value_loaded_under_several_keys_in_range_queries(
+        self,
+    ):
+        """An equality-encoded bitmap index returns a value loaded under several keys in
+        every range query that contains one of these keys, once per such key; each loaded
+        pair has its own bit position.
+        """
+        data: list[tuple[int, str]] = [(1, "v"), (2, "v"), (3, "w")]
+
+        index_type: Type[BitmapIndex]
+        for index_type in [
+            SortedEqualityEncodedBitmapIndex,
+            UnsortedEqualityEncodedBitmapIndex,
+        ]:
+            bit_sequence_type: Type[UncompressedBitSequence]
+            for bit_sequence_type in [IntegerBitSequence, BitListBitSequence]:
+                compression_type: Type[CompressedBitSequence] | None
+                for compression_type in [WAHBitSequence, None]:
+                    with self.subTest(
+                        index_type=index_type,
+                        bit_sequence_type=bit_sequence_type,
+                        compression_type=compression_type,
+                    ):
+                        # bulkload the pairs; v is loaded under keys 1 and 2:
+                        index: BitmapIndex[int, str] = index_type(
+                            bit_sequence_type, compression_type
+                        )
+                        index.bulkload(iter(data))
+
+                        # a point query returns v for each of its keys:
+                        self.assertEqual(list(index.get(1)), ["v"])
+                        self.assertEqual(list(index.get(2)), ["v"])
+                        self.assertEqual(list(index.get(3)), ["w"])
+
+                        # a range query returns v if one of its keys lies in the range,
+                        # once per such key; the lower bound 0 is no stored key:
+                        self.assertEqual(
+                            sorted(index.get_all_in_range(2, 3)), ["v", "w"]
+                        )
+                        self.assertEqual(list(index.get_all_in_range(2, 2)), ["v"])
+                        self.assertEqual(
+                            sorted(index.get_all_in_range(0, 2)), ["v", "v"]
+                        )
+
+                        # each loaded pair has its own bit position, in load order, set
+                        # only in the bit sequence of its key:
+                        self.assertEqual(index.position_to_value, ["v", "v", "w"])
+                        self.assertEqual(index[1].as_set(), {0})
+                        self.assertEqual(index[2].as_set(), {1})
+                        self.assertEqual(index[3].as_set(), {2})
+
+                        # uncompressed, each of the 3 keys has one bit per loaded pair:
+                        if compression_type is None:
+                            self.assertEqual(index.get_number_of_bits(), 9)
+
+    def test_bitmap_indexes_give_each_loaded_copy_of_a_pair_its_own_bit_position(
+        self,
+    ):
+        """A bitmap index gives every loaded key/value pair its own bit position, also a
+        pair loaded twice, and returns its value once per loaded copy, as the radix trie
+        and the Python dictionary index keep such duplicates.
+        """
+        data: list[tuple[int, str]] = [(1, "v"), (1, "v"), (2, "w")]
+
+        index_type: Type[BitmapIndex]
+        for index_type in [
+            SortedEqualityEncodedBitmapIndex,
+            UnsortedEqualityEncodedBitmapIndex,
+            RangeEncodedBitmapIndex,
+        ]:
+            bit_sequence_type: Type[UncompressedBitSequence]
+            for bit_sequence_type in [IntegerBitSequence, BitListBitSequence]:
+                compression_type: Type[CompressedBitSequence] | None
+                for compression_type in [WAHBitSequence, None]:
+                    with self.subTest(
+                        index_type=index_type,
+                        bit_sequence_type=bit_sequence_type,
+                        compression_type=compression_type,
+                    ):
+                        # bulkload the pairs; the pair (1, "v") is loaded twice:
+                        index: BitmapIndex[int, str] = index_type(
+                            bit_sequence_type, compression_type
+                        )
+                        index.bulkload(iter(data))
+
+                        # point and range queries return v once per loaded copy:
+                        self.assertEqual(list(index.get(1)), ["v", "v"])
+                        self.assertEqual(list(index.get(2)), ["w"])
+                        self.assertEqual(
+                            sorted(index.get_all_in_range(1, 2)), ["v", "v", "w"]
+                        )
+                        self.assertEqual(list(index.get_all_in_range(2, 2)), ["w"])
+
+                        # each loaded copy has its own bit position, in load order:
+                        self.assertEqual(index.position_to_value, ["v", "v", "w"])
 
     def test_unsorted_bit_sequence_list(self):
         """

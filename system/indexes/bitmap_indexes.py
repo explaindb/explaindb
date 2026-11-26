@@ -338,7 +338,8 @@ class UnsortedEqualityEncodedBitmapIndex[Key, Value](
 class RangeEncodedBitmapIndex[Key: _Comparable, Value](SortedBitmapIndex[Key, Value]):
     """
     Implements range encoded bitmap index structure. Each bit_sequence contains all values whose keys are less or equal to the
-    keys represented by the bit_sequence.
+    keys represented by the bit_sequence. Since every loaded pair has its own bit position, get_equal recovers the pairs
+    of a key by removing the bit sequence of the next-smaller key.
     """
 
     def bulkload(
@@ -392,8 +393,8 @@ class RangeEncodedBitmapIndex[Key: _Comparable, Value](SortedBitmapIndex[Key, Va
         index: int = self.key_to_index[key]
 
         if index > 0:
-            # If we have an index higher than 0, then we need to remove all values which have a smaller key, i.e.,
-            # the bit_sequence stored under (index - 1)
+            # If we have an index higher than 0, then we need to remove the positions of all pairs with a smaller key,
+            # i.e., the bit_sequence stored under (index - 1)
             return (
                 self.key_bit_sequence_list[index][1]
                 - self.key_bit_sequence_list[index - 1][1]
