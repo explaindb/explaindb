@@ -189,6 +189,23 @@ class OperatorTest(unittest.TestCase):
         rel_persons.interpret_open()
         self.assertListEqual(rel_persons.result, persons_tuples)
 
+    def test_set_parent_accepts_a_parent_of_another_operator_class(self) -> None:
+        """A relation accepts a collect operator as its parent.
+
+        pyright, which the continuous integration (CI) job type_check runs over ``system/``,
+        also checks the call to ``set_parent``: the parent of an operator may be of any
+        operator class, not only of the class of the child.
+        """
+        _, orders, books = self.create_data()
+        # a relation without a parent, and a collect operator built over another relation:
+        relation: Relation = Relation("orders", [vars(e) for e in orders])
+        collect: Collect = Collect(Relation("books", [vars(e) for e in books]))
+        self.assertIsNone(relation.parent)
+
+        # attach the collect operator as the parent of the relation:
+        relation.set_parent(collect)
+        self.assertIs(relation.parent, collect)
+
     def test_semij(self):
         _, orders, books = self.create_data()
         result_tuples = [

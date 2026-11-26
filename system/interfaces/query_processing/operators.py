@@ -21,7 +21,6 @@
 """Abstract interface for query-processing operators."""
 
 from abc import ABC, abstractmethod
-from typing import Self
 
 # tuples are represented as dictionary from attribute name to attribute value
 Tuple = dict
@@ -41,7 +40,7 @@ class Operator(ABC):
         self.parent = parent
         self.children = children
 
-    def set_parent(self, parent: Self) -> None:
+    def set_parent(self, parent: "Operator") -> None:
         """Set the parent operator that this operator pushes its output tuples to.
 
         :param parent: The parent operator to attach.
