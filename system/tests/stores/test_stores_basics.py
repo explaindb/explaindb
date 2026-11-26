@@ -74,9 +74,10 @@ class StoreTestBasics(AbstractUnitTest):
                 self.assertEqual(len(entries), 1)
 
                 # this single version is an update entry holding a Stuff object; it is valid from timestamp 0 on,
-                # i.e. it is visible to every transaction:
+                # i.e. it is visible to every transaction (the plain assert lets the type checker see the class):
                 entry = entries[0]
                 self.assertIsInstance(entry, VersionedKeyValueStore.UpdateEntry)
+                assert isinstance(entry, VersionedKeyValueStore.UpdateEntry)
                 self.assertIsInstance(entry.value, StoreTestBasics.Stuff)
                 self.assertEqual(entry.start_validity, 0)
 
@@ -616,11 +617,16 @@ class OperationsWithoutTransactionTest(AbstractUnitTest):
         autocommit, a call that leaves it out raises TypeError and begins no transaction, so a forgotten id never
         runs as a transaction of its own.
         """
-        # each call that leaves out the transaction id, by the name of its operation:
+        # each call that leaves out the transaction id, by the name of its operation (on purpose, so the type
+        # checker is told to accept the missing argument):
         calls_without_id: dict[str, Callable[[TransactionalKeyValueStore], object]] = {
-            "read_objects": lambda store: store.read_objects(),
-            "update_object": lambda store: store.update_object("1", self.Stuff(9, 9)),
-            "delete_object": lambda store: store.delete_object("1"),
+            "read_objects": lambda store: store.read_objects(),  # pyright: ignore[reportCallIssue]
+            "update_object": lambda store: store.update_object(  # pyright: ignore[reportCallIssue]
+                "1", self.Stuff(9, 9)
+            ),
+            "delete_object": lambda store: store.delete_object(  # pyright: ignore[reportCallIssue]
+                "1"
+            ),
         }
         store_class: type[TransactionalKeyValueStore]
         operation: str

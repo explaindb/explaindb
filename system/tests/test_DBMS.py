@@ -48,6 +48,19 @@ class DBMSTests(unittest.TestCase):
         # self.assertIsInstance(dbms.query_optimizer, QueryOptimizer)
         # self.assertIsInstance(dbms.store, Store)
 
+    def test_begin_transaction_raises_not_implemented_error(self) -> None:
+        """PyDBMS does not begin transactions itself: begin_transaction raises NotImplementedError."""
+        # a DBMS without a wrapped store and without a query optimizer:
+        dbms: DBMS = PyDBMS(
+            QEP_queryable_indexed_ACID_store=None,
+            persistence_layer=VersionedKeyValueStore(),
+            query_optimizer=None,
+        )
+
+        # it inherits begin_transaction from ACIDStore:
+        with self.assertRaises(NotImplementedError):
+            dbms.begin_transaction()
+
 
 if __name__ == "__main__":
     unittest.main(

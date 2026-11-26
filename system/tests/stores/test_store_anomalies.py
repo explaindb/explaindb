@@ -50,6 +50,41 @@ WriteKind = Literal["insert", "update", "delete"]
 
 class StoreTestAnomalies(AbstractUnitTest):
 
+    @staticmethod
+    def _value(
+        entry: VersionedKeyValueStore.VersionEntry | None,
+    ) -> AbstractUnitTest.Stuff:
+        """Returns the object of version <entry>, which the test expects to be an update entry holding a Stuff
+        object (the asserts let the type checker see the classes).
+
+        @param entry: a committed or work-in-progress version of an object
+        @return: the Stuff object of the version
+        """
+        assert isinstance(
+            entry, VersionedKeyValueStore.UpdateEntry
+        ), f"expected an update entry, got {entry!r}"
+        assert isinstance(
+            entry.value, AbstractUnitTest.Stuff
+        ), f"expected a Stuff object, got {entry.value!r}"
+        return entry.value
+
+    @staticmethod
+    def _wip(
+        store: TransactionalKeyValueStore, object_id: str
+    ) -> VersionedKeyValueStore.VersionEntry:
+        """Returns the work-in-progress version of object <object_id> in <store>, which the test expects to exist
+        (the assert lets the type checker see that it is not None).
+
+        @param store: the store holding the object
+        @param object_id: the object id of the object
+        @return: the work-in-progress version of the object
+        """
+        wip: VersionedKeyValueStore.VersionEntry | None = store.key_value_store[
+            object_id
+        ].wip
+        assert wip is not None, f"object {object_id} has no work-in-progress version"
+        return wip
+
     def test_update_multiple_objects_in_TA(self):
         """A TA that updates the same objects several times holds one wip entry per object and each object once in
         its write set; its commit adds one committed version per object.
@@ -67,7 +102,7 @@ class StoreTestAnomalies(AbstractUnitTest):
         After the commit, each object has two committed versions and no wip entry.
         """
         tkvs = TransactionalKeyValueStore()
-        tkvs.bulkload(self._create_fake_data())
+        tkvs.bulkload(iter(self._create_fake_data()))
         TA_id = tkvs.begin_transaction()
 
         # modify object <object_id> multiple times:
@@ -78,7 +113,9 @@ class StoreTestAnomalies(AbstractUnitTest):
 
             for idx, object_id in enumerate(object_ids_to_test):
                 # bypass the store to read an object (we will test reading separately):
-                _object: object = tkvs.key_value_store[object_id].committed[0].value
+                _object: object = self._value(
+                    tkvs.key_value_store[object_id].committed[0]
+                )
 
                 # modify the object, i.e. create a new instance as we use frozen data classes:
                 _object = StoreTestAnomalies.Stuff(a=_object.a, b=_object.b + 4242)
@@ -86,9 +123,7 @@ class StoreTestAnomalies(AbstractUnitTest):
                 tkvs.update_object(object_id, _object, TA_id)
                 self.assertEqual(len(tkvs.TD[TA_id].read_clauses), 0)
                 # now, there must be a wip-entry by this TA:
-                self.assertEqual(
-                    tkvs.key_value_store[object_id].wip.start_validity, TA_id
-                )
+                self.assertEqual(self._wip(tkvs, object_id).start_validity, TA_id)
                 self.assertTrue(
                     isinstance(
                         tkvs.key_value_store[object_id].wip,
@@ -98,7 +133,7 @@ class StoreTestAnomalies(AbstractUnitTest):
 
                 # instances must be different, i.e. we created a copy:
                 self.assertNotEqual(
-                    id(_object), id(tkvs.key_value_store[object_id].wip.value)
+                    id(_object), id(self._value(tkvs.key_value_store[object_id].wip))
                 )
                 self.assertEqual(
                     len(tkvs.TD[TA_id].write_set),
@@ -132,7 +167,7 @@ class StoreTestAnomalies(AbstractUnitTest):
         """
 
         tkvs = TransactionalKeyValueStore()
-        tkvs.bulkload(self._create_fake_data())
+        tkvs.bulkload(iter(self._create_fake_data()))
 
         object_id: str = "4242"
 
@@ -149,6 +184,9 @@ class StoreTestAnomalies(AbstractUnitTest):
         item: tuple[str, object] = result_initial[0]
 
         self.assertEqual(object_id, item[0])
+        # the object is a Stuff object (the plain assert lets the type checker see the class):
+        self.assertIsInstance(item[1], StoreTestAnomalies.Stuff)
+        assert isinstance(item[1], StoreTestAnomalies.Stuff)
         self.assertEqual(4243, item[1].a)
         self.assertEqual(0, item[1].b)
 
@@ -156,13 +194,13 @@ class StoreTestAnomalies(AbstractUnitTest):
         tkvs.update_object("4242", new_version, TA_ID)
 
         # committed version is untouched:
-        self.assertEqual(tkvs.key_value_store["4242"].committed[0].value.b, 0)
+        self.assertEqual(self._value(tkvs.key_value_store["4242"].committed[0]).b, 0)
 
         # and nothing was added to the commit list:
         self.assertEqual(len(tkvs.key_value_store["4242"].committed), 1)
 
         # we have a wip entry now:
-        self.assertEqual(tkvs.key_value_store["4242"].wip.value.b, 4243)
+        self.assertEqual(self._value(tkvs.key_value_store["4242"].wip).b, 4243)
 
         # bypass store semantics and add a new committed version
         # simulating an update by another concurrent transaction with a greater TA_ID than <TA_ID>:
@@ -303,6 +341,9 @@ class StoreTestAnomalies(AbstractUnitTest):
 
         item: tuple[str, object] = result_initial[0]
         self.assertEqual(item[0], object_id)
+        # the object is a Stuff object (the plain assert lets the type checker see the class):
+        self.assertIsInstance(item[1], StoreTestAnomalies.Stuff)
+        assert isinstance(item[1], StoreTestAnomalies.Stuff)
         self.assertEqual(7, item[1].a)
 
         # TA 2 creates a new version of the object and performs an update:
@@ -310,16 +351,16 @@ class StoreTestAnomalies(AbstractUnitTest):
         tkvs.update_object(object_id, new_version, TA_ID_2)
 
         # committed version in the store is untouched:
-        self.assertEqual(tkvs.key_value_store[object_id].committed[0].value.b, 0)
+        self.assertEqual(self._value(tkvs.key_value_store[object_id].committed[0]).b, 0)
 
         # and nothing was added to the commit list:
         self.assertEqual(len(tkvs.key_value_store[object_id].committed), 1)
 
         # we have a wip entry now:
-        self.assertEqual(tkvs.key_value_store[object_id].wip.value.b, 8)
+        self.assertEqual(self._value(tkvs.key_value_store[object_id].wip).b, 8)
 
         # and it is from TA_ID_2:
-        self.assertEqual(tkvs.key_value_store[object_id].wip.start_validity, TA_ID_2)
+        self.assertEqual(self._wip(tkvs, object_id).start_validity, TA_ID_2)
 
         # TA_ID_1 must not see the new (wip)-value from TA 2, TA 1 still sees the old object:
         result_reread = list(tkvs.read_objects(TA_ID_1, where=where))
@@ -471,6 +512,9 @@ class StoreTestAnomalies(AbstractUnitTest):
         item: tuple[str, object] = result_initial[0]
 
         self.assertEqual(len(result_initial), 1)
+        # the object is a Stuff object (the plain assert lets the type checker see the class):
+        self.assertIsInstance(item[1], StoreTestAnomalies.Stuff)
+        assert isinstance(item[1], StoreTestAnomalies.Stuff)
         self.assertEqual(4243, item[1].a)
         self.assertEqual(0, item[1].b)
 
@@ -478,7 +522,7 @@ class StoreTestAnomalies(AbstractUnitTest):
         tkvs.delete_object(object_id, TA_ID)
 
         # the committed version is untouched:
-        self.assertEqual(tkvs.key_value_store[object_id].committed[0].value.b, 0)
+        self.assertEqual(self._value(tkvs.key_value_store[object_id].committed[0]).b, 0)
 
         # and nothing was added to the commit list:
         self.assertEqual(len(tkvs.key_value_store[object_id].committed), 1)
@@ -491,7 +535,7 @@ class StoreTestAnomalies(AbstractUnitTest):
         )
 
         # and it is from TA_ID:
-        self.assertEqual(tkvs.key_value_store[object_id].wip.start_validity, TA_ID)
+        self.assertEqual(self._wip(tkvs, object_id).start_validity, TA_ID)
 
         # commit the transaction:
         tkvs.commit_transaction(TA_ID)
@@ -585,16 +629,17 @@ class StoreTestAnomalies(AbstractUnitTest):
                 # TA 2 is gone from the transaction dictionary:
                 self.assertNotIn(TA_ID_2, tkvs.TD)
 
-                # TA 1's wip entry is unchanged:
+                # TA 1's wip entry is unchanged (the plain assert lets the type checker see that it exists):
                 entry: VersionedKeyValueStore.KVStoreEntry = tkvs.key_value_store[
                     object_id
                 ]
                 wip: VersionedKeyValueStore.VersionEntry | None = entry.wip
                 self.assertIsNotNone(wip)
+                assert wip is not None
                 self.assertEqual(wip.start_validity, TA_ID_1)
                 if first_write == "update":
                     self.assertIsInstance(wip, VersionedKeyValueStore.UpdateEntry)
-                    self.assertEqual(wip.value, StoreTestAnomalies.Stuff(1, 1))
+                    self.assertEqual(self._value(wip), StoreTestAnomalies.Stuff(1, 1))
                 else:
                     self.assertIsInstance(wip, VersionedKeyValueStore.DeleteEntry)
 
@@ -1560,7 +1605,9 @@ class StoreTestAnomalies(AbstractUnitTest):
                 # (b = 0), as T2 aborted and its write of C was discarded:
                 self.assertEqual(
                     {
-                        object_id: tkvs.key_value_store[object_id].committed[-1].value
+                        object_id: self._value(
+                            tkvs.key_value_store[object_id].committed[-1]
+                        )
                         for object_id in object_numbers
                     },
                     {
@@ -1698,7 +1745,9 @@ class StoreTestAnomalies(AbstractUnitTest):
             ]
             for write_j in write_kinds
             for write_i in write_kinds
-        ] + [
+        ]
+        # t_j and t_i inserting the same new key x:
+        variants += [
             (TransactionalKeyValueStore, "insert", "insert"),
             (IndexedTransactionalKeyValueStore, "insert", "insert"),
         ]
@@ -1788,9 +1837,7 @@ class StoreTestAnomalies(AbstractUnitTest):
 
                 # t_k's wip version of A is untouched:
                 self.assertIsNotNone(tkvs.key_value_store[object_id].wip)
-                self.assertEqual(
-                    tkvs.key_value_store[object_id].wip.start_validity, t_k
-                )
+                self.assertEqual(self._wip(tkvs, object_id).start_validity, t_k)
 
     def test_serializable_level_commits_blind_write_after_concurrent_commit(self):
         """Under serializable, a transaction that writes an object another transaction changed and committed after
@@ -1843,7 +1890,9 @@ class StoreTestAnomalies(AbstractUnitTest):
                         self.assertIsInstance(
                             newest, VersionedKeyValueStore.UpdateEntry
                         )
-                        self.assertEqual(newest.value, StoreTestAnomalies.Stuff(1, t_i))
+                        self.assertEqual(
+                            self._value(newest), StoreTestAnomalies.Stuff(1, t_i)
+                        )
                     else:
                         self.assertIsInstance(
                             newest, VersionedKeyValueStore.DeleteEntry
@@ -1938,7 +1987,7 @@ class StoreTestAnomalies(AbstractUnitTest):
         tkvs.commit_transaction(t_i)
         self.assertEqual(tkvs.committed_transactions_trace[-1], t_i)
         self.assertEqual(
-            tkvs.key_value_store[object_id].committed[-1].value,
+            self._value(tkvs.key_value_store[object_id].committed[-1]),
             StoreTestAnomalies.Stuff(1, t_i),
         )
 
@@ -1947,11 +1996,13 @@ class StoreTestAnomalies(AbstractUnitTest):
         force validation (snapshot isolation does not validate reads).
         """
         with self.subTest(case="unknown isolation level"):
-            # the message lists the allowed isolation levels:
+            # the message lists the allowed isolation levels (the type checker is told to accept the unknown level):
             with self.assertRaisesRegex(
                 ValueError, "'serializable', 'snapshot isolation'"
             ):
-                TransactionalKeyValueStore(isolation_level="read committed")
+                TransactionalKeyValueStore(
+                    isolation_level="read committed"  # pyright: ignore[reportArgumentType]
+                )
         with self.subTest(case="snapshot isolation with brute force validation"):
             with self.assertRaisesRegex(ValueError, "use_brute_force_validation"):
                 TransactionalKeyValueStore(
@@ -1989,7 +2040,7 @@ class StoreTestAnomalies(AbstractUnitTest):
         tkvs.commit_transaction(t_i)
         self.assertEqual(tkvs.committed_transactions_trace[-1], t_i)
         self.assertEqual(
-            tkvs.key_value_store[object_id].committed[-1].value,
+            self._value(tkvs.key_value_store[object_id].committed[-1]),
             StoreTestAnomalies.Stuff(1, t_i),
         )
 

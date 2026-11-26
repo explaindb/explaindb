@@ -20,7 +20,7 @@
 
 """Abstract ACID store interfaces: ACID, indexed, and QEP-queryable stores."""
 
-from abc import ABC
+from abc import ABC, abstractmethod
 from typing import Iterator
 
 from system.interfaces.indexing.Index import KeyValueStore, IndexProperties
@@ -32,12 +32,16 @@ class ACIDStore(ABC):
 
     def __init__(self, persistence_layer: KeyValueStore):
         """Initialize the ACID store with a persistence layer, i.e. the layer that actually stores the data."""
-        self.persistence_layer: KeyValueStore = persistence_layer
+        # optional, as in VersionedKeyValueStore, which a store may inherit from, too (e.g. TransactionalKeyValueStore):
+        self.persistence_layer: KeyValueStore | None = persistence_layer
 
     def begin_transaction(self) -> int:
         """Starts a new transaction and returns its transaction id.
         Also adds a new entry with metadata for this transaction in the transaction dictionary.
         """
+        # not abstract, so that a store that does not begin transactions itself (e.g. PyDBMS, which passes transaction
+        # ids on to the store it wraps) can still be created:
+        raise NotImplementedError
 
     def commit_transaction(self, TA_id: int) -> None:
         """Commit a transaction.
@@ -84,6 +88,7 @@ class IndexedACIDStore(ACIDStore, ABC):
         @param index_name: the name of the index to drop
         """
 
+    @abstractmethod
     def get_suitable_indexes(
         self, attribute: str, operator: str
     ) -> Iterator[IndexProperties]:

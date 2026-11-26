@@ -2266,6 +2266,7 @@ fn test_snapshot_isolation_level_aborts_write_to_object_committed_after_begin() 
             variants.push((write_j, write_i));
         }
     }
+    // t_j and t_i inserting the same new key x:
     variants.push((WriteKind::Insert, WriteKind::Insert));
 
     for (write_j, write_i) in variants {

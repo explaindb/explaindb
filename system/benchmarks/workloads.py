@@ -34,6 +34,7 @@ import sys
 import time
 from collections.abc import Callable
 from dataclasses import dataclass
+from typing import cast
 
 from system.query_processing.predicates import WHERE_Clause
 from system.stores.MVCC import TransactionAbortedException, TransactionalKeyValueStore
@@ -136,7 +137,9 @@ def fingerprint(
         if entry.committed and isinstance(
             entry.committed[-1], VersionedKeyValueStore.UpdateEntry
         ):
-            weighted_sum_of_b += (position + 1) * entry.committed[-1].value.b
+            # the workloads store only Stuff objects (the store's versions hold any object):
+            newest: Stuff = cast(Stuff, entry.committed[-1].value)
+            weighted_sum_of_b += (position + 1) * newest.b
     return Fingerprint(
         commits=commits,
         aborts=aborts,
@@ -252,8 +255,10 @@ def read_write_disjoint(
     for i in range(transactions):
         index: int = i % number_of_objects
         ta_id: int = store.begin_transaction()
-        result: list[tuple[str, Stuff]] = store.read_objects(
-            ta_id, WHERE_Clause("a", "==", data[index][1].a)
+        # the workloads store only Stuff objects (the store returns any object):
+        result: list[tuple[str, Stuff]] = cast(
+            list[tuple[str, Stuff]],
+            store.read_objects(ta_id, WHERE_Clause("a", "==", data[index][1].a)),
         )
         objects_read += len(result)
         object_id, value = result[0]
@@ -271,8 +276,9 @@ def read_and_increment_b(
     """Lets transaction `ta_id` read the hot set (a < 10) and update hot object `object_id` (b + 1); returns the
     number of objects read. Raises StopIteration if the read does not return `object_id`; the workloads only pass
     objects of the hot set."""
-    result: list[tuple[str, Stuff]] = store.read_objects(
-        ta_id, WHERE_Clause("a", "<", 10)
+    # the workloads store only Stuff objects (the store returns any object):
+    result: list[tuple[str, Stuff]] = cast(
+        list[tuple[str, Stuff]], store.read_objects(ta_id, WHERE_Clause("a", "<", 10))
     )
     # search the result, as the Rust twin does:
     old: Stuff = next(value for oid, value in result if oid == object_id)

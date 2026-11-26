@@ -82,7 +82,7 @@ class IndexingTest(AbstractUnitTest):
     def test_create_and_drop_index_transactional_store(self):
         store = IndexedTransactionalKeyValueStore()
         fake_data = self._create_fake_data()
-        store.bulkload(fake_data)
+        store.bulkload(iter(fake_data))
 
         self.assertEqual(store.size(), 100)
         store.create_index("a_idx", "a", "=")

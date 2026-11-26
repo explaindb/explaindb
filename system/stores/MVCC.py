@@ -142,12 +142,12 @@ class TransactionalKeyValueStore(VersionedKeyValueStore, ACIDStore):
         committed_timestamp: int | None
 
         # the index of the last committed transaction in the committed transactions trace when the transaction started:
-        last_committed_TA_index_in_TA_trace: int | None
+        last_committed_TA_index_in_TA_trace: int
 
     def __init__(
         self,
         use_brute_force_validation: bool = False,
-        persistence_layer: KeyValueStore = None,
+        persistence_layer: KeyValueStore | None = None,
         isolation_level: IsolationLevel = "serializable",
         autocommit: bool = False,
     ):
@@ -227,14 +227,12 @@ class TransactionalKeyValueStore(VersionedKeyValueStore, ACIDStore):
             raise KeyError(f"object {object_id} not found in the store")
 
         # check whether transaction <timestamp> has a wip entry for this object:
+        wip_entry: VersionedKeyValueStore.VersionEntry | None = self.key_value_store[
+            object_id
+        ].wip
         if (
-            not ignore_wip and self.key_value_store[object_id].wip is not None
+            not ignore_wip and wip_entry is not None
         ):  # i.e. there is a wip entry for this object
-            # get that wip entry:
-            wip_entry: VersionedKeyValueStore.VersionEntry = self.key_value_store[
-                object_id
-            ].wip
-
             # was this wip entry created by TA <timestamp>?
             if wip_entry.start_validity == timestamp:
                 # wip-entry marks a deleted object, return None
@@ -295,6 +293,9 @@ class TransactionalKeyValueStore(VersionedKeyValueStore, ACIDStore):
         ):
             return None
         # some asserts to (again) check the correctness of the implementation:
+        assert isinstance(
+            last_committed_version_visible_to_TA_id, VersionedKeyValueStore.UpdateEntry
+        )
         assert last_committed_version_visible_to_TA_id.value is not None
         assert last_committed_version_visible_to_TA_id.start_validity is not None
         assert last_committed_version_visible_to_TA_id.start_validity < timestamp
@@ -302,7 +303,7 @@ class TransactionalKeyValueStore(VersionedKeyValueStore, ACIDStore):
         return last_committed_version_visible_to_TA_id.value
 
     def _read_objects_iterable(
-        self, timestamp: int, where: Clause = None, ignore_wip=False
+        self, timestamp: int, where: Clause | None = None, ignore_wip=False
     ) -> Iterator[tuple[str, object]]:
         """Yields the (object_id, object) pairs of all objects visible at <timestamp> that match the where clause
         <where>.
@@ -327,7 +328,7 @@ class TransactionalKeyValueStore(VersionedKeyValueStore, ACIDStore):
                 yield object_id, _object
 
     def _read_snapshot(
-        self, timestamp: int, where: Clause = None, ignore_wip=False
+        self, timestamp: int, where: Clause | None = None, ignore_wip=False
     ) -> tuple[list[tuple[str, object]], str | None]:
         """Returns a list with all (object_id,objects)-pairs that match the WHERE_clause for the given snapshot
         <timestamp> plus the checksum. If the store uses brute force validation, the checksum of the returned list
@@ -364,7 +365,10 @@ class TransactionalKeyValueStore(VersionedKeyValueStore, ACIDStore):
         return ret_list, checksum
 
     def read_objects(
-        self, TA_id: int | None, where: Clause = None, collect_read_clause: bool = True
+        self,
+        TA_id: int | None,
+        where: Clause | None = None,
+        collect_read_clause: bool = True,
     ) -> list[tuple[str, object]]:
         """Returns a list with all objects that match the WHERE_clause. If the store uses brute force validation, a
         checksum is also computed over the objects matching the WHERE_clause in the committed snapshot of TA <TA_id>,
@@ -488,13 +492,17 @@ class TransactionalKeyValueStore(VersionedKeyValueStore, ACIDStore):
 
         # check that there is no other ongoing version of this object in the system
         # being worked on by another transaction, i.e. no other writer on this object is allowed:
-        if (
+        wip_entry: VersionedKeyValueStore.VersionEntry | None = (
+            self.key_value_store[object_id].wip
             # do we even have an entry for this object_id?, needed to support inserts
-            object_id in self.key_value_store
+            if object_id in self.key_value_store
+            else None
+        )
+        if (
             # is there a wip entry for this object_id?
-            and self.key_value_store[object_id].wip is not None
+            wip_entry is not None
             # is the wip entry created by another transaction or by the same, i.e. TA_id, transaction?
-            and self.key_value_store[object_id].wip.start_validity != TA_id
+            and wip_entry.start_validity != TA_id
         ):
             self.abort_transaction(TA_id)
             raise TransactionAbortedException(
@@ -576,10 +584,10 @@ class TransactionalKeyValueStore(VersionedKeyValueStore, ACIDStore):
 
         # check that there is no other ongoing version of this object in the system
         # by another transaction, i.e. no other writer on this object is allowed:
-        if (
-            self.key_value_store[object_id].wip is not None
-            and self.key_value_store[object_id].wip.start_validity != TA_id
-        ):
+        wip_entry: VersionedKeyValueStore.VersionEntry | None = self.key_value_store[
+            object_id
+        ].wip
+        if wip_entry is not None and wip_entry.start_validity != TA_id:
             self.abort_transaction(TA_id)
             raise TransactionAbortedException(
                 f"another transaction is currently modifying object {object_id} already"
@@ -752,7 +760,7 @@ class TransactionalKeyValueStore(VersionedKeyValueStore, ACIDStore):
 
                 # re-run the read at the commit timestamp of TA <TA_id>: this sees the newest committed version of every
                 # object and no wip entry, as no transaction id equals a commit timestamp:
-                where: Clause = rc["where_clause"]
+                where: Clause | None = rc["where_clause"]
                 checksum: str = rc["checksum"]
 
                 _, new_checksum = self._read_snapshot(
@@ -923,9 +931,12 @@ class TransactionalKeyValueStore(VersionedKeyValueStore, ACIDStore):
         # let all wip objects of TA <TA_id> become a new committed version:
         # i.e. we move all objects modified by this TA from wip to committed:
         for object_id in self.TD[TA_id].write_set:
-            wip_entry: VersionedKeyValueStore.VersionEntry = self.key_value_store[
-                object_id
-            ].wip
+            wip_entry: VersionedKeyValueStore.VersionEntry | None = (
+                self.key_value_store[object_id].wip
+            )
+
+            # TA <TA_id> wrote the object, so it has a wip entry:
+            assert wip_entry is not None
 
             # so far, the start validity of the wip entry must be the TA_id:
             assert wip_entry.start_validity == TA_id

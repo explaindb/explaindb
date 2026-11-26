@@ -249,14 +249,15 @@ def object_states(
     for object_id in sorted(store.key_value_store.keys()):
         entry: VersionedKeyValueStore.KVStoreEntry = store.key_value_store[object_id]
         # the committed versions in commit order; a committed version starts at its commit timestamp (0 for an
-        # initial object), and a delete marker has no value:
+        # initial object), and a delete marker has no value (a schedule stores only Rows, the store's versions hold
+        # any object):
         committed: tuple[Version, ...] = tuple(
             Version(
                 version.start_validity,
                 (
-                    None
-                    if isinstance(version, VersionedKeyValueStore.DeleteEntry)
-                    else version.value
+                    cast(Row, version.value)
+                    if isinstance(version, VersionedKeyValueStore.UpdateEntry)
+                    else None
                 ),
                 # the initial objects are put at timestamp 0, before any transaction:
                 writers.get(version.start_validity, "initial"),
@@ -270,7 +271,7 @@ def object_states(
             work_in_progress = WorkInProgress(
                 wip.start_validity,
                 (
-                    wip.value
+                    cast(Row, wip.value)
                     if isinstance(wip, VersionedKeyValueStore.UpdateEntry)
                     else None
                 ),
@@ -353,10 +354,11 @@ def transaction_states(
                 }
             )
         )
+        # an update and a delete always name their key:
         write_set: tuple[str, ...] = tuple(
             sorted(
                 {
-                    done.data_operation.key
+                    cast(str, done.data_operation.key)
                     for done in record.data_operations
                     if done.data_operation.kind != "read"
                 }
@@ -364,10 +366,11 @@ def transaction_states(
         )
         sees: tuple[StoredObject, ...] = ()
         if status == "running":
-            # what a read of all objects returns ([0]: the (object_id, object)-pairs, without the checksum); unlike
-            # the store's read_objects, this does not add a read to the transaction's read set:
+            # what a read of all objects returns ([0]: the (object_id, object)-pairs, without the checksum; a
+            # schedule stores only Rows); unlike the store's read_objects, this does not add a read to the
+            # transaction's read set:
             sees = tuple(
-                StoredObject(object_id, row)
+                StoredObject(object_id, cast(Row, row))
                 for object_id, row in sorted(store._read_snapshot(record.TA_id)[0])
             )
         states.append(
@@ -533,10 +536,11 @@ def snapshot_read(
 ) -> ReadResult:
     """Returns what a read with ``where`` returns from the committed versions visible at ``timestamp``, without any
     work-in-progress version, sorted by object id."""
-    # [0]: the (object_id, object)-pairs, without the checksum:
-    pairs: list[tuple[str, Row]] = store._read_snapshot(
-        timestamp, where, ignore_wip=True
-    )[0]
+    # [0]: the (object_id, object)-pairs, without the checksum (a schedule stores only Rows):
+    pairs: list[tuple[str, Row]] = cast(
+        list[tuple[str, Row]],
+        store._read_snapshot(timestamp, where, ignore_wip=True)[0],
+    )
     return tuple(
         sorted(
             (StoredObject(object_id, row) for object_id, row in pairs),
@@ -593,7 +597,9 @@ def abort_explanation(
     assert record.TA_id is not None
     if operation != "commit":
         # an update or a delete; the store checks for another transaction's work-in-progress version first:
-        key: str = cast(DataOperation, operation).key
+        key: str | None = cast(DataOperation, operation).key
+        # an update and a delete always name their key:
+        assert key is not None
         # (an insert of a new key has no entry in the store yet):
         wip: VersionedKeyValueStore.VersionEntry | None = (
             store.key_value_store[key].wip if key in store.key_value_store else None
@@ -617,10 +623,11 @@ def abort_explanation(
         raise AssertionError(f"no reason found for the abort at position {position}")
     # the commit timestamp the commit gets: the next value of the store's counter (see commit_transaction):
     commit_timestamp: int = store.TA_id
-    # the objects written by the transactions that committed after the transaction began (method 2 checks them):
+    # the objects written by the transactions that committed after the transaction began (method 2 checks them; an
+    # update and a delete always name their key):
     written_meanwhile: list[str] = sorted(
         {
-            written.data_operation.key
+            cast(str, written.data_operation.key)
             for other in run.records
             if other.commit_timestamp is not None
             and other.commit_timestamp > record.TA_id
@@ -648,11 +655,16 @@ def abort_explanation(
             continue
         # method 2 checks the objects written by the transactions that committed after the transaction began:
         for key in written_meanwhile:
-            before: Row | None = store._get_visible_object_version(
-                key, record.TA_id, ignore_wip=True
+            # a schedule stores only Rows:
+            before: Row | None = cast(
+                Row | None,
+                store._get_visible_object_version(key, record.TA_id, ignore_wip=True),
             )
-            after: Row | None = store._get_visible_object_version(
-                key, commit_timestamp, ignore_wip=True
+            after: Row | None = cast(
+                Row | None,
+                store._get_visible_object_version(
+                    key, commit_timestamp, ignore_wip=True
+                ),
             )
             if before == after:
                 continue

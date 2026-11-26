@@ -38,7 +38,8 @@ class HashableDict(dict):
     """A hashable dictionary class that can be used as a key in a dictionary. In particular, you can create a set of
     these dictionaries."""
 
-    def __hash__(self):
+    # dict sets __hash__ to None, as a dict can change; this class is hashable on purpose:
+    def __hash__(self):  # pyright: ignore[reportIncompatibleVariableOverride]
         """Hashes the dictionary by its sorted ``(key, value)`` items, so that two dictionaries
         with equal contents hash equally and instances can be used as set members or dictionary keys.
         """
@@ -89,7 +90,7 @@ class VersionedKeyValueStore(KeyValueStore[str, object]):
                 self.committed.__iter__(), [self.wip] if self.wip is not None else []
             )
 
-    def __init__(self, persistence_layer: KeyValueStore = None):
+    def __init__(self, persistence_layer: KeyValueStore | None = None):
         """Initialize the versioned store.
 
         :param persistence_layer: the underlying persistence layer used to make the data durable.
@@ -103,14 +104,18 @@ class VersionedKeyValueStore(KeyValueStore[str, object]):
         # plus AT MOST ONE optional work in progress (wip) entry, i.e. an object currently being modified by an
         # ongoing transaction
 
-        self.persistence_layer: KeyValueStore = persistence_layer
+        self.persistence_layer: KeyValueStore | None = persistence_layer
         self.key_value_store: Dict[str, VersionedKeyValueStore.KVStoreEntry] = {}
 
     def size(self) -> int:
         """See :meth:`Index.size`."""
         return len(self.key_value_store)
 
-    def put(self, object_id: str, _object: object) -> None | PutInfo:
+    # the parameters are named object_id (as in the transactional operations of the store) and _object, not key
+    # and value as in Index:
+    def put(  # pyright: ignore[reportIncompatibleMethodOverride]
+        self, object_id: str, _object: object
+    ) -> None | PutInfo:
         """See :meth:`Index.put`.
 
         Non-transactional insert: the object is deep-copied and recorded as a single committed version with
@@ -129,7 +134,10 @@ class VersionedKeyValueStore(KeyValueStore[str, object]):
             wip=None,
         )
 
-    def get(self, object_id: str) -> Iterator[object]:
+    # the parameter is named object_id (not key as in PointQueryMixIn), as in the transactional operations of the store:
+    def get(  # pyright: ignore[reportIncompatibleMethodOverride]
+        self, object_id: str
+    ) -> Iterator[object]:
         """See :meth:`PointQueryMixIn.get`.
 
         Yields only the value of the most recent committed version; delete markers are not taken into account.
@@ -143,7 +151,11 @@ class VersionedKeyValueStore(KeyValueStore[str, object]):
         # note: deleted entry not considered here
         yield self.key_value_store[object_id].committed[-1].value
 
-    def delete(self, object_id: str, _object: object = None) -> None:
+    # the parameters are named object_id (as in the transactional operations of the store) and _object (which
+    # must be None), not key and value as in Index:
+    def delete(  # pyright: ignore[reportIncompatibleMethodOverride]
+        self, object_id: str, _object: object = None
+    ) -> None:
         """See :meth:`Index.delete`.
 
         Non-transactional delete: requires ``_object`` to be None and appends a delete marker as a committed
@@ -162,7 +174,10 @@ class VersionedKeyValueStore(KeyValueStore[str, object]):
         # add the new entry to the kv store as committed:
         self.key_value_store[object_id].committed.append(new_entry)
 
-    def flush(self, object_id: int | None = None) -> None:
+    # the parameter is named object_id (not key as in Index), as in the transactional operations of the store:
+    def flush(  # pyright: ignore[reportIncompatibleMethodOverride]
+        self, object_id: str | None = None
+    ) -> None:
         """See :meth:`Index.flush`.
 
         No-op: this store keeps its data in volatile memory only and is not backed by persistent storage.
