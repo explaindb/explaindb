@@ -76,14 +76,18 @@ class ChristmasTree[Key, Value](RadixTrie[Key, Value]):
             # empty the buffer:
             self.buffer.clear()
 
-        def flush_all_buffers(self):
-            """Flush all buffers in this node and its children."""
-            self._flush_buffer()
+        def flush_all_buffers(self, level: int = 0) -> None:
+            """Flush all buffers in this node and its children.
+            @param level: The depth of this node in the trie (0 for the root); the key mapping routes the buffered
+            keys by it (ignored when the node finds the child of a key by its child descriptors).
+            """
+            # flush this node's buffer at its own depth, then the buffered children one level deeper:
+            self._flush_buffer(level)
             for c in self.children:
                 if isinstance(
                     c, ChristmasTree.BufferedInnerNode
                 ):  # TODO: refactor to get rid of type check, shown here for educational purposed how not do do this ;-)
-                    c.flush_all_buffers()
+                    c.flush_all_buffers(level + 1)
 
         def put(self, key: Key, value: Value, level: int = 0) -> None | PutInfo:
             """See :meth:`Index.put`.
@@ -236,6 +240,7 @@ class ChristmasTree[Key, Value](RadixTrie[Key, Value]):
                 canvas,
                 canvas_height,
                 x_offset,
+                y_offset,
             )
             radius: int = 25
             # get a consistent pseudo-random x_shift for the crystal ball:
@@ -290,7 +295,9 @@ class ChristmasTree[Key, Value](RadixTrie[Key, Value]):
         ) -> RadixTrie.InnerNode[K, V]:
             """Create a new instance of the node."""
             if self.config == "inner":
-                return ChristmasTree.InnerNode[K, V](parent_descriptor=new_descriptor)
+                return ChristmasTree.InnerNode[K, V](
+                    key_mapping=key_mapping, parent_descriptor=new_descriptor
+                )
             if self.config == "buffered":
                 return ChristmasTree.BufferedInnerNode(
                     key_mapping=key_mapping, parent_descriptor=new_descriptor
