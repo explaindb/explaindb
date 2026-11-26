@@ -5,7 +5,8 @@ level — how a record's fields are laid out, which storage medium holds them, h
 and how concurrent versions are kept — shape everything above.
 
 - [**Row vs. Column Layout**](<Row vs Column Layout.md>) — storing records field-after-field vs.
-  column-after-column, and why analytics prefers columns.
+  column-after-column, why analytics prefers columns, and the hybrid layout PAX (Partition Attributes Across)
+  in between.
 - [**The Storage Hierarchy**](<The Storage Hierarchy.md>) — caching across layers (DRAM → SSD → …),
   eviction, and prefix addressing.
 - [**RAID Cost Modeling**](<RAID Cost Modeling.md>) — combining devices for throughput and resilience,
