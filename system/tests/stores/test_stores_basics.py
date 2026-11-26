@@ -84,6 +84,59 @@ class StoreTestBasics(AbstractUnitTest):
                 # the public get() returns the same value as the internal version entry:
                 self.assertEqual(list(kvs.get(key))[0], entry.value)
 
+    def test_get_of_an_object_without_committed_value_raises_key_error(self) -> None:
+        """get raises KeyError for an object the store has an entry for but no committed value: its newest committed
+        version is a delete marker, or it has no committed version at all, as an insert of a transaction of
+        TransactionalKeyValueStore leaves it before the transaction commits or after it aborts. The error is raised
+        when the returned iterator is advanced, not at the call. A deleted object still counts for size.
+        """
+        with self.subTest(case="delete marker"):
+            # put A and delete it again, which appends a delete marker as its newest committed version:
+            store: VersionedKeyValueStore = VersionedKeyValueStore()
+            store.put("A", self.Stuff(1, 2))
+            store.delete("A")
+
+            # get of A returns an iterator without an error; advancing it raises KeyError:
+            values: Iterator[object] = store.get("A")
+            with self.assertRaises(KeyError) as context:
+                next(values)
+            self.assertEqual(
+                context.exception.args[0],
+                "object A has no committed value in the store",
+            )
+
+            # the entry of A stays in the store and counts for size, so the message does not say "not found":
+            self.assertEqual(store.size(), 1)
+
+        # an insert of a transaction leaves only a work-in-progress version until the transaction commits, and no
+        # version at all after it aborts:
+        case: str
+        wip: VersionedKeyValueStore.VersionEntry | None
+        for case, wip in [
+            (
+                "insert not committed yet",
+                VersionedKeyValueStore.UpdateEntry(
+                    start_validity=1, value=self.Stuff(5, 6)
+                ),
+            ),
+            ("insert aborted", None),
+        ]:
+            with self.subTest(case=case):
+                # give B no committed version:
+                store = VersionedKeyValueStore()
+                store.key_value_store["B"] = VersionedKeyValueStore.KVStoreEntry(
+                    committed=[], wip=wip
+                )
+
+                # get of B returns an iterator without an error; advancing it raises KeyError:
+                values = store.get("B")
+                with self.assertRaises(KeyError) as context:
+                    next(values)
+                self.assertEqual(
+                    context.exception.args[0],
+                    "object B has no committed value in the store",
+                )
+
     def test_TransactionalKeyValueStore(self):
         """A new transactional store is empty and hands out the transaction ids 1, 2, ... in this order."""
         tkvs: TransactionalKeyValueStore = TransactionalKeyValueStore()

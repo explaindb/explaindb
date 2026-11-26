@@ -78,6 +78,67 @@ fn test_key_value_store_basics() {
     check_key_value_store_basics::<TransactionalKeyValueStore<Stuff>>();
 }
 
+/// `get` fails with `NotVisible` for an object the store has an entry for but no committed value: its newest
+/// committed version is a delete marker, or it has no committed version at all, as an insert of a transaction of
+/// [`TransactionalKeyValueStore`] leaves it before the transaction commits or after it aborts. A deleted object still
+/// counts for `size`.
+///
+/// Python's test checks a `KeyError` with the message of `NotVisible` and runs the cases as subtests; Rust names the
+/// case in the message of a failed assertion. Python's test also checks that the error comes only when the returned
+/// iterator is advanced; Rust's `get` returns the error at once.
+#[test]
+fn test_get_of_an_object_without_committed_value_raises_key_error() {
+    // put A and delete it again, which appends a delete marker as its newest committed version:
+    let mut store: VersionedKeyValueStore<Stuff> = VersionedKeyValueStore::new();
+    store.put("A", Stuff { a: 1, b: 2 }).unwrap();
+    store.delete("A").unwrap();
+
+    // get of A fails with `NotVisible`:
+    let error: StoreError = store.get("A").unwrap_err();
+    assert_eq!(
+        error,
+        StoreError::NotVisible("A".to_string()),
+        "delete marker"
+    );
+    assert_eq!(
+        error.to_string(),
+        "object A has no committed value in the store",
+        "delete marker"
+    );
+
+    // the entry of A stays in the store and counts for size, so the error is not `KeyNotFound`:
+    assert_eq!(store.size(), 1, "delete marker");
+
+    // an insert of a transaction leaves only a work-in-progress version until the transaction commits, and no
+    // version at all after it aborts:
+    for (case, wip) in [
+        (
+            "insert not committed yet",
+            Some(update(1, Stuff { a: 5, b: 6 })),
+        ),
+        ("insert aborted", None),
+    ] {
+        // give B no committed version:
+        let mut store: VersionedKeyValueStore<Stuff> = VersionedKeyValueStore::new();
+        store.key_value_store.insert(
+            "B".to_string(),
+            KvStoreEntry {
+                committed: vec![],
+                wip,
+            },
+        );
+
+        // get of B fails with `NotVisible`:
+        let error: StoreError = store.get("B").unwrap_err();
+        assert_eq!(error, StoreError::NotVisible("B".to_string()), "{case}");
+        assert_eq!(
+            error.to_string(),
+            "object B has no committed value in the store",
+            "{case}"
+        );
+    }
+}
+
 /// A new transactional store is empty (no objects, no transactions, no journal entries) and hands out the
 /// transaction ids 1, 2, ... in this order.
 #[test]
@@ -408,8 +469,6 @@ fn get_and_delete_of_missing_key_fail() {
 /// Checks what a delete leaves behind in the store `S`: the key stays in the store, so `size` still counts it and
 /// `put` still fails with `KeyExists`, but `get` fails with `NotVisible`. Deleting again succeeds and appends a
 /// second delete marker, so the versions are update, delete, delete, all with `start_validity` 0.
-///
-/// Python's `get` crashes on a deleted object; `NotVisible` is the Rust port's error for this case.
 fn check_delete_keeps_key_with_delete_marker<S>()
 where
     S: VersionedStore<Value = Stuff> + Default,
@@ -448,8 +507,6 @@ fn delete_keeps_key_with_delete_marker() {
 
 /// Checks that `get` fails with `NotVisible` for a key of the store `S` that has no committed version, only a
 /// work-in-progress version, as for an object whose insert is not committed yet.
-///
-/// Python's `get` crashes in this case; `NotVisible` is the Rust port's error for it.
 fn check_get_without_committed_version_is_not_visible<S>()
 where
     S: VersionedStore<Value = Stuff> + Default,
@@ -588,8 +645,8 @@ fn kv_store_entry_iterates_without_wip_or_without_committed_versions() {
     assert_eq!(start_validities, [7]);
 }
 
-/// The messages of the store errors name the object; the messages of `KeyExists` and `KeyNotFound` are those of
-/// Python's `KeyError`s, `NotVisible` has no Python counterpart.
+/// The messages of the store errors name the object; the messages of `KeyExists`, `KeyNotFound` and `NotVisible` are
+/// those of Python's `KeyError`s.
 #[test]
 fn store_error_messages() {
     assert_eq!(

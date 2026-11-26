@@ -11,7 +11,7 @@
       "path": "Cargo.toml"
     },
     {
-      "sha256": "sha256:20bb162e6e78a0b8",
+      "sha256": "sha256:21bdfcb69aa549ca",
       "sources": [],
       "path": "README.md"
     },
@@ -35,10 +35,10 @@
       "path": "rust-toolchain.toml"
     },
     {
-      "sha256": "sha256:979420de24c47863",
+      "sha256": "sha256:eecb9e77ecfa5a7c",
       "sources": [
         {
-          "sha256": "sha256:89b17a36e4bf173d",
+          "sha256": "sha256:3c99037c9b2177b0",
           "path": "system/stores/VersionedKeyValueStore.py"
         },
         {
@@ -108,17 +108,17 @@
           "path": "system/interfaces/stores.py"
         },
         {
-          "sha256": "sha256:89b17a36e4bf173d",
+          "sha256": "sha256:3c99037c9b2177b0",
           "path": "system/stores/VersionedKeyValueStore.py"
         }
       ],
       "path": "src/stores/mvcc.rs"
     },
     {
-      "sha256": "sha256:a52dd3356e8b6f12",
+      "sha256": "sha256:153556dc298156b9",
       "sources": [
         {
-          "sha256": "sha256:89b17a36e4bf173d",
+          "sha256": "sha256:3c99037c9b2177b0",
           "path": "system/stores/VersionedKeyValueStore.py"
         },
         {
@@ -206,10 +206,10 @@
       "path": "tests/stores/test_store_anomalies.rs"
     },
     {
-      "sha256": "sha256:a49c403f637aebfe",
+      "sha256": "sha256:222ee3852671a53e",
       "sources": [
         {
-          "sha256": "sha256:a49570e76963c4fa",
+          "sha256": "sha256:603e0212be0c2064",
           "path": "system/tests/stores/test_stores_basics.py"
         }
       ],

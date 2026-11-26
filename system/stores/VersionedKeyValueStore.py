@@ -140,16 +140,28 @@ class VersionedKeyValueStore(KeyValueStore[str, object]):
     ) -> Iterator[object]:
         """See :meth:`PointQueryMixIn.get`.
 
-        Yields only the value of the most recent committed version; delete markers are not taken into account.
-        Raises if the object_id is not present.
+        Yields only the value of the most recent committed version. Raises KeyError, when the returned iterator is
+        advanced, not at the call, if the object_id is not present, or if it has no committed value: its most recent
+        committed version is a delete marker, or it has no committed version at all, as an insert of a transaction of
+        :class:`~system.stores.MVCC.TransactionalKeyValueStore` leaves it before the transaction commits or after it
+        aborts.
         """
 
         if object_id not in self.key_value_store:
             raise KeyError(f"object {object_id} not found in the store")
 
-        # get the most recent committed version of the object available:
-        # note: deleted entry not considered here
-        yield self.key_value_store[object_id].committed[-1].value
+        # get the most recent committed version of the object, None if it has no committed version:
+        committed: list[VersionedKeyValueStore.VersionEntry] = self.key_value_store[
+            object_id
+        ].committed
+        newest: VersionedKeyValueStore.VersionEntry | None = (
+            committed[-1] if committed else None
+        )
+
+        # a delete marker or no committed version at all: the object has no value to yield:
+        if not isinstance(newest, VersionedKeyValueStore.UpdateEntry):
+            raise KeyError(f"object {object_id} has no committed value in the store")
+        yield newest.value
 
     # the parameters are named object_id (as in the transactional operations of the store) and _object (which
     # must be None), not key and value as in Index:

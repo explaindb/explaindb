@@ -207,11 +207,8 @@ includes the test files of that folder and the shared `tests/common/mod.rs`.
 - Two clauses with the same fields are equal (`==`); Python's clauses define no equality, so two clauses are equal
   only if they are the same object. The read set of the MVCC store compares clauses by identity, as Python's.
 - Python's `HashableDict` (in `VersionedKeyValueStore.py`) becomes the struct `ReadClause` of the MVCC store.
-- `get` of the versioned store, and of the transactional store before the first transaction, returns
-  `Err(StoreError::NotVisible)` for an object whose last committed version is a delete marker or that has no
-  committed version; Python crashes there. With autocommit, the transactional store returns `KeyNotFound`, as Python.
-- `get` of the versioned store reports a missing key at once; Python's iterator raises the error only when it is used
-  (Python's transactional `get` also reads at the call, as Rust's).
+- `get` of the versioned store reports a missing key, or an object without a committed value, at once; Python's
+  iterator raises the error only when it is used (Python's transactional `get` also reads at the call, as Rust's).
 - `get` takes the store as `&mut self`, as the `get` of the transactional store with autocommit runs a transaction of
   its own.
 - A panic inside an operation that runs as a transaction of its own (with autocommit, or with the transaction id
@@ -248,6 +245,7 @@ includes the test files of that folder and the shared `tests/common/mod.rs`.
 | `test_query_processing.py::test_where_clause` | `test_query_processing.rs::test_where_clause`, with an integer (`Stuff`) and a string (`Named`) attribute, as a Rust field cannot hold both |
 | `test_query_processing.py::test_disjunction` | `test_query_processing.rs::test_disjunction` |
 | `test_stores_basics.py::test_KeyValueStore_basics` | `test_stores_basics.rs::test_key_value_store_basics`, for the versioned and the transactional store; the indexed store follows in step 2 |
+| `test_stores_basics.py::test_get_of_an_object_without_committed_value_raises_key_error` | `test_stores_basics.rs::test_get_of_an_object_without_committed_value_raises_key_error`, checking `Err(StoreError::NotVisible)` and its message where Python checks the `KeyError`; the cases are named in the assertion messages instead of subtests; without the check that the error comes only when the iterator is advanced (Rust's `get` returns it at once) |
 | `test_stores_basics.py::test_TransactionalKeyValueStore` | `test_stores_basics.rs::test_transactional_key_value_store` |
 | `test_stores_basics.py::test_begin_transaction` | `test_stores_basics.rs::test_begin_transaction`, checking the length of the trace (0) where Python checks the index -1 |
 | `test_stores_basics.py::test_journaling` | `test_stores_basics.rs::test_journaling` |

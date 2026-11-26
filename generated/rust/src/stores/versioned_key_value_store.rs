@@ -121,8 +121,10 @@ pub trait VersionedStore {
     /// # Errors
     ///
     /// - [`StoreError::KeyNotFound`] if the object id is not in the store (Python: `KeyError`);
-    /// - [`StoreError::NotVisible`] if the most recent committed version is a delete marker or there is no committed
-    ///   version (Python crashes in these cases).
+    /// - [`StoreError::NotVisible`] if the object has no committed value: its most recent committed version is a
+    ///   delete marker, or it has no committed version at all, as an insert of a transaction of
+    ///   [`crate::TransactionalKeyValueStore`] leaves it before the transaction commits or after it aborts (Python:
+    ///   `KeyError`).
     fn get(&mut self, object_id: &str) -> Result<&Self::Value, StoreError> {
         get_default(self, object_id)
     }
@@ -224,6 +226,8 @@ pub fn get_default<'a, S: VersionedStore + ?Sized>(
         .key_value_store()
         .get(object_id)
         .ok_or_else(|| StoreError::KeyNotFound(object_id.to_string()))?;
+    // get the most recent committed version of the object; a delete marker or no committed version at all: the
+    // object has no value to return:
     match entry.committed.last() {
         Some(VersionEntry {
             version: Version::Update(value),

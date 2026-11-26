@@ -39,9 +39,8 @@ pub enum StoreError {
     KeyNotFound(String),
     /// The object id is in the store, but has no committed value: its last committed version is a delete marker, or
     /// it has no committed version at all, e.g. because its insert is not committed yet or was aborted. Returned by
-    /// `get` of the versioned store, and of the MVCC store without autocommit before the first transaction begins;
-    /// Python's `get` crashes here (`AttributeError` or `IndexError`). The key still counts for `put` and `size`, as
-    /// in Python.
+    /// `get` of the versioned store, and of the MVCC store without autocommit before the first transaction begins
+    /// (Python: `KeyError` in `get`). The key still counts for `put` and `size`, as in Python.
     NotVisible(String),
     /// The transaction id is not in the transaction dictionary (Python: `KeyError` in `read_objects` and
     /// `update_object`, and in validation method 2 for a transaction that committed meanwhile and was aborted
@@ -80,10 +79,10 @@ pub enum StoreError {
 }
 
 impl fmt::Display for StoreError {
-    /// Writes the messages of the Python stores; `NotVisible` has no Python counterpart, the message of
-    /// `VersionsNotOrdered` also names the object, the message of `InvalidConfiguration` names the Rust settings
-    /// (`Validation::BruteForce`, `IsolationLevel::Serializable`) instead of Python's parameters, and the message of
-    /// `AutocommitRequired` writes Rust's `true` (`autocommit=true`) instead of Python's `True`.
+    /// Writes the messages of the Python stores; the message of `VersionsNotOrdered` also names the object, the
+    /// message of `InvalidConfiguration` names the Rust settings (`Validation::BruteForce`,
+    /// `IsolationLevel::Serializable`) instead of Python's parameters, and the message of `AutocommitRequired` writes
+    /// Rust's `true` (`autocommit=true`) instead of Python's `True`.
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             StoreError::KeyExists(object_id) => {
