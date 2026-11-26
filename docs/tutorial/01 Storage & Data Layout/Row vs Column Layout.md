@@ -21,7 +21,11 @@ levers on analytical performance.
   representations.
 - **Visualization:** [`row-or-column.html`](../../../visualizations/row-or-column.html) — an animation
   (open it in a browser): memory is read one 64-byte cache line at a time, so `SELECT MAX(price)` loads
-  4 cache lines of a row layout but only 1 of a column layout.
+  4 cache lines of a row layout but only 1 of a column layout. Its step 06/09
+  ([from 0:49](../../../visualizations/row-or-column.html?t=49.4)) shows PAX (Partition Attributes Across, see
+  below): on the same 2 pages as the row layout, the query loads only 2 cache lines; step 07/09
+  ([from 1:01](../../../visualizations/row-or-column.html?t=61.7)) compares the three layouts on real pages of 4 KB
+  (4,096 bytes): PAX loads as few cache lines as the column layout, but reads every page, like the row layout.
 
 ## The idea in one picture
 

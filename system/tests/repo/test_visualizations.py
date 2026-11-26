@@ -46,7 +46,7 @@ from contextlib import contextmanager
 from dataclasses import dataclass, field
 from itertools import groupby
 from pathlib import Path
-from typing import TYPE_CHECKING, TypedDict
+from typing import TYPE_CHECKING, NamedTuple, TypedDict
 from unittest import mock
 
 # the trees and queries of the B-tree page, from a module that uses only the standard library (the CI job installs
@@ -287,6 +287,34 @@ class MadeBySortingPage(TypedDict):
     merged: list[list[int]]
     # the final merge's output:
     output: list[int]
+
+
+class PageMarks(NamedTuple):
+    """The pages of the row-or-column page's three layouts as it marks them in memory at one moment, as noted in
+    ``data-pages-shown``, ``data-pages-row``, ``-column`` and ``-pax`` of its stage."""
+
+    # the layouts whose pages are marked, in the film's order, comma-separated (e.g. ``row,column``; empty before any):
+    shown: str
+    # the state of each page of a layout, in page order, comma-separated: ``none`` before its scan has passed it,
+    # ``read`` once the read head has reached the first line the scan loads of it, ``not-read`` at the end of a scan
+    # that loads none of its lines (e.g. ``not-read,not-read,read``):
+    row: str
+    column: str
+    pax: str
+
+
+@dataclass(frozen=True)
+class RealReads:
+    """What SELECT MAX(price) reads of one layout of the row-or-column page's table at real size (512 books on pages
+    of 4 KB)."""
+
+    # the pages that hold a cache line it reads, and the pages that hold none:
+    pages: int
+    not_read: int
+    # the cache lines it reads:
+    lines: int
+    # the share of prices among the bytes of those lines (%, rounded):
+    share: int
 
 
 class _PageTestCase(unittest.TestCase):
@@ -816,7 +844,7 @@ class _SoundPageTestCase(_PageTestCase):
         """Waits until the playing film has moved the slider on by at least the given number of steps.
 
         The slider has 1000 steps from the start of the film to its end; on the clock-scan page, which lasts about
-        100 s, ten steps are about 1 s, on the row-or-column page, which lasts 52 s, about 0.5 s.
+        100 s, ten steps are about 1 s, on the row-or-column page, which lasts 83.2 s, about 0.83 s.
 
         @param page: a playing page
         @param steps: how far the slider has to move on
@@ -1825,39 +1853,209 @@ class ClockScanPageTest(_SoundPageTestCase):
 
 @unittest.skipUnless(PLAYWRIGHT_AVAILABLE, SKIP_REASON)
 class RowOrColumnPageTest(_SoundPageTestCase):
-    """Checks what is particular to the voice of the row-or-column page, which says some captions in two segments.
+    """Checks what is particular to the row-or-column page: its voice, which says some captions in two segments; the
+    counters and the pages marked in memory of its three layouts (row, column and PAX); its real pages and the receipt
+    that counts them; the slider with a segment per step; the step's name top left as a step begins; and its header,
+    which leaves the terminal and the step's name below it free.
 
     Each segment has a clip of its own, which starts at the segment's time (decision 035). The times below are those
-    of the page's CAPTIONS.
+    of the page's CAPTIONS, SCANS and CUES; the PAX step, the pages from step 03 on, the real pages step, the receipt,
+    the slider's segments and the step's name top left are those of decision 054.
     """
 
     PAGE: Path | None = ROW_OR_COLUMN_PAGE
 
     # the film's length (s); the slider has 1000 steps over it:
-    LENGTH: float = 52
-    # the steps of the film in their order, by their stop type, and where the first segment of each begins (s):
+    LENGTH: float = 83.2
+    # the steps of the film in their order: their stop type, their name in the header, where each begins and where
+    # its first segment begins (s):
     STEP_TYPES: list[str] = [
         "query",
         "memory",
         "cache-lines",
         "row-layout",
         "column-layout",
+        "pax-layout",
+        "real-pages",
         "verdict",
         "result",
     ]
-    FIRST_SEGMENTS: list[float] = [0.5, 6.4, 13.4, 19.4, 30.6, 42.5, 49.3]
-    # the row-layout step, the fourth, says its caption in two segments; the second one begins at 25.8 s:
-    ROW_LAYOUT_STEP: int = 4
-    ROW_LAYOUT_SEGMENTS: list[str] = [
-        "Row layout: each line drags title and author along.",
-        "Four lines read, a quarter used.",
+    STEP_NAMES: list[str] = [
+        "01/09 · The query",
+        "02/09 · Memory",
+        "03/09 · Cache lines, pages",
+        "04/09 · Row layout",
+        "05/09 · Column layout",
+        "06/09 · PAX layout",
+        "07/09 · Real pages",
+        "08/09 · Verdict",
+        "09/09 · Result",
     ]
-    ROW_LAYOUT_SECOND_SEGMENT: float = 25.8
-    # the column-layout step, the fifth, says its caption in two segments as well; the second one begins at 37.0 s (the
-    # tests of tools/render_video.py check the start of its clip):
-    COLUMN_LAYOUT_SECOND_SEGMENT: float = 37.0
+    STEPS_FROM: list[float] = [0, 6.0, 13.0, 26.2, 37.2, 49.2, 61.2, 73.2, 80.2]
+    FIRST_SEGMENTS: list[float] = [0.5, 6.4, 13.4, 26.6, 37.8, 49.4, 61.7, 73.7, 80.5]
+    # the steps whose caption the voice says in two segments, with the two segments as the subtitle shows them:
+    TWO_SEGMENTS: dict[str, list[str]] = {
+        "cache-lines": [
+            "The CPU loads it in cache lines: 64 bytes at a time.",
+            "The database reads and writes whole pages: 128 bytes here, really 4 kilobytes.",
+        ],
+        "row-layout": [
+            "Row layout: each cache line drags title and author along.",
+            "Two pages, four cache lines: a quarter used.",
+        ],
+        "column-layout": [
+            "Same data, stored by column: all prices side by side.",
+            "One page, one cache line, every byte used.",
+        ],
+        "pax-layout": [
+            "PAX, Partition Attributes Across: the same pages, grouped by column inside.",
+            "Same two pages, half the cache lines.",
+        ],
+        "real-pages": [
+            "Real pages of 4 kilobytes: PAX reads as few cache lines as columns.",
+            "But every page. Columns read only the page of prices.",
+        ],
+    }
+    # where the second segment of each of them begins (s): in the cache-lines step where it brings in pages, in the
+    # column-layout and the PAX step where the scan loads its first line (the tests of tools/render_video.py check the
+    # start of each clip):
+    SECOND_SEGMENTS: dict[str, float] = {
+        "cache-lines": 18.6,
+        "row-layout": 33.0,
+        "column-layout": 44.2,
+        "pax-layout": 55.6,
+        "real-pages": 68.8,
+    }
+    # the row-layout step is the fourth:
+    ROW_LAYOUT_STEP: int = 4
     # a clip longer than its time plays at most this many times as fast (decision 034):
     MAX_RATE: float = 1.15
+
+    # the layouts in the order of the film and of the header's counters:
+    LAYOUTS: list[str] = ["row", "column", "pax"]
+    # when the pages of each layout are marked in memory (s): the row layout's with the second segment of the
+    # cache-lines step, which says what a page is, and the header's counters show their pages from then on; the column
+    # layout's and PAX's once the layout is complete:
+    PAGES_FROM: dict[str, float] = {"row": 18.6, "column": 42.8, "pax": 54.8}
+    # the scans of SELECT MAX(price): when the read head reaches each cache line that a scan loads (s), and when the
+    # scan ends (s), where the pages it did not need are marked "not read". First the page, then its lines: as the head
+    # reaches the first line it loads of a page, the page is read (marked "read" and counted among the pages read);
+    # each line arrives in the cache, and is counted with its bytes, LOAD_DURATION later. The row layout loads its lines
+    # 0 to 3 (pages 0 and 1), the column layout its line 4 (page 2, that of the prices), PAX its lines 1 (page 0) and 3
+    # (page 1):
+    LOADS: dict[str, list[float]] = {
+        "row": [27.2, 28.7, 30.2, 31.7],
+        "column": [44.2],
+        "pax": [55.6, 57.6],
+    }
+    SCAN_DONE: dict[str, float] = {"row": 34.1, "column": 46.1, "pax": 59.1}
+    LOAD_DURATION: float = 0.8
+    # what the counters of each layout show once its scan of SELECT MAX(price) is done: the pages and the cache lines
+    # read, and the bytes loaded and used (the 64 B of the eight prices):
+    COUNTED: dict[str, tuple[int, int, int, int]] = {
+        "row": (2, 4, 256, 64),
+        "column": (1, 1, 64, 64),
+        "pax": (2, 2, 128, 64),
+    }
+    # what they show before it:
+    NOT_COUNTED: tuple[int, int, int, int] = (0, 0, 0, 0)
+    # what the row layout's counter shows while its third line is on its way to the cache: its pages 0 and 1 read,
+    # and the first two lines arrived, each with the prices of two books (16 B):
+    ROW_THIRD_LINE_ON_ITS_WAY: tuple[int, int, int, int] = (2, 2, 128, 32)
+    # what PAX's counter shows while its first line is on its way: its page 0 read, no line arrived yet:
+    PAX_FIRST_LINE_ON_ITS_WAY: tuple[int, int, int, int] = (1, 0, 0, 0)
+    # once that line has arrived: the line, on page 0, with its 32 B of prices:
+    PAX_FIRST_LINE_ARRIVED: tuple[int, int, int, int] = (1, 1, 64, 32)
+    # while its second line is on its way: its pages 0 and 1 read, the first line arrived:
+    PAX_SECOND_LINE_ON_ITS_WAY: tuple[int, int, int, int] = (2, 1, 64, 32)
+    # the real pages come in at 61.8 s; the header's counters, which count the eight books of the small example, are
+    # dimmed from then on, fully 0.6 s later:
+    REAL_PAGES_FROM: float = 61.8
+    COUNTERS_DIMMED: float = 62.4
+    # PAX's row of the counters shows from when PAX's title appears, as PAX is laid down (s):
+    PAX_COUNTER_FROM: float = 50.2
+    # the real pages are shown until 73.6 s; they fade in and out over REAL_PAGES_FADE (s). Each layout's real pages are
+    # read from its REAL_READ time on (s): first the pages read get their green frames (REAL_FRAME_LEAD, s), then their
+    # lines read light up (REAL_READ_DURATION, s):
+    REAL_PAGES_UNTIL: float = 73.6
+    REAL_PAGES_FADE: float = 0.4
+    REAL_READ: dict[str, float] = {"row": 63.2, "column": 65.2, "pax": 67.2}
+    REAL_FRAME_LEAD: float = 0.5
+    REAL_READ_DURATION: float = 1.2
+
+    # the table at real size, which the real pages step shows and the receipt counts: 512 books, each with a title of
+    # 16 B, an author of 8 B and a price of 8 B (32 B in all), on pages of 4 KB, read in cache lines of 64 B:
+    REAL_BOOKS: int = 512
+    FIELD_BYTES: dict[str, int] = {"title": 16, "author": 8, "price": 8}
+    BOOK_BYTES: int = 32
+    REAL_PAGE_BYTES: int = 4096
+    LINE_BYTES: int = 64
+    # what SELECT MAX(price) reads of each layout at real size, as decision 054 states it (DECISION.md, section
+    # "Scope-shift 2026-11-26 (pages from the start, real pages as a step)"): the pages read and not read, the cache
+    # lines read and the share of prices among their bytes (%):
+    REAL_READS_OF_DECISION: dict[str, RealReads] = {
+        "row": RealReads(pages=4, not_read=0, lines=256, share=25),
+        "column": RealReads(pages=1, not_read=3, lines=64, share=100),
+        "pax": RealReads(pages=4, not_read=0, lines=64, share=100),
+    }
+    # how the receipt names the layouts:
+    RECEIPT_NAMES: dict[str, str] = {
+        "row": "row layout",
+        "column": "column layout",
+        "pax": "PAX",
+    }
+    # the receipt's items from top to bottom: the heads of its two columns, input/output and memory; the line of each
+    # layout, in the film's order; and the totals, what the column layout and what PAX save against the row layout:
+    RECEIPT_ITEMS: list[str] = [
+        "receipt-heads",
+        "receipt-row",
+        "receipt-column",
+        "receipt-pax",
+        "receipt-total",
+        "receipt-total-pax",
+    ]
+    # the receipt's footnote on one whole book, which holds also for pages of real size:
+    FOOTNOTE: str = (
+        "One whole book? Row layout: 1 page, 1 cache line. PAX: 1 page. Column layout: a page per column."
+    )
+
+    # the slider's thumb is this wide (px); its middle runs from half of it after the slider's left edge to half of it
+    # before its right edge:
+    THUMB_WIDTH: float = 14
+    # phones held upright, on which the header stands above the terminal and the slider gets a line of its own:
+    PHONES: list[tuple[int, int]] = [(360, 780), (390, 844)]
+    # the least width of the slider on such a phone (px):
+    PHONE_SLIDER_WIDTH: float = 250
+    # as a step begins, its name shows top left from STEP_TITLE_DELAY after the step's beginning for STEP_TITLE_FOR,
+    # fading in and out over STEP_TITLE_FADE (s); not in the first and the last step, where the terminal stands there:
+    STEP_TITLE_DELAY: float = 0.3
+    STEP_TITLE_FOR: float = 3.0
+    STEP_TITLE_FADE: float = 0.4
+
+    class ScansShown(TypedDict):
+        """What the header's counters and the pages marked in memory show at one moment (see scans_shown)."""
+
+        # the data attributes of ``counters``, by their name in the dataset (e.g. ``paxLines``):
+        noted: dict[str, str]
+        # the visibility of the pages of each layout's counter, ``visible`` or ``hidden``:
+        pages: dict[str, str]
+        # the pages marked in memory:
+        marks: PageMarks
+
+    @dataclass
+    class Stretch:
+        """A stretch of the film between two of its events, and what the counters and the pages in memory show in it
+        (see test_scrubbing_back_shows_what_a_page_opened_there_shows)."""
+
+        # the two events (s):
+        after: float
+        before: float
+        # what the counters count of each layout (see counters), and the visibility of their pages (for PAX's counter
+        # only from when its row shows, PAX_COUNTER_FROM; before, its pages are hidden with the row):
+        counted: dict[str, tuple[int, int, int, int]]
+        pages: str
+        # the pages marked in memory:
+        marks: PageMarks
 
     def setUp(self) -> None:
         """Opens the page, paused at its start with sound off."""
@@ -1872,6 +2070,25 @@ class RowOrColumnPageTest(_SoundPageTestCase):
         """
         return seconds / self.LENGTH * 1000
 
+    def thumb_at(self, seconds: float) -> float:
+        """Returns where the middle of the slider's thumb stands at a time of the film, from the slider's left edge.
+
+        @param seconds: a time of the film
+        @return: the distance (px) from the slider's left edge
+        """
+        width: float = self.box_of("scrub")["width"]
+        return self.THUMB_WIDTH / 2 + seconds / self.LENGTH * (width - self.THUMB_WIDTH)
+
+    def step_title_middle(self, step: int) -> float:
+        """Returns the middle of the time in which a step's name shows top left, where it shows in full.
+
+        @param step: the step, from 1 to 9
+        @return: the time (s)
+        """
+        return (
+            self.STEPS_FROM[step - 1] + self.STEP_TITLE_DELAY + self.STEP_TITLE_FOR / 2
+        )
+
     def press_next(self, times: int) -> None:
         """Clicks Next the given number of times.
 
@@ -1879,6 +2096,276 @@ class RowOrColumnPageTest(_SoundPageTestCase):
         """
         for _ in range(times):
             self.page.get_by_test_id("next").click()
+
+    def next_to(self, stop_type: str) -> None:
+        """Clicks Next until the narration shows the given step. With sound off, Next stops at the end of each step
+        (CAPTION_FADE, 0.35 s, before the next one begins), where the step is shown in full.
+
+        @param stop_type: the step's stop type, one of STEP_TYPES at or after the current stop, but not the last (the
+            last stop is the end, ``end``)
+        """
+        narration = self.page.get_by_test_id("narration")
+        for _ in range(len(self.STEP_TYPES)):
+            if narration.get_attribute("data-stop-type") == stop_type:
+                return
+            self.page.get_by_test_id("next").click()
+        expect(narration).to_have_attribute("data-stop-type", stop_type)
+
+    def counters(self) -> dict[str, tuple[int, int, int, int]]:
+        """Returns what the header's counters note for each layout, and asserts that they show the same numbers.
+
+        @return: for each layout of LAYOUTS, the pages, the cache lines, the bytes loaded and the bytes used, as noted
+            in ``data-{layout}-pages``, ``-lines``, ``-loaded`` and ``-used`` of ``counters``
+        """
+        box = self.page.get_by_test_id("counters")
+
+        def number(layout: str, quantity: str, unit: str) -> int:
+            """Returns the number that the counters note for a layout and a quantity (e.g. ``pages``), and asserts that
+            the counter shows it, followed by the unit (" B" for bytes, "" else).
+            """
+            noted: str = box.get_attribute(f"data-{layout}-{quantity}") or ""
+            shown: str | None = self.page.get_by_test_id(
+                f"{layout}-{quantity}"
+            ).text_content()
+            self.assertEqual(f"{noted}{unit}", shown, f"{layout}-{quantity}")
+            return int(noted)
+
+        return {
+            layout: (
+                number(layout, "pages", ""),
+                number(layout, "lines", ""),
+                number(layout, "loaded", " B"),
+                number(layout, "used", " B"),
+            )
+            for layout in self.LAYOUTS
+        }
+
+    def counters_opacity(self) -> float:
+        """Returns the opacity of the header's counters, as the browser has computed it."""
+        return float(
+            self.page.get_by_test_id("counters").evaluate(
+                "box => getComputedStyle(box).opacity"
+            )
+        )
+
+    def page_marks(self, page: Page) -> PageMarks:
+        """Returns the pages of the three layouts as a page marks them in memory.
+
+        @param page: the row-or-column page, also one opened in another browser context than ``self.page``
+        @return: ``data-pages-shown``, ``data-pages-row``, ``-column`` and ``-pax`` of ``stage``
+        """
+        data: dict[str, str] = page.get_by_test_id("stage").evaluate(
+            "stage => ({ ...stage.dataset })"
+        )
+        return PageMarks(
+            data["pagesShown"], data["pagesRow"], data["pagesColumn"], data["pagesPax"]
+        )
+
+    def scans_shown(self, page: Page) -> ScansShown:
+        """Returns what the header's counters of a page show, whether their pages are visible, and the pages marked in
+        memory.
+
+        @param page: the row-or-column page, also one opened in another browser context than ``self.page``
+        @return: the data attributes of ``counters``, the visibility of ``{layout}-pages`` for each layout of LAYOUTS,
+            and the pages marked in memory (see page_marks)
+        """
+        noted: dict[str, str] = page.get_by_test_id("counters").evaluate(
+            "box => ({ ...box.dataset })"
+        )
+        pages: dict[str, str] = {
+            layout: page.get_by_test_id(f"{layout}-pages").evaluate(
+                "pages => getComputedStyle(pages).visibility"
+            )
+            for layout in self.LAYOUTS
+        }
+        return {"noted": noted, "pages": pages, "marks": self.page_marks(page)}
+
+    def real_reads_shown(self) -> dict[str, RealReads]:
+        """Returns what the page counts of the real pages of each layout, once it has built its scene (in which it
+        counts them) and set up its controls.
+
+        @return: for each layout of LAYOUTS, ``data-real-{layout}-pages``, ``-not-read``, ``-lines`` and ``-share`` of
+            ``stage``
+        """
+        expect(self.page.get_by_test_id("play")).to_be_enabled()
+        data: dict[str, str] = self.page.get_by_test_id("stage").evaluate(
+            "stage => ({ ...stage.dataset })"
+        )
+        shown: dict[str, RealReads] = {}
+        for layout in self.LAYOUTS:
+            # in the dataset, e.g. realPaxNotRead for data-real-pax-not-read:
+            name: str = f"real{layout.capitalize()}"
+            shown[layout] = RealReads(
+                pages=int(data[f"{name}Pages"]),
+                not_read=int(data[f"{name}NotRead"]),
+                lines=int(data[f"{name}Lines"]),
+                share=int(data[f"{name}Share"]),
+            )
+        return shown
+
+    @staticmethod
+    def part_at(offset: int, parts: list[tuple[str | None, int]]) -> str | None:
+        """Returns the part that holds a byte, of parts that lie one after the other.
+
+        @param offset: the byte's distance from the start of the first part
+        @param parts: the parts in their order, each with its name (None for free bytes) and its size in bytes
+        @return: the name of the part that holds the byte; None if it is free or lies after the last part
+        """
+        for name, size in parts:
+            if offset < size:
+                return name
+            offset -= size
+        return None
+
+    def field_at(self, layout: str, address: int) -> str | None:
+        """Returns the attribute that holds a byte of a layout of the table at real size.
+
+        The row layout stores book after book, each with its title, author and price. The column layout stores an
+        array per attribute, each on pages of its own, after the pages of the attributes before it; the rest of its last
+        page stays free. PAX stores the books of the row layout's pages, but inside each page first the titles of its
+        books, then their authors, then their prices.
+
+        @param layout: ``row``, ``column`` or ``pax``
+        @param address: the byte's address, from 0 at the start of the layout's first page
+        @return: ``title``, ``author`` or ``price``; None for a free byte
+        """
+        if layout == "row":
+            return self.part_at(
+                address % self.BOOK_BYTES, list(self.FIELD_BYTES.items())
+            )
+        if layout == "pax":
+            books_per_page: int = self.REAL_PAGE_BYTES // self.BOOK_BYTES
+            return self.part_at(
+                address % self.REAL_PAGE_BYTES,
+                [
+                    (attribute, books_per_page * size)
+                    for attribute, size in self.FIELD_BYTES.items()
+                ],
+            )
+        parts: list[tuple[str | None, int]] = []
+        for attribute, size in self.FIELD_BYTES.items():
+            array: int = self.REAL_BOOKS * size
+            parts += [(attribute, array), (None, -array % self.REAL_PAGE_BYTES)]
+        return self.part_at(address, parts)
+
+    def real_page_count(self, layout: str) -> int:
+        """Returns how many pages a layout needs for the table at real size: the row layout and PAX fill page after
+        page with whole books, the column layout fills pages of its own for each attribute.
+
+        @param layout: ``row``, ``column`` or ``pax``
+        @return: the number of pages
+        """
+        if layout == "column":
+            return sum(
+                math.ceil(self.REAL_BOOKS * size / self.REAL_PAGE_BYTES)
+                for size in self.FIELD_BYTES.values()
+            )
+        books_per_page: int = self.REAL_PAGE_BYTES // self.BOOK_BYTES
+        return math.ceil(self.REAL_BOOKS / books_per_page)
+
+    def expected_real_reads(self, layout: str) -> RealReads:
+        """Returns what SELECT MAX(price) reads of a layout of the table at real size, counted byte by byte (see
+        field_at): every cache line that holds a price, and every page that holds such a line.
+
+        @param layout: ``row``, ``column`` or ``pax``
+        @return: the pages read and not read, the lines read and the share of prices among their bytes, rounded as
+            Math.round does (half up)
+        """
+        lines_per_page: int = self.REAL_PAGE_BYTES // self.LINE_BYTES
+        pages: int = self.real_page_count(layout)
+        pages_read: int = 0
+        lines_read: int = 0
+        prices: int = 0
+        for page in range(pages):
+            lines_of_page: int = 0
+            for line in range(lines_per_page):
+                start: int = page * self.REAL_PAGE_BYTES + line * self.LINE_BYTES
+                fields: list[str | None] = [
+                    self.field_at(layout, start + byte)
+                    for byte in range(self.LINE_BYTES)
+                ]
+                if "price" in fields:
+                    lines_of_page += 1
+                    prices += fields.count("price")
+            lines_read += lines_of_page
+            if lines_of_page:
+                pages_read += 1
+        return RealReads(
+            pages=pages_read,
+            not_read=pages - pages_read,
+            lines=lines_read,
+            share=math.floor(100 * prices / (lines_read * self.LINE_BYTES) + 0.5),
+        )
+
+    @staticmethod
+    def as_bytes(count: int) -> str:
+        """Returns a number of bytes as the receipt writes it: in KB from 1 KB on (e.g. ``16 KB``), else in B
+        (e.g. ``64 B``)."""
+        return f"{count / 1024:g} KB" if count >= 1024 else f"{count} B"
+
+    @staticmethod
+    def times(factor: float) -> str:
+        """Returns a factor as the receipt prints it: rounded to two decimals, without trailing zeros (e.g. ``4×`` or
+        ``1.33×``)."""
+        return f"{round(factor, 2):g}×"
+
+    def savings(self, layout: str) -> tuple[str, str]:
+        """Returns how many times fewer pages (input/output) and cache lines (memory) a layout reads than the row
+        layout, at real size, as the receipt's totals write them under the two column heads: e.g. ``4× fewer``, or
+        ``same`` where the layout reads as many as the row layout.
+
+        @param layout: ``column`` or ``pax``
+        @return: the savings in pages and in cache lines, computed from the sizes (see expected_real_reads)
+        """
+        row: RealReads = self.expected_real_reads("row")
+        other: RealReads = self.expected_real_reads(layout)
+
+        def fewer(mine: int, theirs: int) -> str:
+            """Returns ``<factor>× fewer`` if the row layout reads more than the other layout, else ``same``."""
+            return f"{self.times(mine / theirs)} fewer" if mine > theirs else "same"
+
+        return fewer(row.pages, other.pages), fewer(row.lines, other.lines)
+
+    def real_states(self, page: Page) -> tuple[str, str, str]:
+        """Returns how far a page shows the real pages of the row layout, the column layout and PAX read.
+
+        @param page: the row-or-column page, also one opened in another browser context than ``self.page``
+        @return: ``data-real-state-row``, ``-column`` and ``-pax`` of ``stage``, each ``hidden``, ``waiting``,
+            ``reading`` or ``read``
+        """
+        data: dict[str, str] = page.get_by_test_id("stage").evaluate(
+            "stage => ({ ...stage.dataset })"
+        )
+        return data["realStateRow"], data["realStateColumn"], data["realStatePax"]
+
+    def box_of(self, test_id: str) -> FloatRect:
+        """Returns the box of the element with the given test id, and fails if it has none (e.g. is hidden)."""
+        box: FloatRect | None = self.page.get_by_test_id(test_id).bounding_box()
+        if box is None:
+            self.fail(f"{test_id} has no box")
+        return box
+
+    def assert_below_the_header(self, test_id: str) -> None:
+        """Asserts that the element with the given test id begins below the header: below the hairline that closes it,
+        under the step's name and the counters, which stand beside or below it.
+
+        The page moves its terminal and the step's name top left below the header in a ResizeObserver's callback,
+        which runs in the frame after the header has changed its size (with the window, or with a step's name that
+        wraps); so the check waits for two frames first.
+
+        @param test_id: ``terminal`` or ``step-title``
+        """
+        self.page.evaluate(
+            "() => new Promise((done) => requestAnimationFrame(() => requestAnimationFrame(done)))"
+        )
+        header: FloatRect = self.box_of("header")
+        header_bottom: float = header["y"] + header["height"]
+        card: FloatRect = self.box_of(test_id)
+        self.assertGreaterEqual(
+            card["y"],
+            header_bottom,
+            f"the header, down to {header_bottom} px, covers {test_id} {card}",
+        )
 
     def test_a_second_segment_gets_a_clip_of_its_own(self) -> None:
         """With sound on, the second segment of a caption is said by a clip of its own, which starts at its time.
@@ -1917,7 +2404,7 @@ class RowOrColumnPageTest(_SoundPageTestCase):
         # only once, for it:
         self.assertGreaterEqual(
             int(scrub.input_value()),
-            math.floor(self.slider_at(self.ROW_LAYOUT_SECOND_SEGMENT)),
+            math.floor(self.slider_at(self.SECOND_SEGMENTS["row-layout"])),
         )
         self.assertEqual("row-layout", narration.get_attribute("data-stop-type"))
         self.assertEqual(1, len(page.evaluate("window.voiceStarts")))
@@ -1956,32 +2443,69 @@ class RowOrColumnPageTest(_SoundPageTestCase):
         self.assertEqual([*reversed(expected), ("start", 0)], stops)
         self.assert_no_errors(self.opened)
 
+    def test_next_stops_in_each_step_which_the_header_names(self) -> None:
+        """With sound off, Next stops once in each of the nine steps, in their order, the last time at the end of the
+        film, in the result step; the header names each step by its number of nine and its name, from "01/09 · The
+        query" over "03/09 · Cache lines, pages" and "07/09 · Real pages" to "09/09 · Result".
+
+        Fails if a step's name is numbered wrongly or out of another count (e.g. "06/08 · PAX layout"), if the header
+        names another step than the one the narration tells, or if a step is skipped or comes out of order.
+        """
+        narration = self.page.get_by_test_id("narration")
+        step = self.page.get_by_test_id("step")
+        # the stop in each step: at its end, and in the last step at the end of the film (``end``):
+        stop_types: list[str] = [*self.STEP_TYPES[:-1], "end"]
+        for stop_type, name in zip(stop_types, self.STEP_NAMES):
+            with self.subTest(step=name):
+                # Next stops in the next step, which the header names:
+                self.press_next(1)
+                expect(narration).to_have_attribute("data-stop-type", stop_type)
+                expect(step).to_contain_text(name)
+        self.assert_no_errors(self.opened)
+
+    def test_each_step_of_two_segments_shows_both_with_sound_off(self) -> None:
+        """With sound off, at the end of each step whose caption the voice says in two segments, the subtitle shows the
+        two segments one after the other: the cache-lines step says what a page is, the row-layout and the
+        column-layout step how many pages and lines their scans read, the PAX step spells its name out, and the real
+        pages step says that PAX reads as few lines as the column layout, but every page.
+
+        Fails if a segment is missing, out of order or says something else.
+        """
+        text = self.page.get_by_test_id("nar-text")
+        for stop_type, segments in self.TWO_SEGMENTS.items():
+            with self.subTest(step=stop_type):
+                # Next stops at the end of the step; the subtitle shows its two segments:
+                self.next_to(stop_type)
+                expect(text).to_be_visible()
+                expect(text).to_have_text(" ".join(segments))
+        self.assert_no_errors(self.opened)
+
     def test_words_said_count_segment_by_segment(self) -> None:
         """With sound off, the words of a caption in two segments count as said segment by segment.
 
-        Just before the second segment begins, all words of the first are said; in the silence at the start of the
-        second segment's clip, still only those; where the caption is shown in full, all words of both.
+        Just before the second segment begins, all words of the first are said; on the first step of the slider after
+        it begins, before the voice has said the second segment's first word, still only those; where the caption is
+        shown in full, all words of both.
         """
         page: Page = self.page
         scrub = page.get_by_test_id("scrub")
         narration = page.get_by_test_id("narration")
-        first_words: int = len(self.ROW_LAYOUT_SEGMENTS[0].split())
-        all_words: int = len(" ".join(self.ROW_LAYOUT_SEGMENTS).split())
-        second_segment: float = self.slider_at(self.ROW_LAYOUT_SECOND_SEGMENT)
+        segments: list[str] = self.TWO_SEGMENTS["row-layout"]
+        first_words: int = len(segments[0].split())
+        all_words: int = len(" ".join(segments).split())
+        second_segment: float = self.slider_at(self.SECOND_SEGMENTS["row-layout"])
 
         # with sound off, Next stops where the row-layout step is shown in full: both segments, all words said:
         self.press_next(self.ROW_LAYOUT_STEP)
         expect(narration).to_have_attribute("data-stop-type", "row-layout")
-        expect(page.get_by_test_id("nar-text")).to_have_text(
-            " ".join(self.ROW_LAYOUT_SEGMENTS)
-        )
+        expect(page.get_by_test_id("nar-text")).to_have_text(" ".join(segments))
         expect(narration).to_have_attribute("data-words-said", str(all_words))
 
         # on the last step of the slider before the second segment begins, all words of the first one are said:
         scrub.fill(str(math.ceil(second_segment) - 1))
         expect(narration).to_have_attribute("data-words-said", str(first_words))
 
-        # on the first step after it begins, in the silence of 0.4 s at the start of its clip, still only those:
+        # on the first step after it begins, before the voice has said the first word of its clip, still only those:
         scrub.fill(str(math.ceil(second_segment)))
         expect(narration).to_have_attribute("data-words-said", str(first_words))
         self.assert_no_errors(self.opened)
@@ -2034,6 +2558,971 @@ class RowOrColumnPageTest(_SoundPageTestCase):
         # back at the start, it is left out again:
         scrub.fill("0")
         expect(credit).to_be_hidden()
+        self.assert_no_errors(self.opened)
+
+    def test_next_shows_the_counters_of_each_scan_once_it_is_done(self) -> None:
+        """With sound off, Next stops at the end of each layout's step with its scan counted and the scans still to
+        come at 0: at the end of the row-layout step the row layout's 2 pages, 4 cache lines, 256 B loaded and 64 B
+        used; at the end of the column-layout step also the column layout's 1 page, 1 line, 64 B loaded and 64 B used;
+        at the end of the PAX step also PAX's 2 pages, 2 lines, 128 B loaded and 64 B used.
+
+        Fails if a line is counted before its layout's step or only after it, if one is counted on the wrong page, or
+        if a scan changes the counters of another layout. When within a step each line is counted is checked by
+        test_scrubbing_back_shows_what_a_page_opened_there_shows.
+        """
+        # Next stops at the end of the row-layout step: only the row layout is counted:
+        self.next_to("row-layout")
+        self.assertEqual(
+            {
+                "row": self.COUNTED["row"],
+                "column": self.NOT_COUNTED,
+                "pax": self.NOT_COUNTED,
+            },
+            self.counters(),
+        )
+
+        # Next stops at the end of the column-layout step: the column layout is counted as well, PAX is not:
+        self.next_to("column-layout")
+        self.assertEqual({**self.COUNTED, "pax": self.NOT_COUNTED}, self.counters())
+
+        # Next stops at the end of the PAX step: its two lines, on two pages, are counted as well:
+        self.next_to("pax-layout")
+        self.assertEqual(self.COUNTED, self.counters())
+        self.assert_no_errors(self.opened)
+
+    def test_the_counters_show_the_pages_from_the_second_segment_of_step_03_on(
+        self,
+    ) -> None:
+        """The pages in the counters of the row and the column layout are hidden until the second segment of the
+        cache-lines step (03), which says what a page is, begins at 18.6 s; from then on they show, at the same moment
+        as the row layout's pages are marked in memory, and until the end of the film. Back at the start, they are
+        hidden again. (PAX's counter shows only from when PAX's title appears, see
+        test_the_pax_counter_shows_from_when_pax_is_laid_down.)
+
+        Fails if the pages show before the film brings them in, or only later (e.g. from the PAX step on), if the
+        header and the memory bring in pages at different moments, or if the pages hide again later in the film.
+        """
+        scrub = self.page.get_by_test_id("scrub")
+        stage = self.page.get_by_test_id("stage")
+        pages_from: float = self.slider_at(self.SECOND_SEGMENTS["cache-lines"])
+
+        def expect_pages(visibility: str) -> None:
+            """Expects the pages of the row and the column layout's counters to have the given visibility,
+            ``hidden`` or ``visible``."""
+            for layout in ["row", "column"]:
+                expect(self.page.get_by_test_id(f"{layout}-pages")).to_have_css(
+                    "visibility", visibility
+                )
+
+        # at the start, the pages are hidden:
+        expect_pages("hidden")
+
+        # on the last step of the slider before the second segment of step 03 begins, they are still hidden, and no
+        # page is marked in memory:
+        scrub.fill(str(math.ceil(pages_from) - 1))
+        expect_pages("hidden")
+        expect(stage).to_have_attribute("data-pages-shown", "")
+
+        # on the first step after it begins, they show, and the row layout's pages are marked:
+        scrub.fill(str(math.ceil(pages_from)))
+        expect_pages("visible")
+        expect(stage).to_have_attribute("data-pages-shown", "row")
+
+        # at the end of the film, they still show:
+        scrub.fill("1000")
+        expect(self.page.get_by_test_id("play")).to_have_attribute(
+            "data-state", "ended"
+        )
+        expect_pages("visible")
+
+        # back at the start, they are hidden again:
+        scrub.fill("0")
+        expect_pages("hidden")
+        self.assert_no_errors(self.opened)
+
+    def test_the_pax_counter_shows_from_when_pax_is_laid_down(self) -> None:
+        """PAX's counter in the header, its row with all its numbers, is hidden until PAX's title appears as PAX is
+        laid down (50.2 s), also after the other counters have shown their pages (from 18.6 s); from then on it shows,
+        to the end of the film. Back at the start, it is hidden again.
+
+        Fails if PAX's counter, or a part of it such as its pages, shows before the film has brought in PAX, or if it
+        does not show from then on.
+        """
+        scrub = self.page.get_by_test_id("scrub")
+        parts: list[str] = [
+            "counter-pax",
+            "pax-pages",
+            "pax-lines",
+            "pax-loaded",
+            "pax-used",
+        ]
+
+        def expect_shown(shown: bool) -> None:
+            """Expects PAX's counter and each of its numbers to be visible, or each of them to be hidden."""
+            for test_id in parts:
+                counter = self.page.get_by_test_id(test_id)
+                if shown:
+                    expect(counter).to_be_visible()
+                else:
+                    expect(counter).to_be_hidden()
+
+        # at the start, it is hidden:
+        expect_shown(False)
+
+        # on the last step of the slider before PAX's title appears, it is still hidden, while the other counters show
+        # their pages:
+        scrub.fill(str(math.ceil(self.slider_at(self.PAX_COUNTER_FROM)) - 1))
+        expect(self.page.get_by_test_id("row-pages")).to_be_visible()
+        expect_shown(False)
+
+        # on the first step at or after it, it shows:
+        scrub.fill(str(math.ceil(self.slider_at(self.PAX_COUNTER_FROM))))
+        expect_shown(True)
+
+        # at the end of the film, it still shows:
+        scrub.fill("1000")
+        expect(self.page.get_by_test_id("play")).to_have_attribute(
+            "data-state", "ended"
+        )
+        expect_shown(True)
+
+        # back at the start, it is hidden again:
+        scrub.fill("0")
+        expect_shown(False)
+        self.assert_no_errors(self.opened)
+
+    def test_the_counters_are_dimmed_from_the_real_pages_on(self) -> None:
+        """The header's counters, which count the eight books of the small example, show in full until the real pages
+        of 4 KB come in at 61.8 s; then they fade, and from 62.4 s on they are dimmed, to at most half their opacity,
+        and marked ``data-dimmed="true"``, through the real pages, the verdict and the result, still with the counts of
+        the three scans. Back at the start, they show in full again.
+
+        Fails if the counters stay in full beside the real pages, whose numbers they do not count, if they are dimmed
+        already in the PAX step, if they are marked dimmed while they still fade, or if they show in full again in the
+        verdict or the result.
+        """
+        scrub = self.page.get_by_test_id("scrub")
+        box = self.page.get_by_test_id("counters")
+
+        # on the last step of the slider before the real pages come in, the counters show in full, with the three
+        # scans counted:
+        scrub.fill(str(math.ceil(self.slider_at(self.REAL_PAGES_FROM)) - 1))
+        self.assertEqual(1, self.counters_opacity())
+        expect(box).to_have_attribute("data-dimmed", "false")
+        self.assertEqual(self.COUNTED, self.counters())
+
+        # halfway through the fade, they are no longer in full, but not yet marked dimmed:
+        scrub.fill(
+            str(
+                round(self.slider_at((self.REAL_PAGES_FROM + self.COUNTERS_DIMMED) / 2))
+            )
+        )
+        self.assertLess(self.counters_opacity(), 1)
+        expect(box).to_have_attribute("data-dimmed", "false")
+
+        # from 62.4 s on, they are dimmed:
+        scrub.fill(str(math.ceil(self.slider_at(self.COUNTERS_DIMMED))))
+        self.assertLessEqual(self.counters_opacity(), 0.5)
+        expect(box).to_have_attribute("data-dimmed", "true")
+
+        # still at the end of the verdict step, where Next stops:
+        self.next_to("verdict")
+        self.assertLessEqual(self.counters_opacity(), 0.5)
+        expect(box).to_have_attribute("data-dimmed", "true")
+
+        # and at the end of the film, in the result step, still with the three scans counted:
+        scrub.fill("1000")
+        expect(self.page.get_by_test_id("play")).to_have_attribute(
+            "data-state", "ended"
+        )
+        self.assertLessEqual(self.counters_opacity(), 0.5)
+        expect(box).to_have_attribute("data-dimmed", "true")
+        self.assertEqual(self.COUNTED, self.counters())
+
+        # back at the start, they show in full:
+        scrub.fill("0")
+        self.assertEqual(1, self.counters_opacity())
+        expect(box).to_have_attribute("data-dimmed", "false")
+        self.assert_no_errors(self.opened)
+
+    def test_next_marks_the_pages_each_scan_reads_and_those_it_leaves_out(
+        self,
+    ) -> None:
+        """With sound off, Next stops at the end of each step with the pages in memory marked as far as the film has
+        come: no pages before step 03 brings them in; then the row layout's two pages, not yet read; both read once the
+        row layout's scan is done; then the column layout's three pages, one per column, with page 2, that of the
+        prices, read and pages 0 and 1, those of the titles and the authors, "not read"; then PAX's two pages, both
+        read. The marks stay so to the end of the film.
+
+        Fails if a layout's pages are marked before the film brings them in, if the column layout has another number
+        of pages than one per column, if a scan marks a page read of which it loads no line, if it does not mark the
+        pages it leaves out as "not read", or if the marks change after the scans.
+        """
+        # at the end of each step, which layouts' pages are marked, and the state of each page of the row layout, the
+        # column layout and PAX:
+        stops: list[tuple[str, PageMarks]] = [
+            (
+                "memory",
+                PageMarks("", "none,none", "none,none,none", "none,none"),
+            ),
+            (
+                "cache-lines",
+                PageMarks("row", "none,none", "none,none,none", "none,none"),
+            ),
+            (
+                "row-layout",
+                PageMarks("row", "read,read", "none,none,none", "none,none"),
+            ),
+            (
+                "column-layout",
+                PageMarks(
+                    "row,column", "read,read", "not-read,not-read,read", "none,none"
+                ),
+            ),
+            (
+                "pax-layout",
+                PageMarks(
+                    "row,column,pax",
+                    "read,read",
+                    "not-read,not-read,read",
+                    "read,read",
+                ),
+            ),
+        ]
+        for stop_type, marks in stops:
+            with self.subTest(step=stop_type):
+                # Next stops at the end of the step:
+                self.next_to(stop_type)
+                self.assertEqual(marks, self.page_marks(self.page))
+
+        # at the end of the film, the pages are marked as after the PAX step:
+        self.page.get_by_test_id("scrub").fill("1000")
+        expect(self.page.get_by_test_id("play")).to_have_attribute(
+            "data-state", "ended"
+        )
+        self.assertEqual(stops[-1][1], self.page_marks(self.page))
+        self.assert_no_errors(self.opened)
+
+    def test_the_real_pages_count_what_select_max_price_reads_of_512_books(
+        self,
+    ) -> None:
+        """The real pages step shows the same 512 books in each layout, on pages of 4 KB. For each layout, the page
+        counts the pages that SELECT MAX(price) reads and does not read, the cache lines it reads and the share of
+        prices among their bytes, and notes them in ``data-real-{layout}-pages``, ``-not-read``, ``-lines`` and
+        ``-share`` of ``stage``. They are the numbers computed here byte by byte from the sizes of a book, its
+        attributes, a page and a cache line (see expected_real_reads), and those that decision 054 states
+        (REAL_READS_OF_DECISION). So the step makes its point: PAX reads as few lines as the column layout, but as
+        many pages as the row layout, and only the column layout leaves pages unread.
+
+        Fails if a layout of the real pages puts an attribute elsewhere (e.g. PAX's prices spread over more lines, or
+        the column layout's authors and prices on one page), or if the page counts the pages, the lines or the share
+        wrongly.
+        """
+        shown: dict[str, RealReads] = self.real_reads_shown()
+        computed: dict[str, RealReads] = {
+            layout: self.expected_real_reads(layout) for layout in self.LAYOUTS
+        }
+
+        # the numbers computed from the sizes are those that decision 054 states:
+        self.assertEqual(self.REAL_READS_OF_DECISION, computed)
+
+        # each layout's numbers on the page are those computed from the sizes:
+        self.assertEqual(computed, shown)
+
+        # PAX reads as few lines as the column layout, fewer than the row layout:
+        self.assertEqual(shown["column"].lines, shown["pax"].lines)
+        self.assertLess(shown["pax"].lines, shown["row"].lines)
+
+        # but as many pages as the row layout, every page; only the column layout leaves pages unread:
+        self.assertEqual(shown["row"].pages, shown["pax"].pages)
+        self.assertEqual(
+            {"row": 0, "pax": 0},
+            {layout: shown[layout].not_read for layout in ["row", "pax"]},
+        )
+        self.assertGreater(shown["column"].not_read, 0)
+        self.assert_no_errors(self.opened)
+
+    def test_the_real_pages_are_read_layout_after_layout(self) -> None:
+        """In the real pages step, the real pages of the three layouts come in from 61.8 s, all waiting to be read.
+        Then the row layout's are read from 63.2 s (first the pages read get their green frames, then their lines read
+        light up, 1.7 s in all), the column layout's from 65.2 s and PAX's from 67.2 s, each once the one before is
+        done; by 68.9 s all are read, and from 73.6 s the real pages are gone. ``data-real-state-{layout}`` of
+        ``stage`` notes it: ``hidden``, ``waiting``, ``reading`` or ``read``. Scrubbed back through the step, each
+        moment shows the same again, and so does a page opened at one of them (``?t=…&paused``).
+
+        Each time lies halfway between two events, at least 0.1 s from both, which the test asserts. Fails if the
+        layouts are read in another order or at the same time, if one is read before the real pages show or shown
+        after they are gone, if a layout falls back from read while the next one is read, or if a scrub back keeps a
+        later state.
+        """
+        scrub = self.page.get_by_test_id("scrub")
+        step_from: dict[str, float] = dict(zip(self.STEP_TYPES, self.STEPS_FROM))
+        read: dict[str, float] = self.REAL_READ
+        done: dict[str, float] = {
+            layout: at + self.REAL_FRAME_LEAD + self.REAL_READ_DURATION
+            for layout, at in read.items()
+        }
+        hidden: tuple[str, str, str] = ("hidden", "hidden", "hidden")
+
+        # the stretches between two events, and the states of the row layout, the column layout and PAX in each:
+        stretches: list[tuple[float, float, tuple[str, str, str]]] = [
+            (step_from["real-pages"], self.REAL_PAGES_FROM, hidden),
+            (
+                self.REAL_PAGES_FROM + self.REAL_PAGES_FADE,
+                read["row"],
+                ("waiting", "waiting", "waiting"),
+            ),
+            (read["row"], done["row"], ("reading", "waiting", "waiting")),
+            (done["row"], read["column"], ("read", "waiting", "waiting")),
+            (read["column"], done["column"], ("read", "reading", "waiting")),
+            (done["column"], read["pax"], ("read", "read", "waiting")),
+            (read["pax"], done["pax"], ("read", "read", "reading")),
+            (
+                done["pax"],
+                self.REAL_PAGES_UNTIL - self.REAL_PAGES_FADE,
+                ("read", "read", "read"),
+            ),
+            (self.REAL_PAGES_UNTIL, step_from["result"], hidden),
+        ]
+
+        # the slider's position halfway through each stretch, and its time, at least 0.1 s from both events:
+        positions: list[int] = []
+        for after, before, _ in stretches:
+            position: int = round(self.slider_at((after + before) / 2))
+            seconds: float = position * self.LENGTH / 1000
+            self.assertGreaterEqual(seconds, after + 0.1, (after, before))
+            self.assertLessEqual(seconds, before - 0.1, (after, before))
+            positions.append(position)
+
+        # scrubbed forward through the step, and then back, each moment shows its states:
+        moments: list[tuple[int, tuple[str, str, str]]] = [
+            (position, states) for position, (_, _, states) in zip(positions, stretches)
+        ]
+        for position, states in [*moments, *reversed(moments)]:
+            with self.subTest(position=position):
+                scrub.fill(str(position))
+                self.assertEqual(states, self.real_states(self.page))
+
+        # a page opened while the column layout's real pages are read shows the same:
+        position, states = moments[4]
+        fresh: OpenedPage = self.open_page(
+            ROW_OR_COLUMN_PAGE, query=f"?t={position * self.LENGTH / 1000:.3f}&paused"
+        )
+        expect(fresh.page.get_by_test_id("scrub")).to_have_value(str(position))
+        self.assertEqual(states, self.real_states(fresh.page))
+        self.assert_no_errors(fresh)
+        self.assert_no_errors(self.opened)
+
+    def test_scrubbing_back_shows_what_a_page_opened_there_shows(self) -> None:
+        """Scrubbed to the end of the PAX scan, where all three scans are done, and back, the counters and the pages in
+        memory show what belongs to that earlier time, and the same as a page freshly opened there
+        (``?t=…&paused``). A page is read as the read head reaches the first line the scan loads of it, before that
+        line arrives in the cache (first the page, then its lines):
+
+        - while PAX's second line is on its way to the cache, both its pages are read and counted, but only its first
+          line (2 pages, 1 line, 64 B loaded, 32 B used);
+        - between the arrival of its first line and the load of its second, its page 0 is read, page 1 not yet (1 page,
+          1 line, 64 B loaded, 32 B used);
+        - while its first line is on its way, its page 0 is read and counted, but no line (1 page, 0 lines);
+        - once PAX is complete, before the head reaches its first line, PAX counts nothing and none of its pages is
+          read;
+        - in the PAX step before PAX is complete, its pages are not marked;
+        - between the arrival of the column layout's line of prices and the end of its scan, the column layout is
+          counted and its page 2 read, but its pages 0 and 1 are not yet marked "not read";
+        - while the row layout's third line is on its way, both its pages are read, but only its first two lines are
+          counted (2 pages, 2 lines, 128 B loaded, 32 B used);
+        - before step 03 brings in pages, nothing is counted, and no page shows, neither in the counters nor in memory.
+
+        So the counters and the pages are a pure function of the film's time. Each time lies halfway between two
+        events (e.g. a line loaded and its arrival in the cache), at least 0.1 s from both, which the test asserts, so
+        that a shifted timeline fails the test instead of moving a time past an event. Fails if a page is read before
+        the head reaches its first line or only once that line has arrived, if a line is counted before its copy has
+        arrived in the cache, if a page is marked "not read" before its scan has ended, if the counters or the pages
+        keep a later state after a scrub back, or if a page opened at that time shows something else.
+        """
+        scrub = self.page.get_by_test_id("scrub")
+        step_from: dict[str, float] = dict(zip(self.STEP_TYPES, self.STEPS_FROM))
+        pax_first, pax_second = self.LOADS["pax"]
+        column_line: float = self.LOADS["column"][0]
+        row_third: float = self.LOADS["row"][2]
+        # the pages at the end of the PAX scan:
+        done: PageMarks = PageMarks(
+            "row,column,pax", "read,read", "not-read,not-read,read", "read,read"
+        )
+
+        stretches: list[RowOrColumnPageTest.Stretch] = [
+            self.Stretch(
+                after=pax_second,
+                before=pax_second + self.LOAD_DURATION,
+                counted={**self.COUNTED, "pax": self.PAX_SECOND_LINE_ON_ITS_WAY},
+                pages="visible",
+                marks=done,
+            ),
+            self.Stretch(
+                after=pax_first + self.LOAD_DURATION,
+                before=pax_second,
+                counted={**self.COUNTED, "pax": self.PAX_FIRST_LINE_ARRIVED},
+                pages="visible",
+                marks=done._replace(pax="read,none"),
+            ),
+            self.Stretch(
+                after=pax_first,
+                before=pax_first + self.LOAD_DURATION,
+                counted={**self.COUNTED, "pax": self.PAX_FIRST_LINE_ON_ITS_WAY},
+                pages="visible",
+                marks=done._replace(pax="read,none"),
+            ),
+            self.Stretch(
+                after=self.PAGES_FROM["pax"],
+                before=pax_first,
+                counted={**self.COUNTED, "pax": self.NOT_COUNTED},
+                pages="visible",
+                marks=done._replace(pax="none,none"),
+            ),
+            self.Stretch(
+                after=step_from["pax-layout"],
+                before=self.PAGES_FROM["pax"],
+                counted={**self.COUNTED, "pax": self.NOT_COUNTED},
+                pages="visible",
+                marks=done._replace(shown="row,column", pax="none,none"),
+            ),
+            self.Stretch(
+                after=column_line + self.LOAD_DURATION,
+                before=self.SCAN_DONE["column"],
+                counted={**self.COUNTED, "pax": self.NOT_COUNTED},
+                pages="visible",
+                marks=done._replace(
+                    shown="row,column", column="none,none,read", pax="none,none"
+                ),
+            ),
+            self.Stretch(
+                after=row_third,
+                before=row_third + self.LOAD_DURATION,
+                counted={
+                    "row": self.ROW_THIRD_LINE_ON_ITS_WAY,
+                    "column": self.NOT_COUNTED,
+                    "pax": self.NOT_COUNTED,
+                },
+                pages="visible",
+                marks=PageMarks("row", "read,read", "none,none,none", "none,none"),
+            ),
+            self.Stretch(
+                after=step_from["cache-lines"],
+                before=self.PAGES_FROM["row"],
+                counted={layout: self.NOT_COUNTED for layout in self.LAYOUTS},
+                pages="hidden",
+                marks=PageMarks("", "none,none", "none,none,none", "none,none"),
+            ),
+        ]
+        # the first step of the slider at or after the end of the PAX scan:
+        scan_done: int = math.ceil(self.slider_at(self.SCAN_DONE["pax"]))
+        for stretch in stretches:
+            with self.subTest(after=stretch.after, before=stretch.before):
+                # the slider's position halfway between the two events, and its time, at least 0.1 s from each:
+                position: int = round(
+                    self.slider_at((stretch.after + stretch.before) / 2)
+                )
+                seconds: float = position * self.LENGTH / 1000
+                self.assertGreaterEqual(seconds, stretch.after + 0.1)
+                self.assertLessEqual(seconds, stretch.before - 0.1)
+
+                # scrubbed to the end of the PAX scan, the counters show all three scans counted, with their pages,
+                # and every page in memory is marked read or not read:
+                scrub.fill(str(scan_done))
+                self.assertEqual(self.COUNTED, self.counters())
+                shown: RowOrColumnPageTest.ScansShown = self.scans_shown(self.page)
+                self.assertEqual(
+                    {layout: "visible" for layout in self.LAYOUTS}, shown["pages"]
+                )
+                self.assertEqual(done, shown["marks"])
+
+                # scrubbed back, they show what belongs to that time; the pages of PAX's counter follow its row, which
+                # shows only from when PAX's title appears:
+                scrub.fill(str(position))
+                self.assertEqual(stretch.counted, self.counters())
+                shown = self.scans_shown(self.page)
+                self.assertEqual(
+                    {
+                        layout: (
+                            "hidden"
+                            if layout == "pax" and seconds < self.PAX_COUNTER_FROM
+                            else stretch.pages
+                        )
+                        for layout in self.LAYOUTS
+                    },
+                    shown["pages"],
+                )
+                self.assertEqual(stretch.marks, shown["marks"])
+
+                # a page opened at that time shows the same, once it has drawn it:
+                fresh: OpenedPage = self.open_page(
+                    ROW_OR_COLUMN_PAGE, query=f"?t={seconds:.3f}&paused"
+                )
+                expect(fresh.page.get_by_test_id("scrub")).to_have_value(str(position))
+                self.assertEqual(
+                    self.scans_shown(fresh.page), self.scans_shown(self.page)
+                )
+                self.assert_no_errors(fresh)
+                # close the fresh page before the next one opens, not only at the end of the test:
+                fresh.page.context.close()
+        self.assert_no_errors(self.opened)
+
+    def test_a_time_outside_the_film_opens_it_at_its_start_or_its_end(self) -> None:
+        """Opened at a time before the film's start or after its end (``?t=-5&paused``, ``?t=999&paused``), the page
+        opens at its start (0 s) or at its end (83.2 s): the slider at 0 or 1000, the narration at the start or the end.
+
+        Fails if the page does not clamp the time to the film: no caption covers a time outside it, so the page would
+        throw an error while it draws the narration.
+        """
+        for query, slider, stop_type in [
+            ("?t=-5&paused", "0", "start"),
+            ("?t=999&paused", "1000", "end"),
+        ]:
+            with self.subTest(query=query):
+                opened: OpenedPage = self.open_page(ROW_OR_COLUMN_PAGE, query=query)
+                narration = opened.page.get_by_test_id("narration")
+
+                # the page has drawn the start or the end of the film:
+                expect(narration).to_have_attribute("data-stop-type", stop_type)
+                expect(opened.page.get_by_test_id("scrub")).to_have_value(slider)
+                self.assert_no_errors(opened)
+                # close the page before the next one opens, not only at the end of the test:
+                opened.page.context.close()
+
+    def test_the_receipt_lists_row_column_and_pax_and_ends_with_the_footnote(
+        self,
+    ) -> None:
+        """At the end of the verdict step, the receipt shows all its items, from top to bottom: the heads of its
+        input/output and its memory column; the row layout, the column layout and PAX, in the film's order; and the
+        totals of the column layout and of PAX. The footnote says on how many pages one whole book lies in each layout.
+
+        Fails if the items are out of order, if one is not yet printed when the verdict step ends (each comes 0.35 s
+        after the one above it), or if the footnote says something else. The numbers of the items are checked by
+        test_the_receipt_counts_the_real_pages_in_io_and_memory.
+        """
+        receipt = self.page.get_by_test_id("receipt")
+        footnote = self.page.get_by_test_id("footnote")
+
+        # Next stops at the end of the verdict step, where the receipt shows:
+        self.next_to("verdict")
+        expect(receipt).to_have_css("opacity", "1")
+
+        # its items, from top to bottom, are the heads, the three layouts in the film's order and the two totals, and
+        # each is printed:
+        items: list[str] = self.page.get_by_test_id("receipt-lines").evaluate(
+            "list => [...list.children].map((item) => item.dataset.testid)"
+        )
+        self.assertEqual(self.RECEIPT_ITEMS, items)
+        for test_id in self.RECEIPT_ITEMS:
+            expect(self.page.get_by_test_id(test_id)).to_have_css("opacity", "1")
+
+        # the footnote shows below:
+        expect(footnote).to_have_css("opacity", "1")
+        expect(footnote).to_have_text(self.FOOTNOTE)
+        self.assert_no_errors(self.opened)
+
+    def test_the_receipt_counts_the_real_pages_in_io_and_memory(self) -> None:
+        """At the end of the verdict step, the receipt names the table at real size, "512 books · pages of 4 KB", and
+        heads two columns: input/output, the pages the database reads, and memory, the cache lines the processor
+        loads. For each layout it gives both, each with its bytes, e.g. "4 · 16 KB" and "256 · 16 KB" for the row
+        layout. The totals say under the same heads how many times fewer pages and cache lines the column layout and
+        PAX read than the row layout: "4× fewer" and "4× fewer", and for PAX "same" (its pages) and "4× fewer". All
+        numbers are computed here from the sizes of a book, its attributes, a page and a cache line (see
+        expected_real_reads); the real pages step shows the same (see
+        test_the_real_pages_count_what_select_max_price_reads_of_512_books).
+
+        Fails if the receipt counts the eight books of the small example (e.g. PAX with 2 pages and 2 lines), puts
+        input/output and memory in each other's column, counts the bytes of pages or lines wrongly, or if a total
+        compares other layouts or writes a saving of 1× instead of "same".
+        """
+        expected: dict[str, RealReads] = {
+            layout: self.expected_real_reads(layout) for layout in self.LAYOUTS
+        }
+
+        # Next stops at the end of the verdict step, where the receipt shows:
+        self.next_to("verdict")
+        expect(self.page.get_by_test_id("receipt")).to_have_css("opacity", "1")
+
+        # below its head, the size of the table; then the heads of its two columns:
+        expect(self.page.get_by_test_id("receipt-scale")).to_have_text(
+            f"{self.REAL_BOOKS} books · pages of {self.as_bytes(self.REAL_PAGE_BYTES)}"
+        )
+        expect(self.page.get_by_test_id("receipt-heads")).to_have_text(
+            "input/output pages memory cache lines", use_inner_text=True
+        )
+
+        # each layout's line, read as shown: its name, its input/output (the pages read and their bytes) and its memory
+        # traffic (the cache lines read and their bytes):
+        for layout in self.LAYOUTS:
+            with self.subTest(layout=layout):
+                read: RealReads = expected[layout]
+                io: str = (
+                    f"{read.pages} · {self.as_bytes(read.pages * self.REAL_PAGE_BYTES)}"
+                )
+                memory: str = (
+                    f"{read.lines} · {self.as_bytes(read.lines * self.LINE_BYTES)}"
+                )
+                expect(self.page.get_by_test_id(f"receipt-{layout}-io")).to_have_text(
+                    io
+                )
+                expect(
+                    self.page.get_by_test_id(f"receipt-{layout}-memory")
+                ).to_have_text(memory)
+                expect(self.page.get_by_test_id(f"receipt-{layout}")).to_have_text(
+                    f"{self.RECEIPT_NAMES[layout]} {io} {memory}", use_inner_text=True
+                )
+
+        # the totals: how much less the column layout and PAX read than the row layout, under the same two heads:
+        for test_id, layout in [
+            ("receipt-total", "column"),
+            ("receipt-total-pax", "pax"),
+        ]:
+            with self.subTest(total=test_id):
+                pages, lines = self.savings(layout)
+                expect(
+                    self.page.get_by_test_id(f"receipt-{layout}-io-saved")
+                ).to_have_text(pages)
+                expect(
+                    self.page.get_by_test_id(f"receipt-{layout}-memory-saved")
+                ).to_have_text(lines)
+                expect(self.page.get_by_test_id(test_id)).to_have_text(
+                    f"{self.RECEIPT_NAMES[layout]} {pages} {lines}",
+                    use_inner_text=True,
+                )
+        self.assert_no_errors(self.opened)
+
+    def test_on_a_phone_held_sideways_the_receipt_leaves_the_narration_free(
+        self,
+    ) -> None:
+        """On phones held sideways (844 × 390 px and the lower 800 × 360 px), at the end of the verdict step, where the
+        receipt shows in full with the subtitles below it, the receipt's lower edge is at or above the narration's
+        upper edge, and the hint for the sound (shown while the sound is off) gives way to the receipt, which it would
+        cover; on a large screen (1280 × 720 px) the hint stays.
+
+        Fails if the receipt runs into the narration on a low screen, e.g. after a line was added to it or its text
+        was set larger, or if the hint covers the receipt's numbers there, or if it is hidden on a large screen too.
+        """
+        # Next stops at the end of the verdict step, where the receipt and the narration show:
+        self.next_to("verdict")
+        expect(self.page.get_by_test_id("receipt")).to_have_css("opacity", "1")
+        expect(self.page.get_by_test_id("nar-text")).to_be_visible()
+
+        for width, height in [(844, 390), (800, 360)]:
+            with self.subTest(width=width, height=height):
+                self.page.set_viewport_size({"width": width, "height": height})
+                # once the page has laid them out for the window, the receipt ends above the narration:
+                self.page.evaluate(
+                    "() => new Promise((done) => requestAnimationFrame(() => requestAnimationFrame(done)))"
+                )
+                receipt: FloatRect = self.box_of("receipt")
+                narration: FloatRect = self.box_of("narration")
+                self.assertLessEqual(
+                    receipt["y"] + receipt["height"],
+                    narration["y"],
+                    f"the receipt {receipt} runs into the narration {narration}",
+                )
+                expect(self.page.get_by_test_id("sound-hint")).to_be_hidden()
+
+        # on a large screen, the hint for the sound stays beside the receipt:
+        self.page.set_viewport_size({"width": 1280, "height": 720})
+        expect(self.page.get_by_test_id("sound-hint")).to_be_visible()
+        self.assert_no_errors(self.opened)
+
+    def test_the_slider_has_a_segment_per_step_as_long_as_the_step(self) -> None:
+        """The slider is cut into nine segments, ``segment-1`` to ``segment-9``, one per step in the film's order, each
+        as long as its step: its flex-grow is the step's length in seconds, from the step's beginning to the next one's
+        (the last one to the film's end). So each segment begins and ends where the slider's thumb stands at the
+        beginning and the end of its step, give or take the gap between two segments.
+
+        Fails if a step has no segment or one too many, if a segment is as long as another step (e.g. after a step was
+        added to the film but not to the slider), or if the segments do not line up with the thumb (e.g. if they are
+        not set in by half the thumb's width).
+        """
+        segments = self.page.get_by_test_id("segments")
+        ends: list[float] = [*self.STEPS_FROM[1:], self.LENGTH]
+
+        # the page has made the segments when it has set up its controls; one per step, in order:
+        expect(self.page.get_by_test_id("scrub")).to_be_enabled()
+        test_ids: list[str] = segments.evaluate(
+            "box => [...box.children].map((segment) => segment.dataset.testid)"
+        )
+        self.assertEqual(
+            [f"segment-{k}" for k in range(1, len(self.STEP_TYPES) + 1)], test_ids
+        )
+
+        # a segment's edges may lie up to the gap between two segments (and a pixel for rounding) from the thumb:
+        gap: float = segments.evaluate(
+            "box => parseFloat(getComputedStyle(box).columnGap)"
+        )
+        scrub_x: float = self.box_of("scrub")["x"]
+        for k, (start, end) in enumerate(zip(self.STEPS_FROM, ends), 1):
+            with self.subTest(segment=k):
+                # the segment is as long as its step:
+                grow: float = float(
+                    self.page.get_by_test_id(f"segment-{k}").evaluate(
+                        "segment => getComputedStyle(segment).flexGrow"
+                    )
+                )
+                self.assertAlmostEqual(end - start, grow)
+
+                # it begins and ends where the thumb stands at the beginning and the end of its step:
+                box: FloatRect = self.box_of(f"segment-{k}")
+                self.assertAlmostEqual(
+                    scrub_x + self.thumb_at(start), box["x"], delta=gap + 1
+                )
+                self.assertAlmostEqual(
+                    scrub_x + self.thumb_at(end), box["x"] + box["width"], delta=gap + 1
+                )
+        self.assert_no_errors(self.opened)
+
+    def test_hovering_the_slider_names_the_step_under_the_pointer(self) -> None:
+        """Hovering the slider shows a tip above it that names the step under the pointer and the time there in
+        minutes and whole seconds (e.g. "06/09 · PAX layout · 0:55" at 55.5 s), in each of the nine steps; the tip
+        hides when the pointer leaves the slider.
+
+        Each time lies half a second after a whole second, about halfway through its step, so that the pointer's
+        rounding to a pixel cannot change the second shown. Fails if the tip names a neighbouring step or another time
+        (e.g. if it maps the pointer to another time than the slider does), or if it stays after the pointer has left.
+        """
+        scrub = self.page.get_by_test_id("scrub")
+        tip = self.page.get_by_test_id("scrub-tip")
+        ends: list[float] = [*self.STEPS_FROM[1:], self.LENGTH]
+
+        # before the pointer comes, there is no tip; the page reacts to the pointer once it has set up its controls:
+        expect(tip).to_be_hidden()
+        expect(scrub).to_be_enabled()
+        height: float = self.box_of("scrub")["height"]
+
+        # the pointer about the middle of each step: the tip names the step, and the time in minutes and seconds:
+        for name, start, end in zip(self.STEP_NAMES, self.STEPS_FROM, ends):
+            with self.subTest(step=name):
+                seconds: float = math.floor((start + end) / 2) + 0.5
+                minutes, whole = divmod(math.floor(seconds), 60)
+                scrub.hover(position={"x": self.thumb_at(seconds), "y": height / 2})
+                expect(tip).to_be_visible()
+                expect(tip).to_have_text(f"{name} · {minutes}:{whole:02d}")
+
+        # the pointer leaves the slider, and the tip hides:
+        self.page.mouse.move(0, 0)
+        expect(tip).to_be_hidden()
+        self.assert_no_errors(self.opened)
+
+    def test_on_a_phone_the_slider_has_a_line_of_its_own(self) -> None:
+        """On a phone held upright (360 × 780 and 390 × 844 px), the slider stands on a line of its own above the
+        buttons and is at least 250 px wide, so that its nine segments, the shortest of them 3 s of the film's 83.2 s,
+        can still be seen and hit.
+
+        Fails if the slider shares its line with the buttons and the clock, which leave it too little room.
+        """
+        for width, height in self.PHONES:
+            with self.subTest(width=width, height=height):
+                self.page.set_viewport_size({"width": width, "height": height})
+
+                # the slider is wide enough, and the buttons stand below it:
+                scrub: FloatRect = self.box_of("scrub")
+                self.assertGreaterEqual(scrub["width"], self.PHONE_SLIDER_WIDTH)
+                self.assertGreaterEqual(
+                    self.box_of("play")["y"], scrub["y"] + scrub["height"]
+                )
+        self.assert_no_errors(self.opened)
+
+    def test_review_clips_play_one_after_the_other_and_then_pause(self) -> None:
+        """Opened with ``?clips=10-11,20-21``, the page stands at 10 s with the hint "review clip 1/2". Play plays from
+        10 s to 11 s, jumps to 20 s ("review clip 2/2") and plays to 21 s, where the film pauses with the hint "end of
+        review clips · press space to play on"; meanwhile the slider shows no time outside the two clips. Space then
+        plays on past 21 s, and the hint hides.
+
+        Fails if a clip is skipped or played past its end, if the clips play in another order, if the film does not
+        pause after the last clip or pauses without the hint, or if it does not play on after it.
+        """
+        opened: OpenedPage = self.open_page(
+            ROW_OR_COLUMN_PAGE, query="?clips=10-11,20-21"
+        )
+        page: Page = opened.page
+        scrub = page.get_by_test_id("scrub")
+        hint = page.get_by_test_id("clips-hint")
+        play = page.get_by_test_id("play")
+        clips: list[tuple[float, float]] = [(10, 11), (20, 21)]
+
+        # opened, the film stands at the first clip's start, and the hint names the clip:
+        expect(scrub).to_have_value(str(round(self.slider_at(clips[0][0]))))
+        expect(hint).to_have_text("review clip 1/2")
+
+        # every frame from now on notes the slider's position; Play: the second clip follows the first:
+        scrub.evaluate("""(scrub) => {
+                window.positions = [];
+                const note = () => { window.positions.push(Number(scrub.value)); requestAnimationFrame(note); };
+                requestAnimationFrame(note);
+            }""")
+        play.click()
+        expect(hint).to_have_text("review clip 2/2", timeout=FILM_TIMEOUT)
+
+        # after the second clip, the film pauses at its end, with the hint that the clips are over:
+        expect(hint).to_have_text(
+            "end of review clips · press space to play on", timeout=FILM_TIMEOUT
+        )
+        expect(play).to_have_attribute("data-state", "paused")
+        expect(scrub).to_have_value(str(math.floor(self.slider_at(clips[1][1]) + 0.5)))
+
+        # the slider showed no time outside the clips, and the first clip, then the second:
+        positions: list[int] = page.evaluate("window.positions")
+        windows: list[tuple[int, int]] = [
+            (math.floor(self.slider_at(start)), math.ceil(self.slider_at(end)))
+            for start, end in clips
+        ]
+        self.assertEqual(
+            [],
+            [
+                at
+                for at in positions
+                if not any(low <= at <= high for low, high in windows)
+            ],
+            "times outside the clips",
+        )
+        in_first: list[bool] = [at <= windows[0][1] for at in positions]
+        self.assertEqual(sorted(in_first, reverse=True), in_first, positions)
+        self.assertEqual({True, False}, set(in_first), positions)
+
+        # Space plays on past the clips' end, without the hint:
+        page.keyboard.press("Space")
+        expect(play).to_have_attribute("data-state", "playing")
+        expect(hint).to_be_hidden()
+        self.let_film_play_until(page, math.ceil(self.slider_at(clips[1][1])) + 1)
+        self.assert_no_errors(opened)
+
+    def test_a_step_range_plays_from_its_first_step_to_the_end_of_its_last(
+        self,
+    ) -> None:
+        """Opened with ``?step=a-b``, the page stands at the start of step a with the hint "review clip 1/1", and Play
+        plays to the end of step b, where the film pauses with the hint that the review clips are over: ``?step=7-8``
+        opens at the start of step 07 (61.2 s), and ``?step=1-2`` plays to the end of step 02 (13 s).
+
+        The start is checked on a range in the middle of the film, the end on the shortest range that ends neither
+        with its first step nor with the film, so that the test plays only 13 s. Fails if a range starts elsewhere
+        (e.g. at the film's start), ends at the end of its first step or at the film's end, or is not played as a
+        review clip.
+        """
+        # opened with ?step=7-8, the film stands at the start of step 07, in a review clip:
+        opened: OpenedPage = self.open_page(ROW_OR_COLUMN_PAGE, query="?step=7-8")
+        expect(opened.page.get_by_test_id("scrub")).to_have_value(
+            str(round(self.slider_at(self.STEPS_FROM[6])))
+        )
+        expect(opened.page.get_by_test_id("clips-hint")).to_have_text("review clip 1/1")
+        self.assert_no_errors(opened)
+        # close the page before the next one opens, not only at the end of the test:
+        opened.page.context.close()
+
+        # opened with ?step=1-2, it stands at the start of step 01, in a review clip:
+        opened = self.open_page(ROW_OR_COLUMN_PAGE, query="?step=1-2")
+        page: Page = opened.page
+        scrub = page.get_by_test_id("scrub")
+        hint = page.get_by_test_id("clips-hint")
+        expect(scrub).to_have_value("0")
+        expect(hint).to_have_text("review clip 1/1")
+
+        # Space plays it (in a small window, where each drawing is a little cheaper and the Play button may lie
+        # outside the window); the film plays in real time, and a frame advances it by at most 0.1 s (see
+        # FILM_TIMEOUT), so on a slow machine, where a frame may take up to a second, it plays up to ten times slower:
+        ends: float = self.STEPS_FROM[2]
+        timeout: float = FILM_TIMEOUT + 10 * ends * 1000
+        page.set_viewport_size({"width": 320, "height": 180})
+        page.keyboard.press("Space")
+
+        # the film plays to the end of step 02 and pauses there, with the hint that the clips are over:
+        expect(hint).to_have_text(
+            "end of review clips · press space to play on", timeout=timeout
+        )
+        expect(page.get_by_test_id("play")).to_have_attribute("data-state", "paused")
+        expect(scrub).to_have_value(str(math.floor(self.slider_at(ends) + 0.5)))
+        self.assert_no_errors(opened)
+
+    def test_the_name_of_a_step_shows_top_left_as_the_step_begins(self) -> None:
+        """As each of the steps 02 to 08 begins, its number and name show top left (e.g. "Step 05/09" and "Column
+        layout"), from 0.3 s after the step's beginning for 3 s; before and after that, the step title is hidden. In
+        step 01 and step 09, where the terminal stands top left, it never shows. ``data-step`` of ``step-title`` names
+        the step (1 to 9), ``data-shown`` whether the title shows (opacity above 0.5).
+
+        Fails if the title shows over the terminal in the first or the last step, names another step than the one
+        that begins (e.g. the one before it), shows right as the step begins instead of 0.3 s later, or stays on
+        through the step.
+        """
+        scrub = self.page.get_by_test_id("scrub")
+        title = self.page.get_by_test_id("step-title")
+        steps: int = len(self.STEP_TYPES)
+        for step, (begins, name) in enumerate(zip(self.STEPS_FROM, self.STEP_NAMES), 1):
+            with self.subTest(step=name):
+                # before the title fades in, while it shows in full, and after it has faded out (at most at the end of
+                # the film), whether it shows: in the middle only, and only in the steps 02 to 08:
+                middle: float = self.step_title_middle(step)
+                after: float = middle + self.STEP_TITLE_FOR / 2 + self.STEP_TITLE_FADE
+                moments: list[tuple[float, bool]] = [
+                    (begins + self.STEP_TITLE_DELAY / 3, False),
+                    (middle, 1 < step < steps),
+                    (min(after, self.LENGTH), False),
+                ]
+                for seconds, shown in moments:
+                    scrub.fill(str(round(self.slider_at(seconds))))
+                    expect(title).to_have_attribute("data-step", str(step))
+                    expect(title).to_have_attribute("data-shown", str(shown).lower())
+                    expect(title).to_have_css("opacity", "1" if shown else "0")
+
+                # in the steps 02 to 08, it names the step: its number above, its name below:
+                if 1 < step < steps:
+                    number, step_name = name.split(" · ", 1)
+                    expect(self.page.get_by_test_id("step-title-number")).to_have_text(
+                        f"Step {number}"
+                    )
+                    expect(self.page.get_by_test_id("step-title-name")).to_have_text(
+                        step_name
+                    )
+        self.assert_no_errors(self.opened)
+
+    def test_the_header_leaves_the_terminal_free_on_a_phone(self) -> None:
+        """On a phone held upright (360 × 780 and 390 × 844 px), where the three counters stand below the step's name,
+        the terminal begins below them: at the start, where it types the query, and in the result step at the end,
+        where it prints the result.
+
+        Fails if the terminal stays at its least distance from the top (96 px on a phone) while the header reaches
+        further down, i.e. if the page no longer moves its cards below the header.
+        """
+        scrub = self.page.get_by_test_id("scrub")
+        terminal = self.page.get_by_test_id("terminal")
+        for width, height in self.PHONES:
+            with self.subTest(width=width, height=height):
+                self.page.set_viewport_size({"width": width, "height": height})
+
+                # at the start, the terminal shows below the header:
+                scrub.fill("0")
+                expect(terminal).to_have_css("opacity", "1")
+                self.assert_below_the_header("terminal")
+
+                # at the end, in the result step, as well:
+                scrub.fill("1000")
+                expect(self.page.get_by_test_id("play")).to_have_attribute(
+                    "data-state", "ended"
+                )
+                expect(terminal).to_have_css("opacity", "1")
+                self.assert_below_the_header("terminal")
+        self.assert_no_errors(self.opened)
+
+    def test_the_header_leaves_the_step_title_free_on_a_phone(self) -> None:
+        """On a phone held upright (360 × 780 and 390 × 844 px), where the three counters stand below the step's name,
+        the step's name top left begins below them, in each of the steps 02 to 08 where it shows (the header is
+        taller where the step's name in it wraps).
+
+        Fails if the step title stays at its least distance from the top (76 px) while the header reaches further
+        down, i.e. if the page does not move it below the header.
+        """
+        scrub = self.page.get_by_test_id("scrub")
+        title = self.page.get_by_test_id("step-title")
+        for width, height in self.PHONES:
+            self.page.set_viewport_size({"width": width, "height": height})
+            for step in range(2, len(self.STEP_TYPES)):
+                with self.subTest(width=width, height=height, step=step):
+                    # while the step's name shows in full, it stands below the header:
+                    scrub.fill(str(round(self.slider_at(self.step_title_middle(step)))))
+                    expect(title).to_have_css("opacity", "1")
+                    self.assert_below_the_header("step-title")
         self.assert_no_errors(self.opened)
 
 

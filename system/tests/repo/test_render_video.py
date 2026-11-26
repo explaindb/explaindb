@@ -100,14 +100,11 @@ BROWSER_OPTIONS = tool.BrowserOptions(
     sandbox=False,
 )
 
-# the times (s) at which the segments of the row-or-column page's captions begin: the first segment of each step, and
-# the second one of the row-layout and of the column-layout step:
+# the times (s) at which the segments of the row-or-column page's captions begin: the first segment of each of its 9
+# steps, and the second one of the 5 steps whose caption is said in two segments (14 in all):
 SEGMENT_TIMES: list[float] = sorted(
     page_tests.RowOrColumnPageTest.FIRST_SEGMENTS
-    + [
-        page_tests.RowOrColumnPageTest.ROW_LAYOUT_SECOND_SEGMENT,
-        page_tests.RowOrColumnPageTest.COLUMN_LAYOUT_SECOND_SEGMENT,
-    ]
+    + list(page_tests.RowOrColumnPageTest.SECOND_SEGMENTS.values())
 )
 # the page starts the clip of a segment on a frame shortly after the segment's time, e.g. at 31/60 = 0.517 s for
 # 0.5 s, and stops the last one on a frame shortly after the film's end:
@@ -318,10 +315,14 @@ class SegmentsFromLogTest(unittest.TestCase):
 class CheckRecordingTest(unittest.TestCase):
     """Checks when ``check_recording`` accepts a recording, and the reason it gives when it does not."""
 
-    # the most frames the 52 s film of the row-or-column page may take, with the margin and frame 0, as ``record``
-    # counts them:
+    # the most frames the 83.2 s film of the row-or-column page may take, as ``record`` counts them: the whole
+    # seconds its clock shows (1:23), the margin, and frame 0:
     LIMIT: int = (
-        round((page_tests.RowOrColumnPageTest.LENGTH + tool.FILM_MARGIN) * tool.FPS) + 1
+        round(
+            (math.floor(page_tests.RowOrColumnPageTest.LENGTH) + tool.FILM_MARGIN)
+            * tool.FPS
+        )
+        + 1
     )
 
     def test_a_complete_recording_passes(self) -> None:
@@ -946,7 +947,7 @@ class RecordTest(unittest.TestCase):
         )
 
     def test_a_clip_starts_where_each_segment_of_a_caption_begins(self) -> None:
-        """Exactly one clip starts at each of the 9 segments' times, or up to two frames later, from its beginning."""
+        """Exactly one clip starts at each of the 14 segments' times, or up to two frames later, from its beginning."""
         starts: list[float] = sorted(segment.start for segment in self.segments)
         self.assertEqual(len(SEGMENT_TIMES), len(starts), starts)
 
@@ -971,7 +972,7 @@ class RecordTest(unittest.TestCase):
         self.assertGreater(last.rate, 1)
         self.assertLessEqual(last.rate, page_tests.RowOrColumnPageTest.MAX_RATE)
 
-        # the film is 52 s long; the recording ends on the frame after it has ended:
+        # the film is 83.2 s long; the recording ends on the frame after it has ended:
         self.assertAlmostEqual(
             page_tests.RowOrColumnPageTest.LENGTH, last.end, delta=TWO_FRAMES
         )
@@ -1650,15 +1651,20 @@ class OpenedPageTest(unittest.TestCase):  # pylint: disable=too-many-public-meth
         self.assertEqual([], errors)
 
     def test_open_page_allows_the_film_its_length_and_a_margin(self) -> None:
-        """``open_page`` returns the most steps the film may take: the 52 s its clock shows plus ``FILM_MARGIN``."""
+        """``open_page`` returns the most steps the film may take: the length its clock shows, in whole seconds (1:23
+        for the 83.2 s of the film), plus ``FILM_MARGIN``, which leaves room for the part of a second the clock does not
+        show."""
         errors: list[str] = []
         _, most = self.open_row_or_column_page(errors)
         self.assertEqual(
             round(
-                (page_tests.RowOrColumnPageTest.LENGTH + tool.FILM_MARGIN) * tool.FPS
+                (math.floor(page_tests.RowOrColumnPageTest.LENGTH) + tool.FILM_MARGIN)
+                * tool.FPS
             ),
             most,
         )
+        # the margin covers the film's whole length:
+        self.assertGreater(most / tool.FPS, page_tests.RowOrColumnPageTest.LENGTH)
         self.assertEqual([], errors)
 
     def test_the_video_shows_the_subtitles_but_not_the_controls(self) -> None:

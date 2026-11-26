@@ -404,7 +404,7 @@ clip of its own (on the row/column page); these are not the segments of the slid
   script writes into the page only values that have changed, so that it does not redraw everything
   60 times a second for nothing.
 - **Layout:** the picture fills the window. The header names the page and the current step (e.g.
-  `01/07 · The query` on the row/column page, `row-or-column.html`). Along the bottom edge run the
+  `01/09 · The query` on the row/column page, `row-or-column.html`). Along the bottom edge run the
   narration and, below it, the controls.
 - **The name ExplainDB:** the header begins with `ExplainDB ·`, in the header's own style (e.g.
   `ExplainDB · The House DBMS · lecture 03, slide 10 · 01/13 · Slide 10 becomes a house`), and the
@@ -510,7 +510,11 @@ clip of its own (on the row/column page); these are not the segments of the slid
 - **URL parameters:** `t=<seconds>` starts at that time, `paused` keeps the page from starting on its
   own, and, if the film has parts, `q=<n>` starts at part n; e.g. `?q=3&paused`. The page reads `t` as
   a number and keeps it within the length of the film, accepts `q` only if it names one of the parts
-  (and then ignores `t`), and never writes a parameter into the page.
+  (and then ignores `t`), and never writes a parameter into the page. Optional, for reviews (the
+  row/column, B-tree, storage hierarchy and external sorting pages have them): `clips=A-B,C-D` plays
+  only these passages (seconds) one after another and pauses after the last with a hint
+  (`clips-hint`); `step=a-b` is one such passage from step a to the end of step b, and `step=a` starts
+  at step a and plays on. Both win over `t` and `q`.
 - **Test ids:** every control, and every element that shows a value (e.g. the clock or a counter),
   has a `data-testid`; those in the table above are needed on every page. The script also writes state
   for tests into `data-*` attributes, e.g. `data-scene` (the number of the step, `1` … `13` on the
@@ -545,7 +549,9 @@ These differences may be removed later.
 - The row/column page: its card, the receipt, shows in the second-to-last step, and the film ends on
   the terminal's result; Space clicks a focused button such as Next; the narration also marks words in
   red (written `~word~` in its script); and with reduced motion it also leaves out a slight sway of
-  the camera.
+  the camera. Its slider is cut into one segment per step (it has no parts and no part buttons), and
+  the tip over the slider names the step and the time; the name of each step shows top left for a few
+  seconds as the step begins (`step-title`).
 - The row/column page prepares all its programs and textures in one frame after the first picture.
 - All three older pages set no `data-scene` (the elasticity page sets `data-minute` on the picture
   instead; the validation page has nothing in its place), and they write some values into the page on

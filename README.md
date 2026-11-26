@@ -76,17 +76,6 @@ Elasticity: one day of a teaching platform with the tiers App (scales out) and D
 hosting, IaaS, PaaS (also with scheduled scaling by a timetable) or SaaS; shows bottlenecks, scale-up and scale-out, and
 whether the capacity follows the demand.
 
-### [row-or-column](https://htmlpreview.github.io/?https://github.com/explaindb/explaindb/blob/main/visualizations/row-or-column.html)
-
-[<img src="docs/images/visualizations/row-or-column.jpg" width="480" alt="Row layout in 3D: four cache lines loaded, three quarters of their bytes unused">](https://htmlpreview.github.io/?https://github.com/explaindb/explaindb/blob/main/visualizations/row-or-column.html)
-
-Row vs. column layout in main memory: eight books stored row by row and column by column; memory is read linearly, one
-64-byte cache line at a time, so `SELECT MAX(price)` loads 4 cache lines of the row layout but only 1 of the column
-layout (in 3D, with three.js; a synthetic voice speaks the narration once the sound is switched on).
-
-Notebook: [Data-Layout](notebooks/Data-Layout.ipynb)
-[![Open Data-Layout on Binder](https://mybinder.org/badge_logo.svg)](https://mybinder.org/v2/gh/explaindb/explaindb/main?urlpath=lab/tree/notebooks/Data-Layout.ipynb)
-
 ### [call-through-dbms](https://htmlpreview.github.io/?https://github.com/explaindb/explaindb/blob/main/visualizations/call-through-dbms.html)
 
 [<img src="docs/images/visualizations/call-through-dbms.jpg" width="480" alt="The DBMS as a factory building in cross-section, with the store floor and its robots">](https://htmlpreview.github.io/?https://github.com/explaindb/explaindb/blob/main/visualizations/call-through-dbms.html)
@@ -169,6 +158,22 @@ Notebook: [External-Merge-Sort](notebooks/External-Merge-Sort.ipynb)
 
 Notebook: [Replacement-Selection-Playground](notebooks/Replacement-Selection-Playground.ipynb)
 [![Open Replacement-Selection-Playground on Binder](https://mybinder.org/badge_logo.svg)](https://mybinder.org/v2/gh/explaindb/explaindb/main?urlpath=lab/tree/notebooks/Replacement-Selection-Playground.ipynb)
+
+### [row-or-column](https://htmlpreview.github.io/?https://github.com/explaindb/explaindb/blob/main/visualizations/row-or-column.html)
+
+[<img src="docs/images/visualizations/row-or-column.jpg" width="480" alt="Row layout in 3D: four cache lines loaded, three quarters of their bytes unused">](https://htmlpreview.github.io/?https://github.com/explaindb/explaindb/blob/main/visualizations/row-or-column.html)
+
+Row vs. column layout in main memory, and PAX (Partition Attributes Across): eight books stored row by row, column by
+column, and in PAX, which keeps the row layout's pages of 128 bytes but groups each page by column inside. The database
+reads whole pages, the processor (CPU) loads memory one 64-byte cache line at a time, so `SELECT MAX(price)` reads 2
+pages and 4 cache lines of the row layout, 1 page and 1 cache line of the column layout, and 2 pages and 2 cache lines
+of PAX. Pages of 4 KB (4,096 bytes) with 512 books show the same at real size: PAX loads as few cache lines as the
+column layout (64), but reads every page, like the row layout (4 pages, where the column layout reads 1). The receipt at
+the end counts both: I/O (input/output: the pages read) and memory traffic (the cache lines loaded). In 3D, with
+three.js; a synthetic voice speaks the narration once the sound is switched on.
+
+Notebook: [Data-Layout](notebooks/Data-Layout.ipynb)
+[![Open Data-Layout on Binder](https://mybinder.org/badge_logo.svg)](https://mybinder.org/v2/gh/explaindb/explaindb/main?urlpath=lab/tree/notebooks/Data-Layout.ipynb)
 
 ## Notebooks
 
