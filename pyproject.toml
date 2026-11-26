@@ -27,15 +27,25 @@ dependencies = [
     "pyyaml==6.0.3",
 ]
 
-# Packages that only the browser test of the pages in visualizations/
-# (system/tests/repo/test_visualizations.py) and tools/render_video.py with its
-# tests need (CI jobs `visualization_test` and `render_video_test`). The group
-# is not a default group, so `uv sync` does not install it, and the export for
-# Binder (.binder/requirements.txt) leaves it out; the dependency audit covers
-# it (see .gitlab-ci.yml).
+# Packages that only some CI jobs (and the same commands run locally) need. The
+# groups are not default groups, so `uv sync` does not install them, and the
+# export for Binder (.binder/requirements.txt) leaves them out; the dependency
+# audit covers them (see .gitlab-ci.yml).
 [dependency-groups]
+# The browser test of the pages in visualizations/
+# (system/tests/repo/test_visualizations.py) and tools/render_video.py with its
+# tests (CI jobs `visualization_test` and `render_video_test`). The type check
+# (CI job `type_check`) installs it, too, so that pyright can resolve the
+# imports of Playwright in system/tests/repo/.
 browser-tests = [
     "playwright==1.64.1",
+]
+# The type check of system/ with pyright (CI job `type_check`, configured in
+# [tool.pyright] below; see CONTRIBUTING.md, section Type check). The extra
+# `nodejs` brings Node.js, which pyright runs on, as the locked package
+# nodejs-wheel-binaries; raise it together with pyright.
+type-check = [
+    "pyright[nodejs]==1.1.414",
 ]
 
 [tool.uv]
@@ -61,3 +71,17 @@ package = false
 pylint = [
     "--disable=wrong-import-position,wrong-import-order,ungrouped-imports,multiple-imports,reimported,redefined-outer-name,missing-module-docstring,missing-class-docstring,missing-function-docstring,pointless-statement,invalid-name,wildcard-import,unused-wildcard-import,duplicate-code",
 ]
+
+# Configuration of pyright (https://microsoft.github.io/pyright), the static type
+# checker that the CI job `type_check` runs over system/; any error fails the
+# job (see CONTRIBUTING.md, section Type check, and docs/changes/053-pyright-ci).
+# system/tests/repo/test_type_check.py checks that these settings still make
+# pyright check system/ and that there are no others, as other settings could
+# take files out of the check or hide errors.
+[tool.pyright]
+include = ["system"]
+# pyright's default mode, in which system/ was brought to 0 errors; stated so
+# that a new pyright version cannot change it unnoticed:
+typeCheckingMode = "standard"
+# the platform of the CI runners, so that a run on macOS gives the job's result:
+pythonPlatform = "Linux"

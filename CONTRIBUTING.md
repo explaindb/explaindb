@@ -6,6 +6,37 @@ All Python code is formatted with [black](https://black.readthedocs.io) using it
 default settings. The CI pipeline runs `black --check .` and rejects unformatted
 code, so run `black .` before every push.
 
+## Type check
+
+The CI job `type_check` checks the type hints in `system/` with [pyright](https://microsoft.github.io/pyright) and
+fails on any error that pyright reports; warnings do not fail it. Run the same check from the repository root before
+every push:
+
+```sh
+uv run --locked --isolated --all-groups pyright --project pyproject.toml --stats
+```
+
+`--locked` stops with an error if `uv.lock` is out of date with `pyproject.toml` (then run `uv lock`). `--isolated`
+runs pyright in a fresh environment built from `uv.lock`, as in CI, and leaves your `.venv` as it is.
+`--all-groups` installs every dependency group: pyright comes from the group `type-check`, and pyright needs
+Playwright from `browser-tests` to follow the imports in `system/tests/repo/`. The options after `pyright` belong to
+pyright: `--project pyproject.toml` makes it read its settings only from the section `[tool.pyright]` of that file
+(the folder `system/`, the mode `standard` and the platform of the CI runners, Linux), and `--stats` also prints the
+versions and the number of files checked. `system/tests/repo/test_type_check.py` checks that the job runs exactly
+this command.
+
+Fix an error in the code or in its type hints. Only if pyright is wrong, suppress the error, preferably with a
+comment `# pyright: ignore[<rule>]` at the end of its line, naming the rule from the error message, e.g.
+`# pyright: ignore[reportArgumentType]`. Use `# type: ignore[...]` only where black would split the line so that a
+`# pyright: ignore` comment no longer sits on the line that pyright reports (as in
+`system/query_optimization/problems.py`): pyright then hides every error on that line, whatever the brackets name.
+
+pyright is pinned in `pyproject.toml`. Raise it at least once per semester, together with Node.js, which it runs on
+(the package `nodejs-wheel-binaries`, locked in `uv.lock` only): raise the pin, run
+`uv lock --upgrade-package nodejs-wheel-binaries`, and fix the errors the new version reports in the same merge
+request. The dependency audit does not see the security fixes of Node.js itself, so raising it is the only way to
+get them.
+
 ## Tests
 
 The unit tests live in `system/tests/`, whose folders mirror the packages of `system/`: the tests of
@@ -37,7 +68,8 @@ package already pulls it in: otherwise the import breaks as soon as that package
 The dependency group `browser-tests` in `pyproject.toml` holds what only the browser test of the
 pages in `visualizations/` and the tool that turns them into videos need (see
 [Visualizations](#visualizations)). `uv sync` does not install it, and the export above leaves it
-out, so it does not reach Binder; the dependency audit below covers it.
+out, so it does not reach Binder; the dependency audit below covers it. The same holds for the group
+`type-check`, which holds pyright for the [type check](#type-check); the type check installs both groups.
 
 ### Security audit
 

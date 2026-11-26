@@ -61,6 +61,7 @@ stages:
 # logo. Neither
 # does generated/rust/README.md: rust_test runs its code example as a test.
 # Nor does .claude/commands/regenerate-rust.md: a unit test checks the options it names.
+# Nor does CONTRIBUTING.md: a unit test checks its command of the type check.
 detect-docs-only:
   stage: prepare
   extends: .not_in_scheduled_pipelines
@@ -79,10 +80,11 @@ detect-docs-only:
         printf '%s\n' "$CHANGED"
         # docs-only: at least one change, no changed file is a non-.md file, and
         # none of README.md (its notebook table, section Visualizations and logo are tested),
-        # generated/rust/README.md (its code example is tested) and
-        # .claude/commands/regenerate-rust.md (its options are tested) is among them
+        # generated/rust/README.md (its code example is tested),
+        # .claude/commands/regenerate-rust.md (its options are tested) and
+        # CONTRIBUTING.md (its command of the type check is tested) is among them
         if [ -n "$CHANGED" ] && ! printf '%s\n' "$CHANGED" | grep -qvE '\.md$' \
-            && ! printf '%s\n' "$CHANGED" | grep -qxE 'README\.md|generated/rust/README\.md|\.claude/commands/regenerate-rust\.md'; then
+            && ! printf '%s\n' "$CHANGED" | grep -qxE 'README\.md|generated/rust/README\.md|\.claude/commands/regenerate-rust\.md|CONTRIBUTING\.md'; then
           DOCS_ONLY=true
         fi
       fi
@@ -105,6 +107,34 @@ formatting:
     - uv sync --frozen
     # Use black to verify the correct formatting of all files
     - uv run black --check .
+  interruptible: true
+
+# Static type check of system/ with pyright (see docs/changes/053-pyright-ci):
+# fails on any error that pyright reports for the files and in the mode set in
+# [tool.pyright] in pyproject.toml; warnings do not fail the job. The command is
+# the one that CONTRIBUTING.md (section Type check) gives developers, so a local
+# run gives the job's result; system/tests/repo/test_type_check.py checks that
+# the two are equal. --isolated runs pyright in a fresh environment built from
+# uv.lock; --all-groups installs every dependency group: pyright from
+# type-check, and Playwright from browser-tests, whose imports in
+# system/tests/repo/ pyright must resolve. --project pyproject.toml makes
+# pyright read only that file's settings, and --stats logs the versions and the
+# number of files checked. Unlike the jobs that install the environment with
+# --frozen, the command uses --locked, so an out-of-date uv.lock fails this job
+# as well as binder_requirements.
+type_check:
+  stage: test
+  extends: .not_in_scheduled_pipelines
+  tags:
+    - test
+  variables:
+    # Skip pyright's query to PyPI for a newer version (pyright is pinned in
+    # pyproject.toml), which only prints a warning.
+    PYRIGHT_PYTHON_IGNORE_WARNINGS: "1"
+  script:
+    # Skip when the merge request only changes Markdown (see detect-docs-only).
+    - if [ "$DOCS_ONLY" = "true" ]; then echo "Only Markdown changed; skipping."; exit 0; fi
+    - uv run --locked --isolated --all-groups pyright --project pyproject.toml --stats
   interruptible: true
 
 # mybinder.org cannot read uv.lock, so .binder/requirements.txt is an export of
@@ -174,8 +204,8 @@ dependency_audit:
     - uv --version
     # The export flags of binder_requirements and CONTRIBUTING.md, except that
     # --all-groups replaces --no-dev: the audit also covers the packages of the
-    # dependency groups that Binder does not get (browser-tests, see
-    # pyproject.toml). --frozen audits exactly what uv.lock pins (a uv.lock out
+    # dependency groups that Binder does not get (browser-tests and type-check,
+    # see pyproject.toml). --frozen audits exactly what uv.lock pins (a uv.lock out
     # of date with pyproject.toml is caught by binder_requirements).
     - uv export --frozen --all-groups --no-hashes --no-header --no-annotate --format requirements.txt -o /tmp/audit-requirements.txt
     # pip-audit is pinned so a new release cannot change the result without

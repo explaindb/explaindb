@@ -14,14 +14,16 @@ per 0-fill word; see the regression test `test_iterating_sparse_wah_does_not_ove
 
 ## CI / tooling debt
 
-- **No static type check in CI.** No type checker (e.g. pyright or mypy) runs in the pipeline, and none is listed
-  in `pyproject.toml` or `CONTRIBUTING.md`. Type hints that contradict the code therefore go unnoticed, e.g. a
-  method annotated to return a tuple that returns `None`. Before a type check can become a CI job for `system/`,
-  the errors it reports today have to be fixed or recorded as a baseline.
+- **Node.js of the type check lags behind its security releases.** pyright runs on Node.js from the package
+  `nodejs-wheel-binaries`, locked at 24.19.0, the newest build on PyPI on 2026-11-25; Node 24.22.1 (2026-10-20) and
+  24.22.3 (2026-11-10) fix security issues. pyright uses none of the affected parts (TLS, DNS, HTTP, Brotli), and
+  `dependency_audit` cannot report them, as it knows only advisories for PyPI packages. Once PyPI has a build with
+  Node 24.22.3 or newer, run `uv lock --upgrade-package nodejs-wheel-binaries` (see `CONTRIBUTING.md`, section Type
+  check).
 
-The two earlier items were resolved by the migration to uv: black is pinned via `pyproject.toml` / `uv.lock` and
-run with `uv run black`, and the pipenv caching limitation no longer applies because uv installs into the project's
-own `.venv/`.
+Resolved earlier: the static type check is now the CI job `type_check` (see `CONTRIBUTING.md`, section Type
+check); with the migration to uv, black is pinned via `pyproject.toml` / `uv.lock` and run with `uv run black`, and
+the pipenv caching limitation no longer applies because uv installs into the project's own `.venv/`.
 
 ## Follow-ups waiting for other changes
 

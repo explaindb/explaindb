@@ -154,8 +154,8 @@ def distributions_of(module: str, installed: Mapping[str, list[str]]) -> set[str
     """Return the normalised names of the distributions that provide a module.
 
     A module that is not installed (e.g. Playwright, which only the CI jobs of
-    the browser tests install) is assumed to come from the distribution of the
-    same name.
+    the browser tests and of the type check install) is assumed to come from
+    the distribution of the same name.
 
     @param module: a top-level module name, e.g. ``yaml``.
     @param installed: a map from top-level module to distribution names, as

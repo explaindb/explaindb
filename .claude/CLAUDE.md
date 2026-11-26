@@ -73,3 +73,9 @@ ports a new part.
 All Python code is formatted with [black](https://black.readthedocs.io) (default
 settings). CI runs `black --check .` and rejects unformatted code, so run
 `black .` before every push.
+
+## Type check
+
+CI runs pyright over `system/` (job `type_check`) and rejects any error, so run
+the command of [`CONTRIBUTING.md`](../CONTRIBUTING.md), section Type check,
+before every push.
