@@ -49,9 +49,8 @@ class IndexedTransactionalKeyValueStore(TransactionalKeyValueStore, IndexedACIDS
     version visible to the transaction (snapshot read) and checks it against the where clause. The index names the
     candidates, the snapshot decides. Any other read scans all objects. Both return the same objects.
 
-    This relies on two assumptions: attribute values hash consistently with ``==`` (as Python's built-in types do),
-    and callers do not change the objects a read returns (reads return the stored versions, not copies), as the index
-    would then still list the old value.
+    This relies on attribute values that hash consistently with ``==`` (as Python's built-in types do). A caller that
+    changes an object a read returns cannot make an index outdated: reads return deep copies, not the stored versions.
 
     At most one index per attribute and operator; only equality indexes are supported.
     """

@@ -74,3 +74,7 @@ object without the attribute (the where clause cannot be checked), or for an obj
 of order after a non-transactional `put` and `delete` (both use the start timestamp 0; a separate fix follows). A
 read through the index never looks at such objects. If an index is dropped while a transaction runs, its re-read in
 validation method 1 goes through the scan and can then raise inside `commit_transaction`.
+
+**Note 2026-11-26:** The assumption under *Consequences* that callers do not change returned objects in place no
+longer applies: `get` and `read_objects` now return deep copies of the stored versions, so changing a returned object
+changes neither the store nor its indexes.

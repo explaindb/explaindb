@@ -114,6 +114,9 @@ pub trait VersionedStore {
 
     /// Returns the value of the most recent committed version of the object `object_id`.
     ///
+    /// The caller gets a shared reference, so for plain value types such as numbers, strings and structs made of
+    /// them, it cannot change the value in the store (Python returns a deep copy instead).
+    ///
     /// Python's `get` returns an iterator and raises its errors only when the iterator is used; this method returns
     /// the value directly. It takes the store as `&mut self`, as the `get` of the MVCC store with autocommit runs a
     /// transaction of its own (see [`crate::TransactionalStore`]).

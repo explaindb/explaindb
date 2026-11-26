@@ -140,9 +140,10 @@ class VersionedKeyValueStore(KeyValueStore[str, object]):
     ) -> Iterator[object]:
         """See :meth:`PointQueryMixIn.get`.
 
-        Yields only the value of the most recent committed version. Raises KeyError, when the returned iterator is
-        advanced, not at the call, if the object_id is not present, or if it has no committed value: its most recent
-        committed version is a delete marker, or it has no committed version at all, as an insert of a transaction of
+        Yields only a deep copy of the value of the most recent committed version (like put, which stores a deep copy),
+        so a caller that changes it does not change the store. Raises KeyError, when the returned iterator is advanced,
+        not at the call, if the object_id is not present, or if it has no committed value: its most recent committed
+        version is a delete marker, or it has no committed version at all, as an insert of a transaction of
         :class:`~system.stores.MVCC.TransactionalKeyValueStore` leaves it before the transaction commits or after it
         aborts.
         """
@@ -161,7 +162,9 @@ class VersionedKeyValueStore(KeyValueStore[str, object]):
         # a delete marker or no committed version at all: the object has no value to yield:
         if not isinstance(newest, VersionedKeyValueStore.UpdateEntry):
             raise KeyError(f"object {object_id} has no committed value in the store")
-        yield newest.value
+
+        # a deep copy, so that a caller that changes it does not change the committed version:
+        yield copy.deepcopy(newest.value)
 
     # the parameters are named object_id (as in the transactional operations of the store) and _object (which
     # must be None), not key and value as in Index:

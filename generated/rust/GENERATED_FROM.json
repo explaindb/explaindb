@@ -11,7 +11,7 @@
       "path": "Cargo.toml"
     },
     {
-      "sha256": "sha256:21bdfcb69aa549ca",
+      "sha256": "sha256:b798f033b923cedd",
       "sources": [],
       "path": "README.md"
     },
@@ -38,11 +38,11 @@
       "sha256": "sha256:eecb9e77ecfa5a7c",
       "sources": [
         {
-          "sha256": "sha256:3c99037c9b2177b0",
+          "sha256": "sha256:ef1269ff84536383",
           "path": "system/stores/VersionedKeyValueStore.py"
         },
         {
-          "sha256": "sha256:f7b24700f80d717b",
+          "sha256": "sha256:07bae04f63efd82b",
           "path": "system/stores/MVCC.py"
         },
         {
@@ -100,7 +100,7 @@
       "sha256": "sha256:036c7498f9b53690",
       "sources": [
         {
-          "sha256": "sha256:f7b24700f80d717b",
+          "sha256": "sha256:07bae04f63efd82b",
           "path": "system/stores/MVCC.py"
         },
         {
@@ -108,17 +108,17 @@
           "path": "system/interfaces/stores.py"
         },
         {
-          "sha256": "sha256:3c99037c9b2177b0",
+          "sha256": "sha256:ef1269ff84536383",
           "path": "system/stores/VersionedKeyValueStore.py"
         }
       ],
       "path": "src/stores/mvcc.rs"
     },
     {
-      "sha256": "sha256:153556dc298156b9",
+      "sha256": "sha256:9c9dc64089e2840d",
       "sources": [
         {
-          "sha256": "sha256:3c99037c9b2177b0",
+          "sha256": "sha256:ef1269ff84536383",
           "path": "system/stores/VersionedKeyValueStore.py"
         },
         {
@@ -185,7 +185,7 @@
       "sha256": "sha256:60c88681d9077afa",
       "sources": [
         {
-          "sha256": "sha256:f7b24700f80d717b",
+          "sha256": "sha256:07bae04f63efd82b",
           "path": "system/stores/MVCC.py"
         },
         {

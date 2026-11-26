@@ -370,9 +370,10 @@ class TransactionalKeyValueStore(VersionedKeyValueStore, ACIDStore):
         where: Clause | None = None,
         collect_read_clause: bool = True,
     ) -> list[tuple[str, object]]:
-        """Returns a list with all objects that match the WHERE_clause. If the store uses brute force validation, a
-        checksum is also computed over the objects matching the WHERE_clause in the committed snapshot of TA <TA_id>,
-        i.e. without TA <TA_id>'s own work-in-progress changes.
+        """Returns a list with all objects that match the WHERE_clause, as deep copies, so a caller that changes one
+        changes neither the store nor its indexes. If the store uses brute force validation, a checksum is also
+        computed over the objects matching the WHERE_clause in the committed snapshot of TA <TA_id>, i.e. without
+        TA <TA_id>'s own work-in-progress changes.
 
         Unless collect_read_clause is False, the where clause (and checksum) are added to the read set of TA <TA_id>.
 
@@ -383,7 +384,7 @@ class TransactionalKeyValueStore(VersionedKeyValueStore, ACIDStore):
         @param collect_read_clause: if set to True (the default), the where clause is added to the read set of
         TA <TA_id>; False reads without adding it
 
-        @return: a list of (object id, object) pairs that match the given conditions
+        @return: a list of (object id, object) pairs that match the given conditions, with deep copies of the objects
         """
 
         # without a transaction id, read in a transaction of its own (only with autocommit):
@@ -415,7 +416,9 @@ class TransactionalKeyValueStore(VersionedKeyValueStore, ACIDStore):
                 HashableDict({"where_clause": where, "checksum": checksum})
             )
 
-        return ret
+        # only the caller gets deep copies; the checksum above and the validation at the commit work on the stored
+        # versions, as the repr and == of an object that defines neither __repr__ nor __eq__ depend on its identity:
+        return [(object_id, copy.deepcopy(_object)) for object_id, _object in ret]
 
     def _committed_after_begin(self, object_id: str, TA_id: int) -> bool:
         """Returns True if another transaction committed a version of object <object_id> after TA <TA_id> began.
@@ -1137,10 +1140,11 @@ class TransactionalKeyValueStore(VersionedKeyValueStore, ACIDStore):
     def get(self, object_id: str) -> Iterator[object]:
         """See :meth:`VersionedKeyValueStore.get`.
 
-        Reads at the call, not when the returned iterator is advanced, and raises at the call. Without autocommit,
-        only allowed before the first transaction begins (it then reads as the base class does, KeyError if the object
-        does not exist); raises RuntimeError afterwards. With autocommit, reads the newest committed version in a
-        transaction of its own; raises KeyError if the object does not exist or is deleted.
+        Reads at the call, not when the returned iterator is advanced, and raises at the call. Returns a deep copy of
+        the object, as the base class does. Without autocommit, only allowed before the first transaction begins (it
+        then reads as the base class does, KeyError if the object does not exist); raises RuntimeError afterwards. With
+        autocommit, reads the newest committed version in a transaction of its own; raises KeyError if the object does
+        not exist or is deleted.
         """
         if self._check_load_phase("get"):
             # read now, so that the iterator returns the initial state even if it is advanced after transactions ran:
@@ -1148,7 +1152,8 @@ class TransactionalKeyValueStore(VersionedKeyValueStore, ACIDStore):
         _object: object = self._run_as_own_transaction(
             lambda TA_id: self._visible_version(object_id, TA_id)
         )
-        return iter([_object])
+        # a deep copy, as the base class returns, so that a caller that changes it does not change the store:
+        return iter([copy.deepcopy(_object)])
 
     def delete(self, object_id: str, _object: object = None) -> None:
         """See :meth:`VersionedKeyValueStore.delete`.

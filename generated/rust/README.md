@@ -185,7 +185,7 @@ includes the test files of that folder and the shared `tests/common/mod.rs`.
 | `raise KeyError(...)` | returns `Err(StoreError::...)` | errors are values in Rust |
 | `assert ...` | `assert!(...)`, the program stops (panics) | both mark programming errors |
 | `put` copies the value (`deepcopy`) | `put` takes ownership of the value | for plain value types such as numbers, strings and structs made of them, nobody else can change it afterwards, so no copy is needed |
-| `get` returns an iterator over one value | `get` returns a reference to the value | there is only one value |
+| `get` returns an iterator over a deep copy of the value | `get` returns a shared reference to the value | there is only one value; for plain value types, the caller cannot change the stored value through a shared reference, so no copy is needed |
 | attributes of `TransactionalKeyValueStore` (`TA_id`, `TD`, `journal`, ...) | fields of `MvccState` (`ta_id`, `td`, `journal`, ...), reached as `store.state` | the trait methods need one place for all state |
 | subclasses of `TransactionalKeyValueStore` override methods and call `super()` | a store overrides a method of the trait `TransactionalStore` and calls the free function `*_default` of the same name | Rust has no `super()` |
 | `TransactionalKeyValueStore` overrides `put`, `bulkload`, `get` and `delete` of `VersionedKeyValueStore`, calling `super()` in the load phase; `_load` stores the initial state | every store that implements `TransactionalStore` overrides these four methods in its implementation of `VersionedStore` with [`put_transactional`](src/stores/mvcc.rs), `bulkload_transactional`, `get_transactional` and `delete_transactional`; in the load phase, `put_transactional` stores through the trait method `TransactionalStore::load` (default: `load_default`, which calls `put_default`), `bulkload_transactional` calls `bulkload_default`, which calls `put` per object, and `get_transactional` calls `get_default` | Rust has no inheritance and no `super()` |
@@ -222,7 +222,6 @@ includes the test files of that folder and the shared `tests/common/mod.rs`.
 - `show` and `show_transaction_dictionary` print all levels; Python's `pprint` stops at depth 3.
 - Validation method 2 returns `Err(StoreError::TransactionNotFound)` for a transaction that committed meanwhile and
   was aborted afterwards; Python raises a `KeyError` there.
-- `read_objects` returns copies of the objects; Python returns the stored objects themselves.
 - `DictionaryIndex` has no `flush` without a key (in Python it raises a `KeyError`); dropping a key takes time
   proportional to the number of keys after it, as it keeps their order like Python's dict. Its `delete` needs the
   value (Python's default `None` fails unless `None` is stored), its `get` reports a missing key at once, and its

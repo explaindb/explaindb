@@ -132,3 +132,8 @@ request (see docs/changes/015-store-benchmarks).
 **Note 2026-10-19 (regeneration):** The regeneration at the end of the series is feature 019
 ([docs/changes/019-regenerate-rust](../019-regenerate-rust/DECISION.md)): it ports the Python changes since ffab2e8,
 among them snapshot isolation (017), and records all hashes from the current Python.
+
+**Note 2026-11-26:** *Ownership* above says that Python's reads return references. Python's `get` and
+`read_objects` now return deep copies, as Rust's `read_objects` returns owned copies (Rust's `get` returns a shared
+reference, which cannot change the value). The Python read numbers of the benchmark page (015) predate these copies;
+the page is measured again in a merge request of its own.
