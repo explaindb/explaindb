@@ -31,7 +31,8 @@ from system.indexes.utils import Descriptor, Drawable
 
 
 class KeyMapping[Key, Value](ABC):
-    """Maps a key to a value"""
+    """Maps a key to the child (bucket) of an inner node at a given level; ``Value`` is the value type of the trie,
+    which the mapping never uses."""
 
     @abstractmethod
     def map(self, key: Key, level: int, descriptor: Descriptor | None = None) -> int:
@@ -45,9 +46,10 @@ class KeyMapping[Key, Value](ABC):
         """
 
 
-class PrefixDigitMapping(KeyMapping[str, int]):
+class PrefixDigitMapping[Value](KeyMapping[str, Value]):
     """A simple implementation of a key mapping that maps a key to a bucket based on a prefix.
     On each level we take one character of the key and map it to a bucket.
+    The mapping never sees the values, so it works for a trie with any value type.
     """
 
     def map(self, key: str, level: int, descriptor: Descriptor | None = None) -> int:
@@ -133,15 +135,16 @@ class RadixTrie[Key, Value](KeyValueStore[Key, Value], Drawable):
         def __init__(
             self,
             key_mapping: KeyMapping[K, V] | None = None,
-            # not needed for the index but for the viz:
+            # drawn by the visualization, and used to locate the child of a key when there is no key mapping:
             parent_descriptor: Descriptor | None = None,
         ):
             """Creates a new inner node.
 
             @param key_mapping: the mapping used to compute the child (radix) for a key; if omitted, children
             descriptors are used to locate the matching child instead.
-            @param parent_descriptor: the descriptor of the region covered by this node; used only for the
-            visualization and, when given, split into per-child descriptors.
+            @param parent_descriptor: the descriptor of the region covered by this node; when given, split into
+            per-child descriptors, which the visualization draws and which locate the child of a key when there is no
+            key mapping.
             """
             super().__init__()
             # derive the child descriptors:
@@ -350,7 +353,7 @@ class RadixTrie[Key, Value](KeyValueStore[Key, Value], Drawable):
 
     def __init__(
         self,
-        key_mapping: KeyMapping[Key, Value],
+        key_mapping: KeyMapping[Key, Value] | None,
         children_per_inner_node: int,
         inner_node_factory: RadixTrie.InnerNodeFactory[Key, Value] = InnerNodeFactory[
             Key, Value
@@ -361,15 +364,17 @@ class RadixTrie[Key, Value](KeyValueStore[Key, Value], Drawable):
     ):
         """Creates a radix trie and eagerly builds its fixed node structure.
 
-        @param key_mapping: the mapping used by inner nodes to compute the child (radix) for a key.
+        @param key_mapping: the mapping used by inner nodes to compute the child (radix) for a key; if None, inner
+        nodes use the child descriptors to locate the matching child instead, which needs a ``descriptor``.
         @param children_per_inner_node: the fan-out, i.e. the number of children of each inner node.
         @param inner_node_factory: the factory used to create inner nodes.
         @param leaf_factory: the factory used to create leaf nodes.
-        @param descriptor: the descriptor of the whole region covered by the trie; used for the visualization.
+        @param descriptor: the descriptor of the whole region covered by the trie; used for the visualization and,
+        without a key mapping, to locate the child of a key.
         @param number_of_inner_node_levels: the number of inner-node levels; 0 means the trie is a single leaf.
         """
         super().__init__()
-        self.key_mapping: KeyMapping[Key, Value] = key_mapping
+        self.key_mapping: KeyMapping[Key, Value] | None = key_mapping
         self.children_per_inner_node: int = children_per_inner_node
         self.inner_node_factory: RadixTrie.InnerNodeFactory[Key, Value] = (
             inner_node_factory

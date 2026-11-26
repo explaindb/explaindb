@@ -314,12 +314,17 @@ class ChristmasTree[Key, Value](RadixTrie[Key, Value]):
         self,
         children_per_inner_node: int,
         descriptor: Descriptor,
-        key_mapping: KeyMapping[Key, Value] = None,
+        key_mapping: KeyMapping[Key, Value] | None = None,
         number_of_inner_node_levels: int = 0,
         inner_node_factory=InnerNodeFactory[Key, Value](),
         leaf_factory=LeafFactory[Key, Value](),
     ):
-        """Create a new Christmas tree with the given triangle as the base."""
+        """Create a new Christmas tree with the given triangle as the base.
+
+        See :meth:`RadixTrie.__init__` for the parameters; unlike there, the ``descriptor`` (the triangle) is
+        required, and the ``key_mapping`` defaults to None, so that the inner nodes locate the child of a key via the
+        child descriptors (the sub-triangles).
+        """
         super().__init__(
             key_mapping=key_mapping,
             children_per_inner_node=children_per_inner_node,
